@@ -1,0 +1,66 @@
+{
+  "name": "thermal-p1",
+  "title": "Thermal Master P1",
+  "version": "0.1.0",
+  "description": "Stream the Thermal Master P1 (InfiRay-OEM) USB thermal camera on the Snapmaker U1. The P1 is not a UVC/V4L2 camera, so the hardware-accelerated camera plugin cannot see it; this plugin drives it directly over libusb, colormaps the 16-bit thermal frame, and serves it as MJPEG at /thermal. No UVC, no firmware flashing, no Rockchip MPP dependency.\n\nTo register it as a camera in Fluidd and Mainsail, add the /thermal endpoint by hand under Settings → Cameras (MJPEG stream).",
+  "tagline": "libusb-driven MJPEG streaming for the Thermal Master P1 thermal camera.",
+  "category": "camera",
+  "channel": "lts",
+  "printer_specific": true,
+  "published_at": "2026-06-04",
+  "updated_at": "2026-06-04",
+  "source": "https://github.com/Bespok3d/thermal-p1",
+  "homepage": "https://github.com/Bespok3d/thermal-p1",
+  "publisher": "PLACEHOLDER",
+  "provides": [
+    {
+      "service": "thermal-camera-service"
+    }
+  ],
+  "require": [],
+  "conflicts": [],
+  "requires": {
+    "capabilities": [],
+    "variables": []
+  },
+  "permissions": [
+    "init.autostart",
+    "nginx.location"
+  ],
+  "install": {
+    "dirs": [],
+    "symlinks": [
+      {
+        "from": "files/bin",
+        "to": "$BESPOK3D/usr/local/plugins/thermal-p1/bin"
+      },
+      {
+        "from": "files/vendor",
+        "to": "$BESPOK3D/usr/local/plugins/thermal-p1/vendor"
+      },
+      {
+        "from": "files/etc/init.d/s65thermal-p1",
+        "to": "$BESPOK3D/etc/init.d/autostart/s65thermal-p1"
+      },
+      {
+        "from": "files/udev/99-thermal-p1.rules",
+        "to": "/etc/udev/rules.d/99-thermal-p1.rules"
+      }
+    ],
+    "patches": [],
+    "start": [
+      "$BESPOK3D/etc/init.d/autostart/s65thermal-p1 restart"
+    ]
+  },
+  "stop": [
+    "$BESPOK3D/etc/init.d/autostart/s65thermal-p1 stop"
+  ],
+  "endpoints": [
+    {
+      "label": "Thermal P1",
+      "path": "/thermal/"
+    }
+  ],
+  "conflict_resolutions": [],
+  "files": []
+}

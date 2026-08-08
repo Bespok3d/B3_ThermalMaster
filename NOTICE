@@ -1,0 +1,23 @@
+thermal-p1 (Bespok3d plugin)
+
+This product vendors and builds upon third-party software:
+
+1. p3-ir-camera (plugin/files/vendor/p3_camera.py)
+   Source:  https://github.com/jvdillon/p3-ir-camera
+   Pinned:  ae3205dca5727682ff2d903585d1dce5a1d19f1f
+   License: Apache License 2.0
+   USB protocol reverse-engineering credit: @aeternium
+            (https://github.com/jvdillon/p3-ir-camera/issues/2)
+   A copy of the Apache-2.0 license text is fetched alongside the file as
+   plugin/files/vendor/LICENSE.p3-ir-camera by scripts/fetch-vendor.sh.
+
+2. PyUSB (plugin/files/vendor/usb/)        License: BSD-3-Clause
+3. NumPy (plugin/files/vendor/numpy/)      License: BSD-3-Clause
+4. Pillow (plugin/files/vendor/PIL/)       License: HPND (PIL/Pillow License)
+
+The vendored aarch64 packages (2-4) are downloaded at build time from PyPI and are not
+committed to this repository. Their license files are retained inside each package's
+*.dist-info directory in the packed artifact.
+
+The colormap and MJPEG streaming layer (plugin/files/bin/thermal-p1-stream.py) is original
+work, licensed under the same terms as the Bespok3d project.

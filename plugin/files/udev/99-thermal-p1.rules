@@ -1,0 +1,6 @@
+# Thermal Master P1 (InfiRay-OEM) is a raw USB device, not a uvcvideo/V4L2 camera, so it is
+# matched on the USB subsystem by vendor:product. MODE=0666 lets libusb claim it; the hotplug
+# start/stop keeps the streamer running only while the camera is attached (the streamer also
+# self-reconnects, so a plug after boot is handled either way).
+SUBSYSTEM=="usb", ATTR{idVendor}=="3474", ATTR{idProduct}=="45c2", MODE="0666", ACTION=="add",    RUN+="/bin/sh -c 'sleep 2; /userdata/bespok3d/etc/init.d/autostart/s65thermal-p1 start'"
+SUBSYSTEM=="usb", ATTR{idVendor}=="3474", ATTR{idProduct}=="45c2", ACTION=="remove", RUN+="/userdata/bespok3d/etc/init.d/autostart/s65thermal-p1 stop"
