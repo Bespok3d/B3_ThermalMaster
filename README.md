@@ -32,25 +32,47 @@ scripts/
 
 ## Vendored upstream
 
-The USB protocol layer is **not** reimplemented here. `plugin/files/vendor/p3_camera.py` is
-fetched verbatim (pinned commit) from
+The USB protocol layer is **not** reimplemented here. `plugin/files/vendor/p3_camera.py` is checked
+in verbatim at a pinned commit, with its sha256 and the update procedure in
+[VENDORING.md](VENDORING.md), from
 [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera) (Apache-2.0). Protocol
 reverse-engineering credit: @aeternium. See `NOTICE`. We only add the colormap + MJPEG serving
 layer on top (`files/bin/thermal-p1-stream.py`).
 
-`numpy` and `Pillow` ship as **vendored aarch64 packages** under `files/vendor/`, imported via
-`sys.path` at runtime, so nothing is installed into the shared daemon venv and the broken-pip
-situation on the U1 never comes up. `pyusb` is pure Python and vendors the same way (it needs
-`libusb-1.0.so.0`, present in the U1's USB stack).
+`numpy`, `Pillow` and `pyusb` are declared in `plugin/requirements.txt`. CI downloads them as arm64
+wheels and the daemon installs them on the printer into a virtual environment belonging to this plugin
+alone, so nothing is installed into the shared daemon venv and the broken-pip situation on the U1 never
+comes up. `pyusb` needs `libusb-1.0.so.0`, which is present on the U1 at 1.0.3.0. The streamer still
+carries a `sys.path` shim from the era when those three were unpacked by hand into `files/vendor/`;
+removing it is part of the manifest rewrite (ROADMAP F-43).
 
 ## Build locally
 
-Requires Python 3, `pip`, `zip`, `jq`, and `shasum`/`sha256sum`. One command:
+Requires Node.js 20+. The builder is installed into its own prefix, never through `npx`, which
+resolves to whatever copy npm cached earlier and silently builds against an out of date manifest
+schema:
 
 ```sh
-sh scripts/fetch-vendor.sh   # downloads p3_camera.py + aarch64 deps into plugin/files/vendor/
-sh scripts/pack.sh           # stages vendor + packs dist/thermal-p1-<version>.b3
-node scripts/generate-atom.mjs   # writes dist/thermal-p1.atom.json (local dry-run url)
+npm install --prefix ~/.b3-builder github:Bespok3d/b3-builder
+~/.b3-builder/node_modules/.bin/b3-builder build \
+  --source ./plugin --out dist --atom-repo Mauker1/B3_ThermalMaster_P1_P3 --bake
+```
+
+`--bake` downloads the arm64 wheels for `plugin/requirements.txt` into `plugin/files/wheels/`. It is
+not optional: the builder refuses to pack a plugin that declares Python dependencies with an empty
+wheels directory, rather than shipping something that cannot start on the printer.
+
+To check the vendored driver still matches its pin, in both directions:
+
+```sh
+sh scripts/fetch-vendor.sh
+```
+
+Before running the gate for the first time, check out the submodule it lives in:
+
+```sh
+git submodule sync --recursive && git submodule update --init --recursive
+bash scripts/check.sh
 ```
 
 ## Releasing

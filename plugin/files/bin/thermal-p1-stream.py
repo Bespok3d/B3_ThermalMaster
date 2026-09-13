@@ -21,9 +21,8 @@ VENDOR_DIR = Path(__file__).resolve().parent.parent / "vendor"
 sys.path.insert(0, str(VENDOR_DIR))
 
 import numpy as np  # noqa: E402
-from PIL import Image  # noqa: E402
-
 from p3_camera import Model, P3Camera, get_model_config, raw_to_celsius  # noqa: E402
+from PIL import Image  # noqa: E402
 
 DEFAULT_BIND = "127.0.0.1"
 DEFAULT_PORT = 8082
@@ -53,7 +52,8 @@ def build_ironbow_palette() -> np.ndarray:
     ramp = np.linspace(0.0, 1.0, PALETTE_STEPS, dtype=np.float32)
     palette = np.empty((PALETTE_STEPS, 3), dtype=np.uint8)
     for channel in range(3):
-        palette[:, channel] = np.interp(ramp, stop_positions, stop_colors[:, channel]).astype(np.uint8)
+        ramped_channel = np.interp(ramp, stop_positions, stop_colors[:, channel])
+        palette[:, channel] = ramped_channel.astype(np.uint8)
     return palette
 
 
@@ -207,7 +207,8 @@ def main() -> None:
     worker = threading.Thread(target=capture_loop, args=(frame_store, palette), daemon=True)
     worker.start()
     server = ThermalServer((options.bind, options.port), frame_store)
-    print(f"thermal-p1: serving http://{options.bind}:{options.port}/stream.mjpg", file=sys.stderr, flush=True)
+    listening_on = f"thermal-p1: serving http://{options.bind}:{options.port}/stream.mjpg"
+    print(listening_on, file=sys.stderr, flush=True)
     server.serve_forever()
 
 

@@ -1,0 +1,9 @@
+# The streamer's runtime dependencies, resolved at build time for the printer (aarch64, CPython 3.11,
+# manylinux2014) and installed by the daemon into a venv belonging to this plugin alone. The printer
+# never runs pip: see doc/kinds/python.md in Bespok3d/b3-builder.
+#
+# Pinned exactly, because a floating version means two builds of the same plugin version can ship
+# different code. These are the versions the retired hand-vendored tree carried.
+numpy==2.2.6
+Pillow==12.2.0
+pyusb==1.3.1
