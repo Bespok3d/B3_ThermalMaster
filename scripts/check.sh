@@ -37,6 +37,7 @@ PLUGIN_DIR="$REPO_ROOT/plugin"
 # shared between a macOS host and a Linux VM otherwise has each one delete and rebuild the other's
 # venv on every run, and a stale symlink to a missing interpreter reads as a confusing failure rather
 # than as the platform mismatch it is.
+export PYTHONDONTWRITEBYTECODE=1
 B3D_TOOLS_VENV="$REPO_ROOT/.venv-$(uname -s)-$(uname -m)"
 B3D_PY="$B3D_TOOLS_VENV/bin/python"
 
@@ -53,11 +54,13 @@ if ! "$B3D_PY" -c "import numpy, PIL, usb" > /dev/null 2>&1; then
 fi
 
 run_check "pytest" pytest_in_dir "$PLUGIN_DIR" tests
-run_check "ruff"   ruff_in_dir "$PLUGIN_DIR" files/bin tests
-# mypy is deliberately absent until the streamer is split into an importable module (ROADMAP F-47).
-# mypy derives a module name from the filename, and "thermal-master-stream" is not a legal one, so
-# entry script cannot be checked while it carries hyphens and holds all the logic. u1-remote-screen
-# has the same shape and checks only its underscore-named modules for the same reason.
+run_check "ruff"   ruff_in_dir "$PLUGIN_DIR" files/bin files/lib tests
+# Scoped to files/lib, which is the whole plugin. The entry script cannot be checked and does not
+# need to be: mypy derives a module name from the filename and "thermal-master-stream" is not a
+# legal one, which is exactly why the code moved out of it (F-47). What is left in that file is a
+# path setup and a call. u1-remote-screen checks only its underscore-named modules for the same
+# reason.
+run_check "mypy"   mypy_in_dir "$PLUGIN_DIR" files/lib
 
 release_trigger_check "$REPO_ROOT"
 manifest_origin_check "$REPO_ROOT"

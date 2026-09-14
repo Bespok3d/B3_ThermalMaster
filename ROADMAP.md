@@ -410,7 +410,34 @@ reconnects on its own, so no hotplug stop rule is required. `plugin/files/udev/9
 away entirely rather than being fixed, which also disposes of the "no udev class exists" problem, since
 nothing needs placing.
 
-**F-47. The streamer cannot be type-checked while it is one hyphenated script.** mypy derives a
+**F-47. Fixed in 0.8.5.** The streamer is now `plugin/files/lib/thermal_master/`, nine modules
+behind an entry script that does nothing but set two paths and call `main`. mypy runs on the whole
+package and is in the gate as a seventh check.
+
+Three things are worth recording about how it was done.
+
+The tests were not rewritten, and that was the point: `__init__.py` re-exports every public name, so
+the suite takes the package as one namespace and asks for names rather than files. 187 tests passed
+unchanged, which is the only real evidence a refactor changed nothing. Two had to move anyway, and
+both for honest reasons: one asserted about the contents of a source file, which is layout rather
+than behaviour, and one used a driver exception the flat module had leaked by accident.
+
+Turning mypy on found 28 things, which is what a file that has never been type checked contains.
+Most were missing annotations on the drawing functions. One was a real latent defect:
+`settings_payload` dereferenced a settings store that its own type said could be None. Both callers
+happened to check first, so it could not fire, but nothing made that true. It now takes the store as
+an argument, which makes the check provable rather than a coincidence.
+
+The dangerous one was not in the code. `.gitignore` carried `lib/` from the standard Python
+template, and it matched `plugin/files/lib`, so the entire new package was invisible to git. The
+build kept working, because b3-builder reads the working tree, and the first symptom would have been
+a commit whose plugin contained no code. `!plugin/files/lib/` now follows it, with a comment. Worth
+considering for the gate: a check that everything b3-builder packs is tracked by git would have
+caught this in a second, and I have not added it because the gate does not run git.
+
+The original finding, for the record:
+
+**F-47 as first written. The streamer cannot be type-checked while it is one hyphenated script.** mypy derives a
 module name from the filename, and `thermal-p1-stream` is not a legal one, so the file holding all the
 logic cannot be checked. `u1-remote-screen` has the same shape and works around it by checking only its
 underscore-named modules, leaving its own entry script unchecked. The fix is to split the logic into an
@@ -1156,6 +1183,23 @@ own marker, since the marker itself can be inside it.
 Exit: each control is exercised on hardware and the stream survives all of them. Gain, emissivity
 and the numbers are confirmed; calibration is confirmed as reaching the camera and failing, which is
 what produced F-57, and needs one more run on 0.8.1.
+
+### Phase 6b: separate switches for the readout and the ruler
+
+Next, and asked for directly: the readout is currently one switch that turns off the colorbar, the
+centre reading and the hotspot marker together. Those are two different things to a person looking
+at a tile. The colorbar is a ruler down the edge that says what a colour means; the readings are
+numbers drawn over the picture. Wanting the ruler without numbers over the image, or numbers without
+a ruler eating five percent of the width, are both reasonable.
+
+Planned shape: replace the single `overlay` flag with `colorbar` and `markers`, both defaulting on,
+and derive the encode bump from either being set rather than from the master. A settings file saved
+by 0.8.x carries `overlay`, so loading one that has it and not the new keys sets both from it, which
+keeps a deliberate off staying off across the upgrade. One test for that migration, and the existing
+`test_the_overlay_actually_marks_the_picture` splits into one per surface.
+
+Worth doing before Phase 7, because Phase 7 adds a second tile and the question of what the plain
+tile shows becomes a setting people will actually reach for.
 
 ### Phase 7: the embedded page
 

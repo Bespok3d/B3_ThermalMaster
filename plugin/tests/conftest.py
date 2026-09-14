@@ -2,19 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fixtures for the thermal streamer tests.
 
-Two things make the module under test awkward to import, and both are handled here.
-
-It is named `thermal-master-stream.py`, which is a legal program name and an illegal module name, so
-it is loaded by path rather than by `import`. And it imports the vendored `p3_camera` driver at
-module scope. The real driver is present and would import, but it models a USB device, so a stand-in
-is registered under that name before the load instead. The stand-in is the fake camera: it reads
-from a scripted list of frames, where an entry is either a frame to return or an exception to raise,
-which is how a glitch or a vanished device is described to a test as plain data.
+The plugin imports the vendored `p3_camera` driver at module scope. The real driver is present and
+would import, but it models a USB device, so a stand-in is registered under that name first. The
+stand-in is the fake camera: it reads from a scripted list of frames, where an entry is either a
+frame to return or an exception to raise, which is how a glitch or a vanished device is described
+to a test as plain data. It also records what it was told, so a command sent from the wrong thread
+fails here rather than on hardware.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 import types
 from pathlib import Path
@@ -24,7 +21,7 @@ import fake_camera
 import pytest
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
-STREAMER_PATH = PLUGIN_DIR / "files" / "bin" / "thermal-master-stream.py"
+LIB_DIR = PLUGIN_DIR / "files" / "lib"
 
 
 def install_stand_in_usb() -> None:
@@ -56,17 +53,19 @@ def install_stand_in_driver() -> ModuleType:
 
 
 def load_streamer() -> ModuleType:
+    """The plugin's package, with the stand-in driver already in place of the real one.
+
+    The package re-exports everything public, so this returns one namespace with the whole plugin
+    on it. That is what let the split into modules happen without touching a single test: the tests
+    ask for names, not for files, and a test suite that passes unchanged is the only real evidence
+    that a refactor changed nothing.
+    """
+
     install_stand_in_driver()
-    spec = importlib.util.spec_from_file_location("thermal_stream_under_test", STREAMER_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load the streamer from {STREAMER_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    # Registered before executing, which is the documented importlib order and not optional here:
-    # a dataclass resolves its field annotations by looking its own module up in sys.modules, and
-    # fails with a confusing AttributeError on None when it is not there.
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    sys.path.insert(0, str(LIB_DIR))
+    import thermal_master
+
+    return thermal_master
 
 
 @pytest.fixture(scope="session")

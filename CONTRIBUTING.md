@@ -53,6 +53,34 @@ an exception to raise, so a test can describe a glitched frame or a vanished dev
 A fix ships with a regression test in the same change: one that fails on the old behaviour and
 passes on the new.
 
+## Where the code lives
+
+`plugin/files/bin/thermal-master-stream.py` is the entry point and nothing else: the manifest names
+it, and that name is a legal program and an illegal module, so nothing could import it. It puts two
+directories on the path and calls `main`.
+
+The plugin itself is `plugin/files/lib/thermal_master/`:
+
+| module | what it owns |
+| --- | --- |
+| `palettes` | the colour tables |
+| `temperature` | raw counts to Celsius, emissivity, where a pixel ends up on screen |
+| `overlay` | the colorbar, the readings, the glyph cache |
+| `pipeline` | raw frame to JPEG, and the state that spans frames |
+| `camera` | finding, reading and commanding the USB device |
+| `settings` | live settings, their file, and what a posted form may change |
+| `page` | the control page and its script |
+| `server` | routes, the MJPEG stream, the JSON endpoints |
+| `cli` | arguments, threads, shutdown |
+
+`__init__.py` re-exports everything public, so the test suite can take the package as one namespace
+and ask for names rather than files. That is what let the split happen without rewriting tests.
+
+Two things to know before adding a file. Every URL the page emits must be relative, because nginx
+publishes the plugin under a prefix it is never told about. And `plugin/files/lib` needs its
+`!plugin/files/lib/` line in `.gitignore`: the standard Python template ignores `lib/`, which
+silently matched the entire plugin.
+
 ## Checking the control page
 
 The gate covers the plugin's Python. It cannot cover the control page's behaviour in a browser, and

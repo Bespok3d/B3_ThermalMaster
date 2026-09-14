@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.5
+
+Internal only. Nothing about the plugin behaves differently.
+
+- The streamer was one 1,786 line script that nothing could import and no type checker could read.
+  It is now a package of nine modules behind the same entry point, and mypy runs on all of it.
+
 ## 0.8.4
 
 - Emissivity offers 0.98, which is about right for skin, water and matte paint.
