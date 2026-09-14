@@ -1107,7 +1107,55 @@ so readings are slightly higher than 0.7.x, which applied no correction at all. 
 button works with no JavaScript, because the form posts and redirects and the reload is the report:
 by the time the page comes back the capture thread has been round the loop.
 
-Exit: each control is exercised on hardware and the stream survives all of them.
+Confirmed on hardware, 2026-09-14, and two things came back.
+
+**F-57. The vendored driver's `trigger_shutter` cannot work on a P1.** Fixed in 0.8.1 by not using
+it. It sends the command and then reads back the mistimed frame the camera emits, reassembling it
+from two segments whose offsets are absolute line counts: `shutter_seg_2_lines` is 800, and
+`shutter_seg_2` is that times the sensor width. On the P3 that is 204,812 bytes into a 206,872 byte
+buffer and fits. On the P1 it is 128,012 bytes into a buffer of 83,224. The read overruns first,
+which is what reached the control page as "memoryview assignment: lvalue and rvalue have different
+structures".
+
+The fix sends the two control transfers directly, `COMMANDS["shutter"]` and the status read, and
+leaves the frame that follows to the ordinary reader. That is safe because `read_frame` already
+resynchronises: it treats a twelve byte read arriving before the end of a frame as an end marker in
+the wrong place, drops the partial frame and starts again. So the part of the helper we skipped is
+the part that was broken, and the part we kept is model independent.
+
+The driver stays unpatched, per VENDORING.md, and this goes upstream instead. It is worth reporting
+carefully: the geometry properties around it are all derived from `sensor_w`, so the two 800s look
+like the only measurements in that file that were never generalised from the model they came from.
+
+The fake camera now raises the hardware error from `trigger_shutter` and implements `_send_command`
+and `_read_status` instead, so a future change that goes back through the driver's helper fails in
+the suite with the same message that came off the printer.
+
+**F-58. The colorbar and the hotspot marker read as contradicting each other.** Fixed in 0.8.1.
+Hardware showed a bar labelled 29.2 at the top next to a marker reading 35.8, and the maintainer
+reasonably asked which one was lying. Neither: the bar is labelled with the display range, which is
+the 2nd and 98th percentiles smoothed over about a second, and the hottest pixel is routinely above
+that and drawn in the top colour. The numbers were right and the picture did not say how they
+related.
+
+Considered and rejected: labelling the bar with the scene extremes instead. It would make these two
+numbers agree and would then be lying about every colour in between, since the palette does not span
+the extremes. Widening the percentiles was also rejected, because the clipping is what stops one
+glint from washing out the picture, which is the flicker problem F-26 was about.
+
+What shipped instead says the true thing: a red tick on the bar where the hottest pixel falls, and a
+red triangle at the end of the bar when it falls past it. The bar keeps meaning what a colour means,
+and now shows where the marker sits relative to that.
+
+The same round found the label collision fix from 0.7.1 was too narrow. It reserved the bar's width;
+the bar's labels are right-aligned to the margin and are four times wider than the bar, so a hotspot
+in the bottom corner produced "35.8C20.9C". The reserved column is now sized to the widest label the
+bar can carry, and a flipped label is also pulled left of that column rather than only left of its
+own marker, since the marker itself can be inside it.
+
+Exit: each control is exercised on hardware and the stream survives all of them. Gain, emissivity
+and the numbers are confirmed; calibration is confirmed as reaching the camera and failing, which is
+what produced F-57, and needs one more run on 0.8.1.
 
 ### Phase 7: the embedded page
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.1
+
+- Calibration works on the P1. The vendored driver's own shutter helper reads back the frame that
+  follows using offsets measured on a P3, which on a P1 point past the end of the frame buffer, so
+  it failed with "memoryview assignment: lvalue and rvalue have different structures" and no
+  calibration happened. The command is now sent directly and the mistimed frame is left to the
+  ordinary reader, which resynchronises by itself.
+- The colorbar now shows where the hottest pixel falls on it, with a triangle at the top when it is
+  above the range entirely. The bar is labelled with the range the palette covers, which is a
+  percentile of the scene rather than its extremes, so the hotspot marker legitimately reads higher
+  than the top of the bar and the two looked like they were contradicting each other.
+- A marker's label is kept clear of the colorbar's own labels, including when the marker itself is
+  in that corner. The previous attempt only avoided the bar, which is much narrower than its labels.
+
 ## 0.8.0
 
 Camera controls, from the same page.

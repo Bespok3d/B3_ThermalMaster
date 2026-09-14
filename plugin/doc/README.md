@@ -41,9 +41,15 @@ other way round.
 
 On by default. It draws three things into the picture itself:
 
-- A colorbar down the right edge, labelled with the temperatures at each end of the palette. Those
-  are the ends of the range currently being mapped, not the hottest and coldest pixels, so it tells
-  you what a colour means.
+- A colorbar down the right edge, labelled with the temperatures at each end of the palette, and
+  marked in red with where the hottest pixel falls.
+
+  Those labels are the ends of the range currently being mapped, not the hottest and coldest pixels
+  in view. The mapping ignores the top and bottom two percent of the scene so that one glint or one
+  dead pixel cannot wash the picture out, which means the hotspot marker often reads higher than the
+  top of the bar. That is not a disagreement: it means the hottest thing in frame is off the top of
+  the scale and is being drawn in the brightest colour the palette has. When that happens the red
+  mark becomes a triangle at the end of the bar.
 - A crosshair in the middle, with the temperature under it.
 - A marker on the hottest pixel in view, with its temperature.
 
@@ -71,6 +77,11 @@ camera's own automatic mode is not offered because the protocol does not impleme
 **Calibrate now** closes the shutter inside the camera for a moment and re-levels the sensor against
 a known uniform surface. The camera does this by itself about every ninety seconds, so the button is
 for when the picture has visibly drifted and you would rather not wait. It costs one frame.
+
+The plugin sends the calibration command itself rather than using the vendored driver's helper for
+it. That helper also reads back the frame the camera emits afterwards, and it locates that frame
+with offsets measured on a P3, which on a P1 point well past the end of the frame buffer. The
+command is identical on both; the frame afterwards is one the plugin discards anyway.
 
 All three are sent from the thread that owns the camera, between two frames, never from the web
 request that asked for them: a command shares its USB endpoints with the video, so sending one

@@ -45,6 +45,7 @@ def install_stand_in_driver() -> ModuleType:
     driver.Model = types.SimpleNamespace(P1="p1", P3="p3")
     driver.P3Camera = fake_camera.StandInCamera
     driver.get_model_config = fake_camera.get_model_config
+    driver.COMMANDS = fake_camera.COMMANDS
     driver.raw_to_celsius = fake_camera.raw_to_celsius
     driver.raw_to_celsius_corrected = fake_camera.raw_to_celsius_corrected
     driver.EnvParams = fake_camera.EnvParams

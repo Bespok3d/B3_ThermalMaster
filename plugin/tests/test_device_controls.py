@@ -225,3 +225,26 @@ def test_the_gain_survives_a_restart(thermal_streamer, tmp_path):
 
     assert second.camera_snapshot()[1].gain == "low"
     assert second.as_dict()["gain"] == "low"
+
+
+def test_the_shutter_sends_the_command_and_reads_its_acknowledgement(device, camera):
+    device.request_shutter()
+
+    device.apply(camera)
+
+    assert camera.commands_sent == [fake_camera.COMMANDS["shutter"]]
+    assert camera.status_reads == 1
+
+
+def test_the_shutter_does_not_go_through_the_drivers_own_helper(device, camera):
+    """`trigger_shutter` reassembles the post-shutter frame with P3 offsets and fails on a P1.
+
+    The fake raises the hardware error from that method, so a streamer that went back to calling it
+    fails here with the same message that came off the printer.
+    """
+
+    device.request_shutter()
+
+    device.apply(camera)
+
+    assert camera.shutter_triggers == 1

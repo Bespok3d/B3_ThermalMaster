@@ -32,6 +32,7 @@ sys.path.append(str(VENDOR_DIR))
 import numpy as np  # noqa: E402
 import usb.core  # noqa: E402
 from p3_camera import (  # noqa: E402
+    COMMANDS,
     VID,
     EnvParams,
     FrameMarkerMismatchError,
@@ -99,6 +100,9 @@ COLORBAR_MIN_WIDTH_PIXELS = 8
 COLORBAR_HEIGHT_FRACTION = 0.55
 RETICLE_ARM_FRACTION = 0.04
 HOTSPOT_ARM_FRACTION = 0.03
+# The widest label the bar can carry, used to reserve a column for it. Fahrenheit and a minus sign
+# are the worst case, and reserving for the worst case is what keeps a marker's number off it.
+WIDEST_TEMPERATURE_LABEL = "-888.8F"
 OVERLAY_TEXT_RGB = (255, 255, 255)
 OVERLAY_SHADOW_RGB = (0, 0, 0)
 HOTSPOT_RGB = (255, 90, 90)
@@ -472,12 +476,16 @@ def overlay_style(size: tuple[int, int]) -> OverlayStyle:
     bar_width = max(int(width * COLORBAR_WIDTH_FRACTION), COLORBAR_MIN_WIDTH_PIXELS)
     bar_height = max(int(height * COLORBAR_HEIGHT_FRACTION), 1)
     bar_left = width - margin - bar_width
+    # Reserved against the bar's own labels rather than against the bar. They are right-aligned to
+    # the margin and are several times wider than it, which is how a hotspot in the bottom corner
+    # still landed on top of the low label after the first attempt at this in 0.7.1.
+    reserved = max(bar_width, int(label_width(WIDEST_TEMPERATURE_LABEL, pixel_height)) + 1)
     return OverlayStyle(
         pixel_height=pixel_height,
         line_height=pixel_height + 2,
         margin=margin,
         bar_box=(bar_left, (height - bar_height) // 2, bar_width, bar_height),
-        content_right=bar_left - margin,
+        content_right=width - margin - reserved,
     )
 
 
@@ -551,7 +559,57 @@ def marker_label_position(
     right_of = anchor_x + arm + style.margin
     if right_of + width <= style.content_right:
         return (right_of, top)
-    return (max(anchor_x - arm - style.margin - width, 0.0), top)
+    # Left of the marker, and never further right than the reserved column, because the marker
+    # itself can be inside that column: flipping alone still left the label overlapping in that
+    # case, which is the shape of the collision seen on hardware twice now.
+    left_of = min(anchor_x - arm - style.margin - width, style.content_right - width)
+    return (max(left_of, 0.0), top)
+
+
+def bar_position(value: float, low: float, high: float, height: int) -> tuple[int, int]:
+    """Which row of the bar a temperature sits on, and which end it is past if it is past one.
+
+    Returns the row and one of -1, 0, 1 for below the bar, on it, and above it.
+    """
+
+    span = high - low
+    if span <= 0.0:
+        return (height // 2, 0)
+    fraction = (value - low) / span
+    if fraction > 1.0:
+        return (0, 1)
+    if fraction < 0.0:
+        return (height - 1, -1)
+    return (int(round((1.0 - fraction) * (height - 1))), 0)
+
+
+def mark_bar(image, row: int, beyond: int, style: OverlayStyle) -> None:
+    """Show where the hottest pixel falls on the scale, or that it is off the end of it.
+
+    Without this the bar and the hotspot marker read as contradicting each other, and on hardware
+    they did: a bar labelled 29.2 at the top beside a marker reading 35.8. Both are right. The bar
+    is labelled with the range the palette covers, which is a percentile of the scene rather than
+    its extremes, because otherwise one glint or one dead pixel washes the whole picture out. A
+    hotter pixel than that is drawn in the top colour and is genuinely off the top of the scale.
+
+    A tick says where. A triangle at the end of the bar, drawn inside it so it cannot collide with
+    the label above, says past here.
+    """
+
+    left, top, width, height = style.bar_box
+    draw = ImageDraw.Draw(image)
+    if beyond == 0:
+        y = top + row
+        draw.line((left, y, left + width - 1, y), fill=HOTSPOT_RGB)
+        draw.line((left - style.margin, y, left - 1, y), fill=HOTSPOT_RGB)
+        return
+    arrow = max(width // 2, 3)
+    apex = top + 1 if beyond > 0 else top + height - 2
+    base = apex + arrow if beyond > 0 else apex - arrow
+    middle = left + width // 2
+    draw.polygon(
+        [(middle, apex), (left + 1, base), (left + width - 2, base)], fill=HOTSPOT_RGB
+    )
 
 
 def draw_colorbar(image, overlay: Overlay, style: OverlayStyle) -> None:
@@ -567,6 +625,13 @@ def draw_colorbar(image, overlay: Overlay, style: OverlayStyle) -> None:
     draw.rectangle(
         (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
     )
+    row, beyond = bar_position(
+        overlay.stats.maximum_celsius,
+        overlay.stats.range_low_celsius,
+        overlay.stats.range_high_celsius,
+        bar_height,
+    )
+    mark_bar(image, row, beyond, style)
     high = format_temperature(overlay.stats.range_high_celsius, overlay.units)
     low = format_temperature(overlay.stats.range_low_celsius, overlay.units)
     right = width - style.margin
@@ -811,6 +876,33 @@ class LatestFrame:
             return self._jpeg
 
 
+def fire_shutter(camera: P3Camera) -> None:
+    """Fire the calibration shutter, without asking the driver to read the frame that follows.
+
+    The driver has its own `trigger_shutter`, and it cannot be used on a P1. It sends this command
+    and then reads back the mistimed frame the camera emits afterwards, reassembling it from two
+    segments whose offsets are absolute line counts measured on a P3. `shutter_seg_2` is 800 lines:
+    on a 256 wide sensor that is 204,812 bytes and lands inside the 206,872 byte frame buffer, and
+    on a 160 wide P1 it is 128,012 bytes into a buffer of 83,224. The read overruns the buffer
+    first, which on hardware surfaced as "memoryview assignment: lvalue and rvalue have different
+    structures" and no calibration. Reported upstream. Not patched here: the vendored driver is
+    pinned and is not ours to edit (VENDORING.md).
+
+    The command itself is model independent, a fixed control transfer and its acknowledgement, and
+    those two lines are all a calibration actually needs. The frame afterwards is the part we did
+    not want anyway, and the driver's ordinary reader already copes with it: `read_frame` spots an
+    end marker arriving before the end of a frame, drops what it has and starts again, so the next
+    read or two resynchronises by itself.
+
+    Reaching past the underscore is deliberate and is the smaller of two couplings. The alternative
+    is issuing the control transfers here, which would copy the endpoint, the request numbers and
+    the timeout out of the driver and leave them to rot when the pin moves.
+    """
+
+    camera._send_command(COMMANDS["shutter"])
+    camera._read_status()
+
+
 class DeviceController:
     """Everything that has to be said to the camera, said on the thread that owns it.
 
@@ -879,7 +971,7 @@ class DeviceController:
                 return
             self._shutter_requested = False
         try:
-            camera.trigger_shutter()
+            fire_shutter(camera)
         except Exception as error:  # noqa: BLE001 - recorded for the page, then re-raised
             with self._lock:
                 self._shutter_state = SHUTTER_FAILED

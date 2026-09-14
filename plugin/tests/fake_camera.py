@@ -33,6 +33,15 @@ P3_PRODUCT_ID = 0x45A2
 # is standing in front of.
 PRESENT_PRODUCT_IDS: set[int] = set()
 
+# Stand-ins for the driver's command table. Only the shutter is used, and only by identity: the
+# test asserts that the bytes the streamer sent are the ones the driver calls "shutter", which a
+# streamer that invented its own payload would fail.
+COMMANDS = {
+    "shutter": b"stand-in-shutter-command",
+    "gain_high": b"stand-in-gain-high",
+    "gain_low": b"stand-in-gain-low",
+}
+
 
 def find_usb_device(idVendor: int, idProduct: int):  # noqa: N803 - pyusb's own parameter names
     """Stand in for usb.core.find, which is the only USB call the streamer makes itself."""
@@ -122,8 +131,13 @@ class StandInCamera:
     # What the device was told to do, in order, so a test can assert both that a command was sent
     # and that it was sent on the thread that owns the camera rather than from an HTTP handler.
     gain_modes_set: list = field(default_factory=list)
-    shutter_triggers: int = 0
+    commands_sent: list = field(default_factory=list)
+    status_reads: int = 0
     fail_next_shutter: BaseException | None = None
+
+    @property
+    def shutter_triggers(self) -> int:
+        return self.commands_sent.count(COMMANDS["shutter"])
 
     def __post_init__(self) -> None:
         StandInCamera.instances.append(self)
@@ -153,11 +167,25 @@ class StandInCamera:
     def set_gain_mode(self, mode: GainMode) -> None:
         self.gain_modes_set.append(mode)
 
-    def trigger_shutter(self, return_partial: bool = False) -> None:
+    def _send_command(self, command: bytes) -> None:
         if self.fail_next_shutter is not None:
             failure, self.fail_next_shutter = self.fail_next_shutter, None
             raise failure
-        self.shutter_triggers += 1
+        self.commands_sent.append(command)
+
+    def _read_status(self) -> int:
+        self.status_reads += 1
+        return 0x02
+
+    def trigger_shutter(self, return_partial: bool = False) -> None:
+        """Present, and deliberately broken, because the real one is broken on a P1.
+
+        The streamer must not call this. If it ever does again, this says so here rather than on
+        hardware, where it presents as an obscure memoryview error and a calibration that silently
+        never happened.
+        """
+
+        raise TypeError("memoryview assignment: lvalue and rvalue have different structures")
 
     def disconnect(self) -> None:
         self.disconnect_calls += 1

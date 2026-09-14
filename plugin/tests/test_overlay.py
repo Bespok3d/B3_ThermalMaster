@@ -311,3 +311,56 @@ def test_the_colorbar_box_leaves_room_for_content_beside_it(thermal_streamer):
 
     assert style.content_right < bar_left
     assert bar_left + bar_width <= 320
+
+
+def test_a_hotspot_inside_the_range_is_ticked_on_the_bar(thermal_streamer):
+    row, beyond = thermal_streamer.bar_position(30.0, 20.0, 40.0, 101)
+
+    assert beyond == 0
+    assert row == 50
+
+
+def test_the_top_of_the_bar_is_the_high_end(thermal_streamer):
+    row, beyond = thermal_streamer.bar_position(40.0, 20.0, 40.0, 101)
+
+    assert (row, beyond) == (0, 0)
+
+
+def test_a_hotspot_above_the_range_is_marked_as_past_the_top(thermal_streamer):
+    """The case seen on hardware: a bar labelled 29.2 beside a marker reading 35.8."""
+
+    _, beyond = thermal_streamer.bar_position(35.8, 20.9, 29.2, 100)
+
+    assert beyond == 1
+
+
+def test_a_value_below_the_range_is_marked_as_past_the_bottom(thermal_streamer):
+    row, beyond = thermal_streamer.bar_position(10.0, 20.0, 40.0, 100)
+
+    assert (row, beyond) == (99, -1)
+
+
+def test_a_collapsed_range_does_not_divide_by_zero(thermal_streamer):
+    row, beyond = thermal_streamer.bar_position(25.0, 25.0, 25.0, 100)
+
+    assert (row, beyond) == (50, 0)
+
+
+def test_the_reserved_column_is_wider_than_the_bar(thermal_streamer):
+    """It has to clear the bar's labels, which are right-aligned and several times its width."""
+
+    style = thermal_streamer.overlay_style((320, 240))
+    bar_left, _, bar_width, _ = style.bar_box
+
+    assert style.content_right < bar_left
+    assert 320 - style.content_right > bar_width
+
+
+def test_a_label_for_a_marker_inside_the_reserved_column_is_pulled_clear_of_it(thermal_streamer):
+    """Flipping alone was not enough when the marker itself sits in the reserved column."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((236, 300), 7, "31.3C", style)
+
+    assert left + thermal_streamer.label_width("31.3C", style.pixel_height) <= style.content_right
