@@ -156,6 +156,15 @@ SHUTTER_DONE = "done"
 SHUTTER_FAILED = "failed"
 SHUTTER_ACTION = "shutter"
 
+# Where the browser is sent after a post, and it has to be relative. The plugin serves the page at
+# "/" and nginx publishes it at "/thermal/", stripping the prefix on the way in, so the plugin never
+# learns what the browser called it. An absolute "/" therefore sent anyone using the printer's web
+# interface to the printer's home page on every change, which is the Fluidd dashboard. A relative
+# reference resolves against the URL the browser asked for, so it lands on the control page whether
+# that is /thermal/ or a direct connection to the port. The fragment puts it back at the controls
+# rather than at the top.
+SETTINGS_REDIRECT = "./#controls"
+
 # How many reads in a row may come back empty before the camera counts as stalled rather than slow.
 # At the idle sleep below this is a fifth of a second of nothing, where a healthy camera delivers
 # twenty-five frames a second.
@@ -1311,7 +1320,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
 <body>
 <main>
   <img src="/thermal/stream.mjpg" alt="Live thermal view">
-  <form method="post" action="/thermal/settings">
+  <form id="controls" method="post" action="/thermal/settings">
     <fieldset>
       <legend>Image</legend>
       <label><span>Palette</span><select name="palette">{palette_options}</select></label>
@@ -1336,7 +1345,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
       <button type="submit">Apply</button>
       <button type="submit" name="action" value="shutter">Calibrate now</button>
-      <p class="status">{device_status}</p>
+      <p class="status" id="device-status">{device_status}</p>
     </fieldset>
   </form>
   <p>Changes take effect immediately and survive a restart. The picture takes about a second to
@@ -1351,9 +1360,59 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      it. The camera does this by itself about every ninety seconds; the button is for when the
      picture has drifted and you would rather not wait. It costs one frame.</p>
 </main>
+{control_script}
 </body>
 </html>
 """
+
+
+# Progressive enhancement, and nothing depends on it. Without JavaScript the form posts, the server
+# redirects, and the browser reloads the page: correct, but it also tears down the video stream and
+# opens a new one on every change, which shows as the picture blinking out for a moment just as the
+# auto-ranging is already re-settling. With it, the settings go up in the background and the picture
+# is never interrupted. Anything that goes wrong falls back to submitting the form normally.
+CONTROL_SCRIPT = """<script>
+(function () {
+  var form = document.getElementById("controls");
+  var line = document.getElementById("device-status");
+  if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
+  var polls = 0;
+
+  form.addEventListener("submit", function (event) {
+    // The submitter carries the name of the button that was pressed, which is how the calibrate
+    // button is told apart from apply. Without it there is no way to know, so let the browser post.
+    if (!event.submitter) { return; }
+    event.preventDefault();
+    var fields = new URLSearchParams(new FormData(form));
+    if (event.submitter.name) { fields.append(event.submitter.name, event.submitter.value); }
+    polls = 0;
+    post(fields.toString());
+  });
+
+  function post(body) {
+    ask({ method: "POST", body: body, headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/x-www-form-urlencoded"
+    }});
+  }
+
+  function ask(options) {
+    fetch(form.action, options).then(function (reply) {
+      return reply.ok ? reply.json() : Promise.reject(reply.status);
+    }).then(show).catch(function () { form.submit(); });
+  }
+
+  function show(state) {
+    line.textContent = state.device;
+    // A calibration is applied by the capture thread between two frames, so the answer to the post
+    // itself is always "requested". Ask again a few times, briefly, for what actually happened.
+    if (state.pending && polls < 8) {
+      polls += 1;
+      setTimeout(function () { ask({ headers: { "Accept": "application/json" } }); }, 300);
+    }
+  }
+})();
+</script>"""
 
 
 def describe_device(status: dict | None) -> str:
@@ -1395,6 +1454,7 @@ def render_control_page(
             for name in VALID_GAINS
         ),
         device_status=describe_device(device_status),
+        control_script=CONTROL_SCRIPT,
         palette_options="".join(
             option(name, name.replace("-", " "), name == settings["palette"])
             for name in palette_names
@@ -1499,11 +1559,27 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             payload["device"] = self.device.status()
         self.send_json(payload)
 
+    def settings_payload(self) -> dict:
+        """The settings, plus one sentence on what the camera is doing and whether to ask again.
+
+        The sentence comes from the same function that renders it into the page, so the wording
+        cannot drift between the version a browser with JavaScript sees and the version one
+        without it sees.
+        """
+
+        payload = self.settings_store.as_dict()
+        status = self.device.status() if self.device is not None else None
+        payload["device"] = describe_device(status)
+        payload["pending"] = bool(
+            status is not None and status.get("shutter", {}).get("state") == SHUTTER_PENDING
+        )
+        return payload
+
     def serve_settings(self) -> None:
         if self.settings_store is None:
             self.send_error(503, "settings are not available")
             return
-        self.send_json(self.settings_store.as_dict())
+        self.send_json(self.settings_payload())
 
     def apply_settings(self) -> None:
         """Accept a posted form, then send the browser back to the page it came from."""
@@ -1523,8 +1599,14 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         # A button, not a setting: the capture thread picks this up between two frames.
         if self.device is not None and SHUTTER_ACTION in form.get("action", []):
             self.device.request_shutter()
+        # A page with JavaScript posts in the background and wants the new state back, so that the
+        # video stream is not torn down and reopened every time a palette changes. A page without
+        # it gets the redirect, and both paths end up at the same place.
+        if "application/json" in self.headers.get("Accept", ""):
+            self.send_json(self.settings_payload())
+            return
         self.send_response(303)
-        self.send_header("Location", "/")
+        self.send_header("Location", SETTINGS_REDIRECT)
         self.send_header("Content-Length", "0")
         self.end_headers()
 

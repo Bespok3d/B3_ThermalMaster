@@ -15,6 +15,7 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Stream: `/thermal/stream.mjpg`
 - Snapshot: `/thermal/snapshot.jpg`
 - Temperatures: `/thermal/stats`
+- Settings and camera state: `/thermal/settings`
 
 ## Setting it up
 

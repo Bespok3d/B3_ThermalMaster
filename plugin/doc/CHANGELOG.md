@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.2
+
+- Changing a setting no longer throws you out to the printer's home page. The control page redirected
+  to an absolute path after every change, and since nginx publishes the page under a prefix that the
+  plugin never sees, that path resolved to the Fluidd dashboard rather than back to the page.
+- Changing a setting no longer interrupts the video. The page now applies settings in the background
+  where the browser allows it, so the picture is not torn down and reopened every time. Without
+  JavaScript it still posts and reloads as before, and lands back at the controls rather than at the
+  top of the page.
+- `/thermal/settings` now also reports what the camera is doing, in the same words the page uses.
+
 ## 0.8.1
 
 - Calibration works on the P1. The vendored driver's own shutter helper reads back the frame that

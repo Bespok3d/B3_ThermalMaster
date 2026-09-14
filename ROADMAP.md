@@ -1219,3 +1219,30 @@ pinned driver alone (F-31).
 Next: Phase 1, the manifest rewrite. It is the change that makes the plugin installable and puts the
 camera in Fluidd without the user touching Settings. Everything it needs is settled except the
 capability string, where `klipper-generic` is the recommendation (section 6.2).
+
+**F-59. Every settings change bounced the user out to the Fluidd dashboard.** Fixed in 0.8.2, found
+by the maintainer asking whether it was meant to happen. It was not.
+
+`apply_settings` answered its POST with `Location: /`. The plugin serves the control page at `/` and
+nginx publishes it at `/thermal/` with the prefix stripped on the way in, so the plugin never learns
+what the browser called it, and `proxy_redirect` does not rewrite a bare path because it does not
+start with the `proxy_pass` value. The browser therefore resolved `/` against the printer's origin
+and went to the printer's home page. Directly on port 8082 it worked perfectly, which is why it
+survived every test written for it.
+
+The fix is a relative reference, `./#controls`, which resolves against whatever URL the browser
+actually asked for: `/thermal/` behind nginx, `/` on a direct connection. The fragment also puts the
+page back at the controls instead of at the top. The test now asserts the header is not absolute and
+says why, rather than asserting the string it happens to be.
+
+Worth generalising: this plugin is mounted under a prefix it cannot see, so it must never emit an
+absolute path of its own. The one remaining place it does is the form's `action`, which is hardcoded
+to `/thermal/settings` and so only works behind nginx. That is the mirror image of the same bug and
+should become relative too.
+
+A second thing came out of the same question. The redirect reloads the page, which tears down the
+MJPEG stream and opens a new one on every change, so the picture blinks out exactly when the
+auto-ranging is already re-settling. The page now posts in the background where the browser allows
+it and updates only the status line. It is progressive enhancement and nothing depends on it: the
+form still works with JavaScript off, and any failure falls back to submitting normally. The wording
+of the status line comes from `describe_device` either way, so the two paths cannot drift.

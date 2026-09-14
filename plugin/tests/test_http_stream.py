@@ -151,7 +151,13 @@ def test_posting_settings_changes_them_and_redirects_back(serving_with_settings)
     response.read()
 
     assert response.status == 303
-    assert response.getheader("Location") == "/"
+    location = response.getheader("Location")
+
+    # Relative, and this is the whole point of the assertion. The plugin serves the page at "/" and
+    # nginx publishes it at "/thermal/" with the prefix stripped, so an absolute "/" resolved to the
+    # printer's home page in a browser and every settings change bounced the user into Fluidd.
+    assert not location.startswith("/")
+    assert location.endswith("#controls")
     assert store.as_dict() == {**store.as_dict(), "palette": "sepia", "rotation": 270}
     connection.close()
 
@@ -166,7 +172,8 @@ def test_the_root_path_serves_the_control_page(serving_with_settings):
 
     assert response.status == 200
     assert response.getheader("Content-Type") == "text/html; charset=utf-8"
-    assert "<form method=\"post\" action=\"/thermal/settings\">" in body
+    assert 'action="/thermal/settings"' in body
+    assert 'id="controls"' in body
     connection.close()
 
 
@@ -292,6 +299,61 @@ def test_posting_a_gain_records_it_without_sending_it(thermal_streamer):
 
         assert store.camera_snapshot()[1].gain == "low"
         assert device.status()["gain"] is None
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_client_that_asks_for_json_is_not_redirected(thermal_streamer):
+    """The page posts in the background so the video stream is not torn down on every change."""
+
+    frame_store = thermal_streamer.LatestFrame()
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    device = thermal_streamer.DeviceController(store)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), frame_store, store, thermal_streamer.build_palettes(), device
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+    try:
+        body = "palette=sepia&rotation=90&action=shutter"
+        connection.request(
+            "POST", "/settings", body,
+            {"Content-Type": "application/x-www-form-urlencoded",
+             "Content-Length": str(len(body)), "Accept": "application/json"},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+
+        assert response.status == 200
+        assert payload["palette"] == "sepia"
+        assert payload["rotation"] == 90
+        assert payload["pending"] is True
+        assert "Calibration requested" in payload["device"]
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_the_settings_mirror_carries_the_same_device_sentence(thermal_streamer):
+    """One wording, so a browser with JavaScript and one without cannot disagree."""
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    device = thermal_streamer.DeviceController(store)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store,
+        thermal_streamer.build_palettes(), device,
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+    try:
+        connection.request("GET", "/settings")
+        payload = json.loads(connection.getresponse().read())
+
+        assert payload["device"] == thermal_streamer.describe_device(device.status())
+        assert payload["pending"] is False
     finally:
         connection.close()
         server.shutdown()
