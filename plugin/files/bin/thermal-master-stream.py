@@ -154,6 +154,13 @@ SHUTTER_IDLE = "idle"
 SHUTTER_PENDING = "pending"
 SHUTTER_DONE = "done"
 SHUTTER_FAILED = "failed"
+# The form field the calibrate button posts under. Named "command" and emphatically not "action":
+# a named form control becomes a property of its own form element in the DOM, so a button named
+# "action" makes `form.action` return that button instead of the URL the form posts to. The page's
+# script read `form.action`, fetched "[object HTMLButtonElement]", got a 404, and fell back to a
+# plain submit, which does not carry the pressed button. The result was a page that reloaded and a
+# calibration that was never requested, with nothing in any log to say so.
+SHUTTER_FIELD = "command"
 SHUTTER_ACTION = "shutter"
 
 # Where the browser is sent after a post, and it has to be relative. The plugin serves the page at
@@ -1298,6 +1305,12 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Thermal Master</title>
+<!-- Every URL on this page is relative, and it has to stay that way. The plugin serves the page at
+     "/" and nginx publishes it at "/thermal/" with the prefix stripped on the way in, so the plugin
+     is never told what the browser called it. An absolute path is therefore a guess about the mount
+     point: it was wrong for the redirect, which sent people to the Fluidd dashboard, and wrong for
+     the form action, which made the page work only behind nginx. Relative references resolve
+     against whatever the browser asked for, which is the one thing that is always right. -->
 <style>
   :root {{ color-scheme: dark; }}
   body {{ margin: 0; padding: 1rem; background: #14161a; color: #e8e8ea;
@@ -1319,8 +1332,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
 </head>
 <body>
 <main>
-  <img src="/thermal/stream.mjpg" alt="Live thermal view">
-  <form id="controls" method="post" action="/thermal/settings">
+  <img src="stream.mjpg" alt="Live thermal view">
+  <form id="controls" method="post" action="settings">
     <fieldset>
       <legend>Image</legend>
       <label><span>Palette</span><select name="palette">{palette_options}</select></label>
@@ -1344,7 +1357,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <legend>Camera</legend>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
       <button type="submit">Apply</button>
-      <button type="submit" name="action" value="shutter">Calibrate now</button>
+      <button type="submit" name="command" value="shutter">Calibrate now</button>
       <p class="status" id="device-status">{device_status}</p>
     </fieldset>
   </form>
@@ -1352,7 +1365,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      settle afterwards, while the auto-ranging finds the scene again.</p>
   <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Turning it
      on encodes at a larger size, so the text stays legible. The same numbers, plus the frame
-     average and the coldest pixel, are at <a href="/thermal/stats">/thermal/stats</a>.</p>
+     average and the coldest pixel, are at <a href="stats">stats</a>.</p>
   <p>Emissivity is how much of what a surface radiates is its own heat rather than a reflection of
      the room, so a shiny surface reads cold until you tell the plugin it is shiny. It changes the
      numbers only, never the picture.</p>
@@ -1376,17 +1389,29 @@ CONTROL_SCRIPT = """<script>
   var form = document.getElementById("controls");
   var line = document.getElementById("device-status");
   if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
+  // getAttribute, not form.action. A named control shadows a form property of the same name, so
+  // form.action is only the URL as long as nothing in the form is called "action". The attribute
+  // is always the attribute.
+  var endpoint = form.getAttribute("action");
   var polls = 0;
+  var givingUp = false;
+
+  // The pressed button lives in the form itself rather than being appended to one request body,
+  // because a programmatic submit does not include the submitter. Anything below that falls back
+  // to a plain submit would otherwise silently drop the calibrate button and reload the page
+  // looking like it had worked.
+  var pressed = document.createElement("input");
+  pressed.type = "hidden";
+  form.appendChild(pressed);
 
   form.addEventListener("submit", function (event) {
-    // The submitter carries the name of the button that was pressed, which is how the calibrate
-    // button is told apart from apply. Without it there is no way to know, so let the browser post.
+    if (givingUp) { return; }
     if (!event.submitter) { return; }
+    pressed.name = event.submitter.name || "";
+    pressed.value = event.submitter.value || "";
     event.preventDefault();
-    var fields = new URLSearchParams(new FormData(form));
-    if (event.submitter.name) { fields.append(event.submitter.name, event.submitter.value); }
     polls = 0;
-    post(fields.toString());
+    post(new URLSearchParams(new FormData(form)).toString());
   });
 
   function post(body) {
@@ -1397,9 +1422,14 @@ CONTROL_SCRIPT = """<script>
   }
 
   function ask(options) {
-    fetch(form.action, options).then(function (reply) {
+    fetch(endpoint, options).then(function (reply) {
       return reply.ok ? reply.json() : Promise.reject(reply.status);
-    }).then(show).catch(function () { form.submit(); });
+    }).then(show).catch(giveUp);
+  }
+
+  function giveUp() {
+    givingUp = true;
+    form.submit();
   }
 
   function show(state) {
@@ -1597,7 +1627,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         if camera != current_camera:
             self.settings_store.update_camera(camera)
         # A button, not a setting: the capture thread picks this up between two frames.
-        if self.device is not None and SHUTTER_ACTION in form.get("action", []):
+        if self.device is not None and SHUTTER_ACTION in form.get(SHUTTER_FIELD, []):
             self.device.request_shutter()
         # A page with JavaScript posts in the background and wants the new state back, so that the
         # video stream is not torn down and reopened every time a palette changes. A page without

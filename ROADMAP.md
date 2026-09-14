@@ -1246,3 +1246,33 @@ auto-ranging is already re-settling. The page now posts in the background where 
 it and updates only the status line. It is progressive enhancement and nothing depends on it: the
 form still works with JavaScript off, and any failure falls back to submitting normally. The wording
 of the status line comes from `describe_device` either way, so the two paths cannot drift.
+
+**F-60. The calibrate button silently stopped working, and every test still passed.** Fixed in
+0.8.3. Two defects, both introduced by the progressive enhancement in 0.8.2, and both invisible from
+Python.
+
+The button posted under a field named `action`. A named form control is exposed as a property of its
+own form element, so `<button name="action">` makes `form.action` return that button instead of the
+URL. The script read `form.action`, fetched `[object HTMLButtonElement]`, got a 404, and fell back.
+
+The fallback was `form.submit()`, and a programmatic submit does not include the submitter. So the
+fallback posted every field except the one that mattered. The page reloaded and honestly reported
+that no calibration had been asked for.
+
+Fixed three ways, because any one of them alone leaves the trap set: the field is named `command`,
+the script reads `form.getAttribute("action")`, and the pressed button is written into a hidden
+input before the handler does anything, so every path out of that handler carries it.
+
+The interesting part is the gap it exposed. This plugin's page had no test that a browser ever ran,
+and two bugs walked straight through 180 passing tests. `scripts/check-control-page.py` now serves
+the real page against the stand-in camera and drives it in headless Chromium. Its first run found the
+shadowing fix working and immediately failed on something else: the deferred half of F-59, the
+hardcoded `action="/thermal/settings"`, which meant the page only ever worked behind nginx and put a
+404 permanently under the fallback path. Every URL the page emits is now relative, which closes F-59
+completely.
+
+The browser check is not in the gate; a browser download is too much to ask of a printer plugin
+contributor. What went into the suite instead are the two rules it taught, as assertions on the
+rendered HTML: no form control may share a name with a property of `HTMLFormElement`, and the page
+may not emit an absolute path. Those are cheap, they run everywhere, and either one would have
+caught its bug.

@@ -172,7 +172,7 @@ def test_the_root_path_serves_the_control_page(serving_with_settings):
 
     assert response.status == 200
     assert response.getheader("Content-Type") == "text/html; charset=utf-8"
-    assert 'action="/thermal/settings"' in body
+    assert 'action="settings"' in body
     assert 'id="controls"' in body
     connection.close()
 
@@ -272,7 +272,7 @@ def test_pressing_calibrate_queues_a_shutter_without_touching_the_camera(thermal
     camera = fake_camera.StandInCamera()
     connection = connect_to(server)
     try:
-        status = posting(connection, "action=shutter&palette=ironbow&rotation=0")
+        status = posting(connection, "command=shutter&palette=ironbow&rotation=0")
 
         assert status == 303
         assert device.status()["shutter"]["state"] == "pending"
@@ -317,7 +317,7 @@ def test_a_client_that_asks_for_json_is_not_redirected(thermal_streamer):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     connection = connect_to(server)
     try:
-        body = "palette=sepia&rotation=90&action=shutter"
+        body = "palette=sepia&rotation=90&command=shutter"
         connection.request(
             "POST", "/settings", body,
             {"Content-Type": "application/x-www-form-urlencoded",

@@ -183,7 +183,7 @@ def test_the_control_page_offers_the_camera_controls(thermal_streamer, store):
 
     assert 'name="gain"' in page
     assert 'name="emissivity"' in page
-    assert 'name="action" value="shutter"' in page
+    assert 'name="command" value="shutter"' in page
 
 
 def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer):
@@ -212,3 +212,68 @@ def test_the_control_page_copes_with_no_device_at_all(thermal_streamer, store):
     page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
 
     assert "not available" in page
+
+
+# Properties of HTMLFormElement. A named control is exposed as a property of its own form, so a
+# control sharing one of these names shadows it: a button named "action" makes `form.action` return
+# the button rather than the URL. That shipped, and it produced a page that reloaded and a
+# calibration that was never requested, with nothing anywhere to say why.
+FORM_ELEMENT_PROPERTIES = frozenset({
+    "acceptCharset", "action", "autocomplete", "elements", "encoding", "enctype", "length",
+    "method", "name", "noValidate", "requestSubmit", "reset", "submit", "target",
+})
+
+
+def form_control_names(page: str) -> set:
+    import re
+
+    return set(re.findall(r'name="([^"]+)"', page))
+
+
+def test_no_form_control_shadows_a_form_property(thermal_streamer, store):
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert not form_control_names(page) & FORM_ELEMENT_PROPERTIES
+
+
+def without_comments(page: str) -> str:
+    """The page with its script comments dropped, so a rule can be checked against real code.
+
+    The comments explain the rule below, and naming the thing they warn about is how they explain
+    it, so a check against the raw page fails on its own documentation.
+    """
+
+    return "\n".join(
+        line for line in page.splitlines() if not line.strip().startswith("//")
+    )
+
+
+def test_the_page_script_does_not_read_the_shadowable_property(thermal_streamer, store):
+    """Belt and braces for the rule above: the attribute is always the attribute."""
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert "form.action" not in without_comments(page)
+    assert 'form.getAttribute("action")' in page
+
+
+def test_the_calibrate_button_posts_the_field_the_handler_reads(thermal_streamer, store):
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert f'name="{thermal_streamer.SHUTTER_FIELD}"' in page
+    assert f'value="{thermal_streamer.SHUTTER_ACTION}"' in page
+
+
+def test_the_page_carries_no_absolute_paths_of_its_own(thermal_streamer, store):
+    """The plugin cannot know its mount point, so every URL it emits has to be relative.
+
+    nginx publishes the page under a prefix and strips it on the way in, so an absolute path is a
+    guess. Guessing sent every settings change to the Fluidd dashboard, and made the form work only
+    behind nginx and never on a direct connection to the port.
+    """
+    import re
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+    referenced = re.findall(r'(?:href|src|action)="([^"]*)"', page)
+
+    assert [url for url in referenced if url.startswith("/")] == []

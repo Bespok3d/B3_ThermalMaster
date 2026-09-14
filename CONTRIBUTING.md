@@ -53,6 +53,27 @@ an exception to raise, so a test can describe a glitched frame or a vanished dev
 A fix ships with a regression test in the same change: one that fails on the old behaviour and
 passes on the new.
 
+## Checking the control page
+
+The gate covers the plugin's Python. It cannot cover the control page's behaviour in a browser, and
+that gap has produced two shipped bugs: a button whose name shadowed a form property, and a fallback
+path that dropped the button that was pressed. Both passed every server-side test.
+
+`scripts/check-control-page.py` serves the real page against a stand-in camera and drives it in
+headless Chromium: it checks that calibrate reaches the device, that the page does not reload doing
+it, and that a later Apply does not re-fire the last button. Run it after touching the page or its
+script.
+
+```sh
+pip install playwright && playwright install chromium
+python3 scripts/check-control-page.py
+```
+
+It is not in the gate, because a browser download is a lot to ask of someone working on a printer
+plugin. The rules it taught are in the suite instead, as cheap assertions on the rendered HTML: no
+form control may share a name with a property of HTMLFormElement, and the page may not emit an
+absolute path.
+
 ## Building locally
 
 The builder is installed into its own prefix. Do not use `npx b3-builder`: it resolves to whatever

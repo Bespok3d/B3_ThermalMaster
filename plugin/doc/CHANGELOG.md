@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.3
+
+- Calibrate now works again. It was broken by 0.8.2: the button posted under a field named "action",
+  which in a browser shadows the form's own action property, so the page fetched a nonsense URL,
+  fell back to an ordinary submit, and an ordinary submit does not carry the button that was
+  pressed. The page reloaded and reported that nothing had been asked for, which was true.
+- Every URL the page uses is now relative, so the page works both behind the printer's web server
+  and on a direct connection to the plugin's port. The form previously only worked behind the
+  former, which is also what made the fallback above land on a 404.
+
 ## 0.8.2
 
 - Changing a setting no longer throws you out to the printer's home page. The control page redirected
