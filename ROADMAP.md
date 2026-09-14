@@ -1271,6 +1271,13 @@ hardcoded `action="/thermal/settings"`, which meant the page only ever worked be
 404 permanently under the fallback path. Every URL the page emits is now relative, which closes F-59
 completely.
 
+One clarification for anyone reading this later and trying to check it. "Only worked behind nginx"
+is a statement about the URLs the page emitted, not an invitation to open port 8082 in a browser.
+The service binds to 127.0.0.1 by design, so the port is unreachable from anywhere but the printer
+itself and refuses the connection: that is the intended posture and not a symptom. The direct mount
+point is verified by `scripts/check-control-page.py`, which serves the page on loopback and drives
+it there, and on the printer by curling 127.0.0.1:8082 from its own shell.
+
 The browser check is not in the gate; a browser download is too much to ask of a printer plugin
 contributor. What went into the suite instead are the two rules it taught, as assertions on the
 rendered HTML: no form control may share a name with a property of `HTMLFormElement`, and the page

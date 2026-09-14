@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.4
+
+- Emissivity offers 0.98, which is about right for skin, water and matte paint.
+
 ## 0.8.3
 
 - Calibrate now works again. It was broken by 0.8.2: the button posted under a field named "action",

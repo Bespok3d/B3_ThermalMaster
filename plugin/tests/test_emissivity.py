@@ -148,3 +148,33 @@ def test_the_emissivity_survives_a_restart(thermal_streamer, tmp_path):
     )
 
     assert second.as_dict()["emissivity"] == pytest.approx(0.3)
+
+
+def test_the_presets_cover_skin(thermal_streamer):
+    """0.98 is about right for skin, water and matte paint, which is what people point it at."""
+
+    assert 0.98 in [value for value, _ in thermal_streamer.EMISSIVITY_PRESETS]
+
+
+def test_every_preset_is_offered_by_the_page(thermal_streamer):
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    for value, _ in thermal_streamer.EMISSIVITY_PRESETS:
+        assert f'value="{value:.2f}"' in page
+
+
+def test_the_presets_are_distinct_and_ordered(thermal_streamer):
+    """Two presets a hundredth apart would both match the same stored value on the page."""
+
+    values = [value for value, _ in thermal_streamer.EMISSIVITY_PRESETS]
+
+    assert values == sorted(values, reverse=True)
+    assert len(set(values)) == len(values)
+    assert min(abs(a - b) for a, b in zip(values, values[1:])) > thermal_streamer.EMISSIVITY_MATCH
+
+
+def test_every_preset_is_in_range(thermal_streamer):
+    for value, _ in thermal_streamer.EMISSIVITY_PRESETS:
+        assert thermal_streamer.MIN_EMISSIVITY <= value <= thermal_streamer.MAX_EMISSIVITY

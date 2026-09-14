@@ -142,6 +142,7 @@ DEFAULT_EMISSIVITY = 0.95
 EMISSIVITY_MATCH = 0.005
 EMISSIVITY_PRESETS = (
     (1.00, "1.00 perfect emitter"),
+    (0.98, "0.98 skin, water, matte paint"),
     (0.95, "0.95 matte plastic, PLA, painted"),
     (0.90, "0.90 rough surfaces, ceramic"),
     (0.85, "0.85 glossy plastic, PETG"),
