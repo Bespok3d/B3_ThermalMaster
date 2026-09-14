@@ -1,0 +1,13 @@
+# Registers the thermal stream as a camera in Fluidd and Mainsail, so the user never has to add it by
+# hand under Settings. The name is theirs to choose at install time.
+#
+# Adaptive, not plain mjpegstreamer. Fluidd renders a plain mjpegstreamer camera by fetching the
+# stream inside a Web Worker and parsing the multipart itself, and in Safari that fetch fails outright
+# with "Load failed" while the very same URL renders when opened as a page. Adaptive polls the
+# snapshot on a timer instead, so there is no long-lived streaming connection to fail. It costs some
+# smoothness, and it works in every browser rather than most of them.
+[webcam $THERMAL_CAMERA_NAME]
+service: mjpegstreamer-adaptive
+stream_url: /thermal/stream.mjpg
+snapshot_url: /thermal/snapshot.jpg
+aspect_ratio: 4:3

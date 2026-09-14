@@ -1,66 +1,102 @@
 {
-  "name": "thermal-p1",
-  "title": "Thermal Master P1",
-  "version": "0.1.0",
-  "description": "Stream the Thermal Master P1 (InfiRay-OEM) USB thermal camera on the Snapmaker U1. The P1 is not a UVC/V4L2 camera, so the hardware-accelerated camera plugin cannot see it; this plugin drives it directly over libusb, colormaps the 16-bit thermal frame, and serves it as MJPEG at /thermal. No UVC, no firmware flashing, no Rockchip MPP dependency.\n\nTo register it as a camera in Fluidd and Mainsail, add the /thermal endpoint by hand under Settings → Cameras (MJPEG stream).",
-  "tagline": "libusb-driven MJPEG streaming for the Thermal Master P1 thermal camera.",
+  "name": "thermal-master",
+  "title": "Thermal Master",
+  "version": "0.5.0",
+  "license": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3/blob/main/plugin/doc/LICENSE",
+  "author": "Mauker",
+  "min_daemon_version": "0.14.0",
+  "description": "Stream a Thermal Master P1 or P3 (InfiRay-OEM) USB thermal camera on the Snapmaker U1 and watch a print thermally in Fluidd or Mainsail. Plug either one in: the plugin works out which it is.\n\nNeither is a UVC camera. It speaks a vendor protocol over raw USB bulk transfers, so the kernel never gives it a video device and the hardware-accelerated camera plugin cannot see it. This plugin drives it directly over libusb, colormaps the 16-bit thermal frame, and serves it as ordinary MJPEG. No UVC, no firmware flashing, no Rockchip MPP dependency.\n\nIt registers itself as a camera, so it appears alongside your other cameras with nothing to set up by hand. You choose the name it shows under when you install it.\n\nThe image is auto-ranged each frame, so the coldest and hottest areas map to the ends of the palette and contrast follows the scene. It is a relative thermal view, not a calibrated temperature readout.",
+  "tagline": "Watch a print thermally, straight in Fluidd and Mainsail.",
   "category": "camera",
-  "channel": "lts",
+  "channel": "experiment",
   "printer_specific": true,
-  "published_at": "2026-06-04",
-  "updated_at": "2026-06-04",
-  "source": "https://github.com/Bespok3d/thermal-p1",
-  "homepage": "https://github.com/Bespok3d/thermal-p1",
+  "changelog": "doc/CHANGELOG.md",
+  "source": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3",
+  "homepage": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3",
   "publisher": "PLACEHOLDER",
   "provides": [
     {
-      "service": "thermal-camera-service"
+      "service": "thermal-camera-service",
+      "exclusive": true
     }
   ],
   "require": [],
   "conflicts": [],
   "requires": {
-    "capabilities": [],
-    "variables": []
-  },
-  "permissions": [
-    "init.autostart",
-    "nginx.location"
-  ],
-  "install": {
-    "dirs": [],
-    "symlinks": [
-      {
-        "from": "files/bin",
-        "to": "$BESPOK3D/usr/local/plugins/thermal-p1/bin"
-      },
-      {
-        "from": "files/vendor",
-        "to": "$BESPOK3D/usr/local/plugins/thermal-p1/vendor"
-      },
-      {
-        "from": "files/etc/init.d/s65thermal-p1",
-        "to": "$BESPOK3D/etc/init.d/autostart/s65thermal-p1"
-      },
-      {
-        "from": "files/udev/99-thermal-p1.rules",
-        "to": "/etc/udev/rules.d/99-thermal-p1.rules"
-      }
+    "capabilities": [
+      "klipper-generic"
     ],
-    "patches": [],
-    "start": [
-      "$BESPOK3D/etc/init.d/autostart/s65thermal-p1 restart"
+    "variables": [
+      {
+        "name": "THERMAL_CAMERA_NAME",
+        "description": "Display name for the thermal camera in Fluidd/Mainsail (e.g. \"Thermal\", \"Heat\", \"IR\").",
+        "required": true
+      }
     ]
   },
-  "stop": [
-    "$BESPOK3D/etc/init.d/autostart/s65thermal-p1 stop"
+  "config": [
+    {
+      "key": "THERMAL_CAMERA_NAME",
+      "label": "Camera name in Fluidd/Mainsail",
+      "type": "text",
+      "placeholder": "Thermal",
+      "default": "Thermal",
+      "hint": "Whatever you want it called in the UI: Thermal, Heat, IR, etc.",
+      "required": true,
+      "userEditable": true
+    }
   ],
+  "permissions": [
+    "web-location",
+    "managed-service",
+    "moonraker-config",
+    "restart"
+  ],
+  "install": {
+    "place": [
+      {
+        "class": "web-location",
+        "src": "files/etc/nginx/locations/thermal-master.conf"
+      },
+      {
+        "class": "moonraker-config",
+        "src": "files/webcam.conf.tmpl",
+        "name": "thermal-master.cfg",
+        "render": true
+      }
+    ],
+    "service": [
+      {
+        "name": "thermal-master",
+        "command": "$PLUGIN_VENV/bin/python3",
+        "args": [
+          "-u",
+          "$BESPOK3D_PLUGINS/thermal-master/files/bin/thermal-master-stream.py",
+          "--bind",
+          "127.0.0.1",
+          "--port",
+          "8082",
+          "--palette",
+          "ironbow"
+        ],
+        "autostart": true,
+        "ports": [
+          8082
+        ]
+      }
+    ],
+    "restart": [
+      "web",
+      "moonraker"
+    ]
+  },
   "endpoints": [
     {
-      "label": "Thermal P1",
+      "label": "Thermal camera",
       "path": "/thermal/"
     }
   ],
   "conflict_resolutions": [],
-  "files": []
+  "files": [],
+  "attributions": "# Attributions - thermal-master\n\n**Plugin author:** Mauker, vendoring the P1/P3 USB protocol driver from jvdillon/p3-ir-camera\n\nlibusb-driven capture and MJPEG streaming for the Thermal Master P1.\n\n| Upstream project | Author | Licence | Needed at runtime | Code ships in this package |\n| --- | --- | --- | --- | --- |\n| p3-ir-camera | Joshua V. Dillon (@jvdillon) | Apache-2.0 | yes | yes |\n| numpy | NumPy Developers | BSD-3-Clause | yes | yes, as a wheel |\n| Pillow | Jeffrey A. Clark and contributors | MIT-CMU | yes | yes, as a wheel |\n| pyusb | PyUSB contributors | BSD-3-Clause | yes | yes, as a wheel |\n\nThe USB protocol layer is not reimplemented here. `files/vendor/p3_camera.py` is verbatim from\nhttps://github.com/jvdillon/p3-ir-camera at pinned commit\n`e3205dca5727682ff2d903585d1dce5a1d19f1f6`, Apache-2.0, whose licence ships beside it as\n`LICENSE.p3-ir-camera`. The repo's `VENDORING.md` records the pin and how it is verified. Protocol\nreverse-engineering credit belongs to @aeternium.\n\nThis plugin adds the colormap, the auto-ranging and the MJPEG serving layer on top, in\n`files/bin/thermal-master-stream.py`.\n\nnumpy, Pillow and pyusb are declared in `requirements.txt` and ship as wheels built for the printer's\narchitecture, installed into a virtual environment belonging to this plugin alone. They are separate\nworks under their own licences, aggregated with this plugin's code rather than relicensed by it.\n"
 }

@@ -32,7 +32,12 @@ PLUGIN_DIR="$REPO_ROOT/plugin"
 # one venv is shared across every plugin repo that has no runtime dependencies. This plugin has three,
 # and its tests import two of them, so the toolchain is pointed at a venv this repo owns before it is
 # built. The shared one stays exactly what the other repos share.
-B3D_TOOLS_VENV="$REPO_ROOT/.venv"
+#
+# The name carries the platform because this tree is edited from more than one machine: a checkout
+# shared between a macOS host and a Linux VM otherwise has each one delete and rebuild the other's
+# venv on every run, and a stale symlink to a missing interpreter reads as a confusing failure rather
+# than as the platform mismatch it is.
+B3D_TOOLS_VENV="$REPO_ROOT/.venv-$(uname -s)-$(uname -m)"
 B3D_PY="$B3D_TOOLS_VENV/bin/python"
 
 echo ""
@@ -50,7 +55,7 @@ fi
 run_check "pytest" pytest_in_dir "$PLUGIN_DIR" tests
 run_check "ruff"   ruff_in_dir "$PLUGIN_DIR" files/bin tests
 # mypy is deliberately absent until the streamer is split into an importable module (ROADMAP F-47).
-# mypy derives a module name from the filename, and "thermal-p1-stream" is not a legal one, so the
+# mypy derives a module name from the filename, and "thermal-master-stream" is not a legal one, so
 # entry script cannot be checked while it carries hyphens and holds all the logic. u1-remote-screen
 # has the same shape and checks only its underscore-named modules for the same reason.
 
@@ -63,8 +68,11 @@ workflow_pinning_check "$REPO_ROOT"
 # vendored driver tree and the upstream viewer clone checked out beside it, neither of which is ours
 # to rewrite and both of which carry em-dashes. A path that does not exist is skipped, so naming
 # files/udev here is safe whether or not it survives the manifest rewrite.
-em_dash_check \
-    "$PLUGIN_DIR/files/bin" "$PLUGIN_DIR/files/etc" "$PLUGIN_DIR/files/udev" \
+# --suffix adds to the guard's defaults, which cover code and prose but not the config formats this
+# plugin ships: an em-dash in an nginx location or a Moonraker fragment is as much a Rule Zero
+# violation as one in a comment.
+em_dash_check --suffix .conf --suffix .tmpl \
+    "$PLUGIN_DIR/files" \
     "$PLUGIN_DIR/doc" "$PLUGIN_DIR/tests" "$PLUGIN_DIR/manifest.json" "$PLUGIN_DIR/requirements.txt" \
     "$REPO_ROOT/scripts" "$REPO_ROOT/README.md" "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md" \
     "$REPO_ROOT/CONTRIBUTING.md" "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/ROADMAP.md" \

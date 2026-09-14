@@ -179,6 +179,18 @@ The path shapes also differ between dialects, which matters for writing service 
 
 ## 4. Review findings
 
+### 4.0 What is still open
+
+Findings below are kept as written, so the reasoning stays readable, and most now carry their own
+resolution note. Closed by Phase 0: F-2, F-3, F-9, F-10, F-12, F-31, F-40 (partly), F-42, F-43, F-48,
+F-49, F-50, F-51. Closed by Phase 1: F-11, F-20, F-22, F-23, F-24, F-32, F-33, F-34, F-35, F-36, F-37,
+F-38, F-39, F-41, F-44, and the rest of F-40; F-45 keeps Apache-2.0 and now ships a per-plugin
+`doc/LICENSE`, and F-46's capability and exclusivity metadata is declared.
+
+Genuinely still open: F-5 and F-6 (signing, Phase 8), F-7 and F-8 (withdrawn, the udev file is gone),
+F-13 through F-18 (runtime correctness, Phase 3), F-25 through F-30 (streamer design, Phase 5), and
+F-47 (mypy, waiting on the streamer being split into an importable module).
+
 ### 4.1 The manifest describes a plugin model that does not exist
 
 **F-32. The manifest is written in an older dialect that the documentation no longer describes.**
@@ -380,9 +392,15 @@ layer for exactly this class of problem.
 **F-30. `# type: ignore[attr-defined]` on `self.server.frame_store`** will not survive the mypy gate
 cleanly.
 
-**F-31. Two later drafts sit in the gitignored vendor directory.** `p3_stream.py` and `temp.py` carry
-palettes, a colorbar, EMA auto-gain, gain switching and a `/control` page. Harvest what is wanted into
-`files/bin/`, then delete them.
+**F-31. The vendor directory is now the driver and nothing else. Resolved.** It held two later
+streamer drafts (`p3_stream.py`, `temp.py`) and 70 MB of hand-unpacked numpy, Pillow and pyusb. All of
+it was gitignored, which is not the same as harmless: the builder walks `files/` and ships what it
+finds, so every byte of it would have gone into the package and its `files[]` list. The packages are
+deleted, since `requirements.txt` and the bake replace them. The drafts are moved to
+`reference/streamer-drafts/`, outside the payload and gitignored, with a README naming what is worth
+harvesting from them in Phase 5: the EMA auto-gain (F-26), the palettes and colorbar, the pending-request
+queue for device controls (F-18), and the per-frame handling of a marker mismatch (F-15).
+`plugin/files/vendor/` is down to `p3_camera.py` and its licence, 48 KB, both tracked and pinned.
 
 **F-7 and F-8. Resolved: delete the udev file.** F-7 was the world-writable `MODE="0666"`, F-8 the
 two-second `sleep` inside `RUN+=`. The printer diagnosis removes the need for either. The service runs
@@ -405,6 +423,108 @@ unsorted imports and two lines over the 100 column limit. The plan was to leave 
 was wrong: the gate has to be green for Phase 0 to be done, so they were fixed here. All four changes
 are formatting only, no behaviour touched: the import block reordered by `ruff --fix`, and two long
 expressions split by naming their intermediate value (`ramped_channel`, `listening_on`).
+
+**F-50. The vendor directory shadowed installed packages. Fixed.** The streamer put `files/vendor/` at
+the FRONT of `sys.path`, so anything unpacked there won against the installed package of the same
+name. With the hand-unpacked aarch64 numpy and Pillow still sitting in a working tree, that meant the
+plugin imported Linux binaries in preference to the environment's own copies. On the printer's
+architecture it does that silently, which is the dangerous case: the code appears to work while
+running a dependency nobody declared. On any other machine the binaries refuse to load, which is how
+it surfaced, as `ImportError: cannot import name '_imaging' from 'PIL'` on macOS.
+
+The tests passed on Linux and failed on macOS for exactly this reason, so the gate was
+platform-dependent, which is worse than a red gate. `sys.path.append` replaces the insert: the
+environment wins, and the vendor directory is reachable for the one thing it holds, the upstream
+driver. `test_the_vendor_directory_does_not_shadow_installed_packages` pins it, and was confirmed to
+fail on the old code (`assert ['PIL'] == []`) before the fix landed.
+
+Still outstanding: those numpy and Pillow trees are gitignored, but `b3-builder` walks `files/` and
+ships what it finds, so they must be deleted before the first real build or they end up in the
+package and in its `files[]` list.
+
+**F-51. The gate venv collided across machines.** It was built at `.venv` inside the repo, which is
+shared between a macOS host and a Linux VM working the same checkout, so each run deleted and rebuilt
+the other's, and a stale symlink to a missing interpreter reported as a confusing "not 3.11" error.
+The path now carries `uname -s` and `uname -m`, so each platform keeps its own.
+
+**F-52. Query strings 404ed. Fixed in 0.2.1, found on hardware.** The request handler matched
+`self.path`, the raw request target, against its route table. Every client that decorates a URL
+therefore got a 404: Fluidd and Mainsail add a cache-busting parameter to snapshot requests so the
+browser cannot serve a stale one, and mjpg-streamer clients add `?action=stream`. The failure mode is
+deceptive, because the stream is loaded as a plain `<img>` with no query and keeps working: the camera
+tile renders live frames and is labelled an error at the same time, which is what the first hardware
+install showed. `resolve_route` now discards the query before an exact-match lookup, with tests
+covering the cache-busted snapshot, the action-style stream, the root path, an unknown path, and a
+path that merely starts with a known one, so discarding the query cannot quietly become prefix
+matching.
+
+Worth recording honestly: this was fixed on a misreading. "The frame shows up" was taken to mean
+video frames were rendering, when it meant the tile appeared. The routing bug is real and would have
+bitten as soon as the service ran, but it was not the cause of the reported symptom (F-53 was), and
+it was diagnosed from an assumption rather than from evidence. The three curl lines that settled it
+should have come first.
+
+**F-53. The service ran under the wrong interpreter, so it never started at all.** The manifest
+launched it as `python3`, which is the printer's system interpreter, not the one in the virtual
+environment the daemon provisions from `requirements.txt`. The system interpreter happens to have
+numpy and does not have pyusb, so it got past the first import and died on `No module named 'usb'`,
+once per restart, into `var/log/thermal-master.log`. Nothing was listening on 8082, which is why
+every endpoint answered 502 while nginx and the Moonraker registration were both fine.
+
+The fix is the form the platform's own reference Python plugin uses:
+`"command": "$PLUGIN_VENV/bin/python3"`, with no `venv` field. Note that
+`doc/kinds/python.md` documents `"venv": true` as what opts a service into its environment, and
+`anatomy-of-the-manifest` documents `"venv"` as a path; `reference-python-plugins/status-feed`, which
+is the stated reference for this mechanism and is running on the printer today, uses neither and
+names the interpreter directly. Trust the running plugin over both documents.
+
+`plugin/tests/test_manifest.py` now pins this and four other manifest promises that only fail after
+an install: that every placed file exists, that service arguments naming plugin files point at real
+ones, that the registered camera URLs match locations the proxy actually serves, and that the
+declared port is the one the service is told to bind. The interpreter test was confirmed to fail
+against the broken command before being called done.
+
+**F-54. The camera worked in Chrome and not in Safari. Fixed in 0.4.1.** Fluidd does not render a
+`mjpegstreamer` camera with an `<img>`: it fetches the stream inside a Web Worker and parses the
+multipart itself. In Safari that fetch fails with `TypeError: Load failed`, a generic network failure,
+while the identical URL renders when opened as a page and works in Chrome. Registering the camera as
+`mjpegstreamer-adaptive` fixes it, because adaptive polls the snapshot on a timer and never holds a
+streaming connection open. Confirmed by the maintainer at about fifteen frames a second, which is
+Moonraker's default `target_fps` rather than anything about the camera.
+
+The cause was not chased further than that. Three things about our response differ from a typical
+mjpg-streamer, HTTP/1.0 rather than 1.1, no cache headers on the stream, and no leading CRLF before
+the first boundary, and any of them might be the trigger. Changing all three to see if the symptom
+moves would not have said which mattered, and adaptive is the better default regardless: the plugin
+should not depend on a browser holding a streaming fetch open for hours during a print.
+
+**F-55. The adaptive tile decays from 15 fps to 5 fps if left open.** Reported from hardware, cause
+not yet established. The leading suspicion is our own transport: the request handler never sets
+`protocol_version`, so it answers HTTP/1.0 and every snapshot is a fresh TCP connection and a fresh
+thread in `ThreadingHTTPServer`. At fifteen a second that is nine hundred connections a minute, and
+over hours the sockets left in TIME_WAIT on a small board are a plausible reason for each request to
+get slower, which is exactly what an adaptive poller responds to by slowing down.
+
+Measured on hardware, and the suspicion is probably wrong. A snapshot from the printer's own shell
+returns in 17 ms, and the streamer holds 6 threads, so the server is healthy. `netstat` does show 989
+sockets against port 8082, but that is the expected steady state rather than a leak: fifteen
+connections a second against a sixty second TIME_WAIT is nine hundred, which is what we see. It is 3%
+of the ephemeral port range, not exhaustion.
+
+So unless that measurement was taken while the tile was fast, the decay is client-side, in Safari's
+adaptive poller rather than in anything we serve. Still to confirm: whether curl stays at 17 ms while
+the tile sits at 5 fps.
+
+Healthy baseline for comparison, taken 2026-09-14 with 0.4.1, both Safari and Chrome open at about
+fifteen frames a second each: a snapshot in 15 ms, 768 sockets against port 8082, 6 threads. The
+decay was not reproducible at that moment, so the investigation waits for it to happen again.
+
+Reducing the connection churn is worth doing regardless, and there is a constraint worth recording
+before anyone plans it: `keepalive` is only valid inside an nginx `upstream` block, which belongs to
+the `http` context, and a `web-location` file is included inside a `server` block. So the nginx half
+cannot be shipped from this plugin at all as the install classes stand. `protocol_version = "HTTP/1.1"`
+on our side alone does not help, because nginx closes the upstream connection per request without it.
+Lowering `target_fps` is the only lever we actually hold.
 
 ### 4.5 Gate and CI
 
@@ -635,8 +755,50 @@ Write the nginx location with `proxy_buffering off` (F-36). Delete `s65thermal-p
 `scripts/tag_version_guard.sh` on the reference pattern (F-11, F-41). Add `doc/CHANGELOG.md` and
 `doc/ATTRIBUTIONS.md` (F-20, F-44).
 
-Exit: a `.b3` built by `b3-builder` installs, the service starts, `/thermal/stream.mjpg` resolves through
-nginx, and the camera appears in Fluidd without the user touching Settings.
+Exit: a `.b3` built by `b3-builder` installs, the service starts, `/thermal/stream.mjpg` resolves
+through nginx, and the camera appears in Fluidd without the user touching Settings.
+
+Status: written and building. `thermal-master-0.2.0.b3` packs clean, and the archive was cross-checked
+against its own `files[]`: nine payload members, every one listed, nothing shipped that is not, modes
+only 644 and 755. The bake pulled the three aarch64 wheels, so the package is 20 MB where the
+hand-unpacked trees were 70 MB. `publisher` reads `PLACEHOLDER`, which is correct for an unsigned
+build. The plugin is renamed to `thermal-master`, capability `klipper-generic`, channel `experiment`.
+The tag guard was exercised both ways, accepting `plugin-thermal-master-v0.2.0` and refusing a tag
+claiming a version the manifest does not declare.
+
+The service now starts, and the camera answers: with 0.2.2 installed the log ends at
+`serving http://127.0.0.1:8082/stream.mjpg` with no traceback after it, and the camera's shutter is
+audible, which means `connect`, `init` and `start_streaming` all got through and the NUC calibration
+ran. That settles three things at once that were previously assumptions: root can claim the device
+with no udev rule (F-7, F-8), `libusb-1.0.so.0` is where the diagnosis said it was, and the vendored
+protocol handshake works against real hardware.
+
+And then the rest of it: `/thermal/snapshot.jpg` returns 200 with a 12722 byte body starting `ffd8`.
+That is a real JPEG off real hardware, so the whole path holds end to end, from USB bulk transfer
+through the protocol, frame decode, colormap, JPEG encode, the HTTP server and the proxy. Phase 2 is
+done.
+
+Verified since, because a magic number is not an image: the snapshot decodes fully under Pillow as
+640x480 RGB with a luminance range of 0 to 249, which is a real scene rather than a flat field, and
+both `/thermal/snapshot.jpg` and `/thermal/stream.mjpg` render in a browser opened straight at the
+printer's LAN address. Over the LAN the stream delivers about 1 MB in 3 seconds, roughly 26 frames a
+second. Moonraker's `webcams/list` shows exactly one `Thermal` entry, `mjpegstreamer`, correct URLs,
+`source: config`, no leftovers from the earlier installs, and the location file is symlinked beside
+the screen plugin's.
+
+The tile reporting an error while every URL it named worked turned out to be browser cache: the same
+Fluidd page in a different browser rendered the camera immediately. Worth recording as a process
+lesson rather than a finding. Four rounds of server-side diagnosis went by before the cheapest check
+was made, and the evidence that should have prompted it arrived early, when the snapshot returned a
+valid JPEG through the proxy. Cheap client-side explanations belong before expensive server-side
+ones.
+
+Installing it works, and the trial was worth its cost immediately. 0.2.0 installed cleanly: nginx
+served the location, Moonraker registered the camera, the tile appeared in Fluidd under the chosen
+name. The service, however, had never once started. Found by the trial: F-53 (wrong interpreter, the
+actual cause) and F-52 (query strings 404ing, real but not the reported symptom). Both fixed in
+0.2.2, which is built and in `dist/`. What is still unproven is everything past process start: the
+USB protocol, the frame loop, and whether an image ever appears.
 
 ### Phase 2: verify on hardware
 
@@ -649,10 +811,31 @@ this point.
 
 ### Phase 3: runtime robustness
 
-F-13 through F-18, plus F-29 and F-30, each with a regression test against a fake camera object so the
-frame-loop failure modes are testable without hardware.
+F-13 through F-17, each with a regression test against a fake camera object so the frame-loop failure
+modes are testable without hardware.
 
-Exit: the streamer survives unplug, replug, a glitched frame, and a stop immediately followed by a start.
+Exit: the streamer survives unplug, replug, a glitched frame, and a stop immediately followed by a
+start.
+
+Status: written, shipped in 0.3.0, and green, but only the tests have exercised it. F-13 and F-14 are
+a SIGTERM handler that unwinds the session and a `release_camera` that calls `stop_streaming` before
+`disconnect`, both best-effort so a camera already pulled cannot block the unwind. F-15 turns a marker
+mismatch into one skipped frame rather than a teardown. F-16 counts consecutive empty reads and raises
+`CameraStalledError` at twenty, which at the idle sleep is a fifth of a second of nothing where a
+healthy camera delivers twenty-five frames a second; a single good frame forgives everything before
+it, so an occasional empty read is not a stall. F-17 backs the reconnect delay off from three seconds
+to a ceiling of sixty, resetting as soon as a session publishes anything.
+
+F-29 is resolved at the proxy instead: the nginx location sets `Cache-Control: no-store` on the
+snapshot. F-18 stays open, since there are no device controls yet to serialize; it belongs with
+Phase 6. F-30 stays open with F-47.
+
+The tests needed the fake camera to grow, so it moved out of `conftest.py` into
+`plugin/tests/fake_camera.py`, where a scripted entry can be a frame, an exception, or `None`, and
+`None` means what the driver means by it. That distinction is the whole of F-16.
+
+What no test can cover: whether a real stop actually releases the interface on the real device. The
+way to know is a stop, an immediate start, and no unplug in between.
 
 ### Phase 4: dual model
 
@@ -661,13 +844,45 @@ render the webcam fragment's aspect ratio and display name from `config[]` (F-24
 
 Exit: one package streams from either camera with no user configuration.
 
+Status: shipped in 0.4.0. `detect_camera_model` probes the USB bus for each supported model's product
+ID, taken from the driver's own configs so no product ID is written down twice, and the session drives
+whichever it finds. With nothing attached it raises `CameraNotFoundError` rather than assuming a P1
+and failing deeper in, and the backoff from F-17 turns that into a quiet retry instead of a log flood.
+Six tests cover a P1, a P3, an empty bus, an unrelated device on the same bus (the printer's own USB
+carries MCU links), a session with no camera, and a session picking up the P3's 256x192 geometry.
+Testing this needed the doubles to fake `usb.core.find`, which is the only USB call the streamer makes
+without going through the driver.
+
+The P1 half is verified on hardware. The P3 half is verified only against the fake bus, because there
+is no P3 here to plug in. What is untested is not the detection, which is four lines, but everything
+downstream of a 256x192 frame: the frame size arithmetic and the shutter segment offsets are the
+driver's, and the upscale factor is ours and produces a 1024x768 JPEG per frame on the P3 against
+640x480 on the P1, which is nearly three times the encode work.
+
 ### Phase 5: image pipeline
 
 Six palettes, EMA auto-gain (F-26), DDE, TNR, colorbar overlay, and the performance fixes F-25 and F-27.
 A settings surface so palette and overlays change without an SSH session. Resolve CLAHE.
 
-Exit: the feed is stable and readable, palette switching works live, and measured printer CPU is recorded
-in the doc for both models.
+Exit: the feed is stable and readable, palette switching works live, and measured printer CPU is
+recorded in the doc for both models.
+
+Status: the pipeline shipped in 0.5.0; the surfaces around it did not. Done: EMA smoothing on the
+display bounds (F-26), which is the flicker fix and the change worth looking at first; six palettes
+built from two shapes, colour ramps for ironbow and rainbow and per-channel tints for the greys, with
+black hot being white hot reversed; temporal noise reduction; an unsharp mask for detail; and F-25,
+taking the percentiles on raw counts instead of converting a whole frame to Celsius to find two
+numbers. The state that spans frames now lives in a `ThermalRenderer` rather than in module globals,
+which is what made the smoothing testable: nineteen tests cover the pipeline and the suite is at 47.
+
+Deferred, each for a reason. Live palette switching needs somewhere to switch it from, which is the
+control page, so the palette is a service argument for now. The colorbar needs real temperatures,
+which is why `raw_to_celsius` left the hot path but not the plugin. CLAHE stays unanswered until
+someone looks at a real print. F-27, the upscale factor, is untouched because it matters most on the
+P3 and there is no P3 to measure.
+
+Unmeasured: the per-frame cost went up by a blend, a two-pass blur and a subtract. On 160x120 at 25 fps
+that should vanish into the noise, but nobody has checked, and a P3 frame is three times the pixels.
 
 ### Phase 6: device controls
 
@@ -727,8 +942,13 @@ rest and the wheels tree; `scripts/fetch-vendor.sh` is now a vendor verification
 build step; `README.md`'s build and vendoring sections match reality; `plugin/files/bin/thermal-p1-stream.py`
 has formatting-only lint fixes.
 
-Two things nobody has verified: shellcheck reports as skipped in the assistant's sandbox, so the shell
-in this repo has never actually been checked, and the plugin has still never run against the camera.
+shellcheck now passes on all three scripts, confirmed on the maintainer's machine. The plugin has
+still never run against the camera.
+
+Found by that first real run: F-50, the vendor directory shadowing installed packages, and F-51, the
+gate venv colliding between the two machines. Both fixed, and the gate is green on both machines
+(9/9 on the maintainer's, where shellcheck runs). The vendor directory has since been cleared to the
+pinned driver alone (F-31).
 
 Next: Phase 1, the manifest rewrite. It is the change that makes the plugin installable and puts the
 camera in Fluidd without the user touching Settings. Everything it needs is settled except the
