@@ -10,6 +10,7 @@ malformed multipart body or a missing header, and neither is visible from the in
 from __future__ import annotations
 
 import http.client
+import json
 import threading
 
 import pytest
@@ -105,4 +106,134 @@ def test_the_stream_sends_a_well_formed_part(serving):
     received = response.read(len(expected))
 
     assert received == expected
+    connection.close()
+
+
+@pytest.fixture
+def serving_with_settings(thermal_streamer, tmp_path):
+    """The server as it actually runs, settings store and all."""
+
+    frame_store = thermal_streamer.LatestFrame()
+    frame_store.publish(FAKE_JPEG)
+    palettes = thermal_streamer.build_palettes()
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), tmp_path / "settings.json"
+    )
+    server = thermal_streamer.ThermalServer(("127.0.0.1", 0), frame_store, store, palettes)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield server, store
+    server.shutdown()
+    server.server_close()
+
+
+def test_the_settings_endpoint_reports_json(serving_with_settings):
+    server, _ = serving_with_settings
+    connection = connect_to(server)
+
+    connection.request("GET", "/settings")
+    response = connection.getresponse()
+    payload = json.loads(response.read())
+
+    assert response.status == 200
+    assert payload["palette"] == "ironbow"
+    connection.close()
+
+
+def test_posting_settings_changes_them_and_redirects_back(serving_with_settings):
+    server, store = serving_with_settings
+    connection = connect_to(server)
+    body = "palette=sepia&rotation=270&flip_vertical=on"
+
+    connection.request(
+        "POST", "/settings", body, {"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    response = connection.getresponse()
+    response.read()
+
+    assert response.status == 303
+    assert response.getheader("Location") == "/"
+    assert store.as_dict() == {**store.as_dict(), "palette": "sepia", "rotation": 270}
+    connection.close()
+
+
+def test_the_root_path_serves_the_control_page(serving_with_settings):
+    server, _ = serving_with_settings
+    connection = connect_to(server)
+
+    connection.request("GET", "/")
+    response = connection.getresponse()
+    body = response.read().decode()
+
+    assert response.status == 200
+    assert response.getheader("Content-Type") == "text/html; charset=utf-8"
+    assert "<form method=\"post\" action=\"/thermal/settings\">" in body
+    connection.close()
+
+
+def test_the_stream_cannot_be_posted_to(serving_with_settings):
+    server, _ = serving_with_settings
+    connection = connect_to(server)
+
+    connection.request("POST", "/stream.mjpg", "", {"Content-Length": "0"})
+    response = connection.getresponse()
+    response.read()
+
+    assert response.status == 404
+    connection.close()
+
+
+def test_the_root_path_falls_back_to_the_stream_without_a_settings_store(serving):
+    """The server is constructed without a store in the tests above, and must still serve."""
+
+    server, _ = serving
+    connection = connect_to(server)
+
+    connection.request("GET", "/")
+    response = connection.getresponse()
+    response.read(16)
+
+    assert response.status == 200
+    assert response.getheader("Content-Type").startswith("multipart/x-mixed-replace")
+    connection.close()
+
+
+def test_the_statistics_endpoint_answers_before_any_frame_has_measurements(serving):
+    """The fixture publishes a frame with no statistics, which is what a bare publish looks like."""
+
+    server, _ = serving
+    connection = connect_to(server)
+
+    connection.request("GET", "/stats")
+    response = connection.getresponse()
+    response.read()
+
+    assert response.status == 503
+    connection.close()
+
+
+def test_the_statistics_endpoint_serves_what_the_last_frame_measured(thermal_streamer, serving):
+    server, frame_store = serving
+    stats = thermal_streamer.FrameStats(
+        minimum_celsius=20.0,
+        maximum_celsius=60.0,
+        average_celsius=30.0,
+        centre_celsius=35.0,
+        range_low_celsius=21.0,
+        range_high_celsius=58.0,
+        hotspot=(12, 34),
+        coldspot=(1, 2),
+        width=160,
+        height=120,
+    )
+    frame_store.publish(FAKE_JPEG, stats)
+    connection = connect_to(server)
+
+    connection.request("GET", "/stats")
+    response = connection.getresponse()
+    payload = json.loads(response.read())
+
+    assert response.status == 200
+    assert response.getheader("Content-Type") == "application/json"
+    assert payload["maximum"] == 60.0
+    assert payload["hotspot"] == {"x": 12, "y": 34}
     connection.close()

@@ -57,6 +57,10 @@ def load_streamer() -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load the streamer from {STREAMER_PATH}")
     module = importlib.util.module_from_spec(spec)
+    # Registered before executing, which is the documented importlib order and not optional here:
+    # a dataclass resolves its field annotations by looking its own module up in sys.modules, and
+    # fails with a confusing AttributeError on None when it is not there.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -64,6 +68,15 @@ def load_streamer() -> ModuleType:
 @pytest.fixture(scope="session")
 def thermal_streamer() -> ModuleType:
     return load_streamer()
+
+
+@pytest.fixture
+def renderer_source(thermal_streamer):
+    """A source wired to a defaults-only store, which is what the capture path actually consumes."""
+
+    palettes = thermal_streamer.build_palettes()
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    return thermal_streamer.RendererSource(store, palettes)
 
 
 @pytest.fixture

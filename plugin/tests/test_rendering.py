@@ -157,3 +157,96 @@ def test_the_blur_leaves_a_flat_field_flat(thermal_streamer):
     flat = np.full((6, 6), 100, dtype=np.uint8)
 
     assert np.allclose(thermal_streamer.blur_3x3(flat), 100.0)
+
+
+def test_a_rendered_jpeg_is_a_jpeg(renderer):
+    encoded = renderer.render_jpeg(thermal_frame())
+
+    assert encoded[:2] == b"\xff\xd8"
+    assert encoded[-2:] == b"\xff\xd9"
+
+
+def test_the_default_encode_is_the_sensor_size(thermal_streamer, palettes):
+    """Upscaling here was four fifths of the plugin's CPU and the browser scales the tile anyway."""
+
+    assert thermal_streamer.DEFAULT_UPSCALE == 1
+
+
+def test_upscaling_is_still_available_and_changes_the_image_size(thermal_streamer, palettes):
+    import io
+
+    from PIL import Image
+
+    frame = thermal_frame()
+    settings = thermal_streamer.RenderSettings
+    # Overlay off on both, because it raises the encode size itself: see test_overlay.
+    native = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], settings(upscale=1, overlay=False)
+    )
+    doubled = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], settings(upscale=2, overlay=False)
+    )
+
+    native_size = Image.open(io.BytesIO(native.render_jpeg(frame))).size
+    doubled_size = Image.open(io.BytesIO(doubled.render_jpeg(frame))).size
+
+    assert native_size == (frame.shape[1], frame.shape[0])
+    assert doubled_size == (frame.shape[1] * 2, frame.shape[0] * 2)
+
+
+ROTATION_CASES = [(0, (120, 160)), (90, (160, 120)), (180, (120, 160)), (270, (160, 120))]
+
+
+@pytest.mark.parametrize(("rotation", "expected_shape"), ROTATION_CASES)
+def test_a_quarter_turn_swaps_the_frame_shape(thermal_streamer, palettes, rotation, expected_shape):
+    settings = thermal_streamer.RenderSettings(rotation=rotation)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings)
+
+    image = renderer.render(thermal_frame())
+
+    assert image.shape[:2] == expected_shape
+
+
+def test_rotation_is_clockwise(thermal_streamer):
+    """numpy rotates anticlockwise, so this is the sign that is easy to get backwards.
+
+    Top-left goes to top-right under a quarter turn clockwise.
+    """
+
+    marked = np.zeros((2, 2, 3), dtype=np.uint8)
+    marked[0, 0] = (255, 255, 255)
+
+    turned = thermal_streamer.orient(marked, 90, False, False)
+
+    assert tuple(turned[0, 1]) == (255, 255, 255)
+
+
+def test_a_full_turn_changes_nothing(thermal_streamer):
+    image = np.arange(24, dtype=np.uint8).reshape(2, 4, 3)
+
+    assert np.array_equal(thermal_streamer.orient(image, 0, False, False), image)
+
+
+def test_mirroring_flips_the_axis_it_names(thermal_streamer):
+    image = np.zeros((2, 2, 3), dtype=np.uint8)
+    image[0, 0] = (255, 255, 255)
+
+    assert tuple(thermal_streamer.orient(image, 0, True, False)[0, 1]) == (255, 255, 255)
+    assert tuple(thermal_streamer.orient(image, 0, False, True)[1, 0]) == (255, 255, 255)
+
+
+def test_an_oriented_frame_is_contiguous_so_pillow_can_read_it(thermal_streamer):
+    """A rotation returns a view with negative strides, which Pillow refuses."""
+
+    image = np.zeros((4, 6, 3), dtype=np.uint8)
+
+    assert thermal_streamer.orient(image, 90, False, False).flags["C_CONTIGUOUS"]
+
+
+def test_a_rotated_frame_still_encodes(thermal_streamer, palettes):
+    settings = thermal_streamer.RenderSettings(rotation=270, flip_horizontal=True)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings)
+
+    encoded = renderer.render_jpeg(thermal_frame())
+
+    assert encoded[:2] == b"\xff\xd8"

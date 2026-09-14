@@ -10,6 +10,7 @@ path that moved, a URL that drifted apart from the location serving it.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
@@ -69,3 +70,30 @@ def test_the_declared_ports_are_the_ones_the_service_is_told_to_bind():
     for service in SERVICES:
         bound_port = service["args"][service["args"].index("--port") + 1]
         assert [int(bound_port)] == service["ports"]
+
+
+def test_every_template_variable_is_declared_and_configurable():
+    """A `.tmpl` placeholder with no matching config key renders as the literal `$NAME`.
+
+    Nothing catches that: the plugin installs, Moonraker reads `rotation: $THERMAL_CAMERA_ROTATION`,
+    and the camera is quietly broken in a way that points at Moonraker rather than at us.
+    """
+
+    declared = {variable["name"] for variable in MANIFEST["requires"]["variables"]}
+    configurable = {entry["key"] for entry in MANIFEST["config"]}
+
+    for placement in MANIFEST["install"]["place"]:
+        if not placement.get("render"):
+            continue
+        template = (PLUGIN_DIR / placement["src"]).read_text()
+        used = set(re.findall(r"\$([A-Z][A-Z0-9_]*)", template))
+        assert used <= declared, f"{placement['src']}: undeclared {sorted(used - declared)}"
+        unconfigurable = sorted(used - configurable)
+        assert used <= configurable, f"{placement['src']}: unconfigurable {unconfigurable}"
+
+
+def test_every_select_option_list_contains_its_default():
+    for entry in MANIFEST["config"]:
+        if entry.get("type") != "select":
+            continue
+        assert entry["default"] in entry["options"], entry["key"]

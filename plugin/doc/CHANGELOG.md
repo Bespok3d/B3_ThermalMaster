@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.7.0
+
+A temperature readout, drawn into the picture.
+
+- A colorbar down the right edge, labelled at both ends with the range currently mapped to the
+  palette.
+- A crosshair in the centre with the temperature under it, and a marker on the hottest pixel in
+  view with its temperature.
+- Celsius or Fahrenheit, from the control page.
+- The readout can be switched off, which returns the plugin to exactly what 0.6.0 cost.
+- `/thermal/stats` serves the same numbers as JSON, plus the frame average and the coldest pixel,
+  for anything that would rather draw its own.
+
+The readout is drawn into the frame rather than onto the control page, because the surface that
+matters is the camera tile in Fluidd and Mainsail, and that is a plain image with nowhere to hang
+an annotation. Switching it on doubles the encoded size so the text stays legible, which is the
+only part of it that costs anything measurable.
+
+Temperatures are the camera's own uncorrected readings. Emissivity is not applied yet, so treat
+them as a good guide to a scene and not as measurements.
+
+## 0.6.0
+
+A control page, at `/thermal/` on the printer.
+
+- Palette, rotation and mirroring can be changed while the camera is running. No reinstall, no
+  editing files, and the choice survives a restart.
+- Orientation is now applied by the plugin rather than by the browser. Rotating in Fluidd needed a
+  setting that could only be changed by reinstalling, and the installer did not reliably carry the
+  choice through, so a sideways camera could not be corrected at all. Fluidd's own rotation stays at
+  zero to avoid rotating twice.
+- Rotation and mirroring are no longer install-time questions, since they are live settings now.
+
+Note that changing a setting costs about a second: the auto-ranging restarts and has to find the
+scene again.
+
+## 0.5.3
+
+- The tile shape is now an install setting. Rotating by 90 or 270 turns a 4:3 image into a 3:4 one,
+  and the tile stayed 4:3, so the picture sat inside it with black bars at the sides and shrank to
+  fit. Set the tile shape to match the rotation and it fills again.
+
+## 0.5.2
+
+- Much lighter on the printer. The stream was being upscaled four times and encoded at 640x480,
+  twenty-five times a second, so the browser could scale it back down to fit the tile. Measured at
+  62.5% of a CPU core, of which the resize and the oversized encode were about four fifths. Frames
+  are now encoded at the sensor's own size, with the quality raised to compensate, and the browser
+  does the scaling it was going to do anyway. Expect a large drop in CPU with no visible difference.
+
+## 0.5.1
+
+- Rotation and mirroring are now install settings. A camera registered from a config file is
+  read-only in Fluidd's settings panel, which shows "Managed by your Moonraker configuration" and
+  greys the controls out, so there was no way to correct a camera that is mounted sideways. Both are
+  applied by the browser, so they cost the printer nothing.
+
 ## 0.5.0
 
 The picture, rather than the plumbing.

@@ -26,30 +26,25 @@ def frame_store(thermal_streamer):
     return thermal_streamer.LatestFrame()
 
 
-@pytest.fixture
-def renderer(thermal_streamer):
-    return thermal_streamer.ThermalRenderer(thermal_streamer.build_palettes()["ironbow"])
-
-
-def run_until_script_ends(thermal_streamer, camera, frame_store, renderer):
+def run_until_script_ends(thermal_streamer, camera, frame_store, renderer_source):
     shutdown = threading.Event()
     with pytest.raises(ScriptExhaustedError):
-        thermal_streamer.stream_frames(camera, frame_store, renderer, shutdown)
+        thermal_streamer.stream_frames(camera, frame_store, renderer_source, shutdown)
 
 
-def test_a_glitched_frame_does_not_end_the_session(thermal_streamer, frame_store, renderer):
+def test_a_glitched_frame_does_not_end_the_session(thermal_streamer, frame_store, renderer_source):
     """A marker mismatch is one bad frame. Reconnecting over it costs seconds of dead video."""
 
     marker_mismatch = thermal_streamer.FrameMarkerMismatchError("cnt1 mismatch")
     camera = StandInCamera(scripted_frames=[marker_mismatch, thermal_frame(), thermal_frame()])
 
-    run_until_script_ends(thermal_streamer, camera, frame_store, renderer)
+    run_until_script_ends(thermal_streamer, camera, frame_store, renderer_source)
 
     assert frame_store.published_count == 2
 
 
 def test_a_camera_that_stops_producing_frames_ends_the_session(
-    thermal_streamer, frame_store, renderer
+    thermal_streamer, frame_store, renderer_source
 ):
     """The old loop slept and retried forever here, so the stream froze on its last good image."""
 
@@ -58,34 +53,36 @@ def test_a_camera_that_stops_producing_frames_ends_the_session(
     shutdown = threading.Event()
 
     with pytest.raises(thermal_streamer.CameraStalledError):
-        thermal_streamer.stream_frames(camera, frame_store, renderer, shutdown)
+        thermal_streamer.stream_frames(camera, frame_store, renderer_source, shutdown)
 
 
-def test_a_good_frame_forgives_the_failures_before_it(thermal_streamer, frame_store, renderer):
+def test_a_good_frame_forgives_the_failures_before_it(
+    thermal_streamer, frame_store, renderer_source
+):
     """Occasional empty reads are not a stall, however many there are in total."""
 
     almost_stalled = [None] * (thermal_streamer.MAX_CONSECUTIVE_FRAME_FAILURES - 1)
     camera = StandInCamera(scripted_frames=[*almost_stalled, thermal_frame(), *almost_stalled])
 
-    run_until_script_ends(thermal_streamer, camera, frame_store, renderer)
+    run_until_script_ends(thermal_streamer, camera, frame_store, renderer_source)
 
     assert frame_store.published_count == 1
 
 
 def test_a_requested_shutdown_stops_the_loop_without_reading(
-    thermal_streamer, frame_store, renderer
+    thermal_streamer, frame_store, renderer_source
 ):
     camera = StandInCamera(scripted_frames=[thermal_frame()])
     shutdown = threading.Event()
     shutdown.set()
 
-    thermal_streamer.stream_frames(camera, frame_store, renderer, shutdown)
+    thermal_streamer.stream_frames(camera, frame_store, renderer_source, shutdown)
 
     assert camera.frames_read == 0
     assert frame_store.published_count == 0
 
 
-def test_the_camera_is_released_when_a_session_ends(thermal_streamer, frame_store, renderer):
+def test_the_camera_is_released_when_a_session_ends(thermal_streamer, frame_store, renderer_source):
     """Both halves matter: stop_streaming resets the alternate setting, disconnect drops the
     claim."""
 
@@ -93,14 +90,16 @@ def test_the_camera_is_released_when_a_session_ends(thermal_streamer, frame_stor
     shutdown = threading.Event()
 
     with pytest.raises(ScriptExhaustedError):
-        thermal_streamer.run_capture_session(frame_store, renderer, shutdown)
+        thermal_streamer.run_capture_session(frame_store, renderer_source, shutdown)
 
     camera = fake_camera.StandInCamera.instances[-1]
     assert camera.stop_streaming_calls == 1
     assert camera.disconnect_calls == 1
 
 
-def test_a_camera_pulled_mid_session_is_still_released(thermal_streamer, frame_store, renderer):
+def test_a_camera_pulled_mid_session_is_still_released(
+    thermal_streamer, frame_store, renderer_source
+):
     """Release runs while unwinding from a failure, so it cannot assume the device is there."""
 
     class VanishedCamera(StandInCamera):

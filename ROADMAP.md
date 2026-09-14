@@ -581,8 +581,24 @@ Mouse-over temperature readout, ROI drag with max/min/average and tracking marke
 Celsius/Fahrenheit toggle, zoom, center reticle, PNG screenshot via canvas export. None cost the printer
 anything per viewer, but all need temperature values in the browser, not just pixels.
 
-Rotate and flip stay out of the MJPEG feed: Fluidd and Mainsail already apply per-webcam rotation and
-flip, and duplicating it server-side would fight their setting. The embedded page needs its own.
+Rotate and flip stay out of the MJPEG feed: Fluidd and Mainsail already apply per-webcam rotation
+and flip, and duplicating it server-side would fight their setting. The embedded page needs its own.
+
+That reasoning was right and incomplete, and hardware found the gap. A webcam defined by a config
+file is read-only in Fluidd's settings panel, which reports it as managed by Moonraker and greys the
+controls out, so the user cannot reach the client-side setting at all. Since this plugin owns that
+config, it has to expose them. `rotation`, `flip_horizontal` and `flip_vertical` became install
+settings in 0.5.1, rendered into the `[webcam]` fragment; the browser still does the work, so there
+is still no per-frame cost.
+
+That exposed a second gap immediately. Both cameras are 4:3, so a 90 or 270 rotation produces a
+portrait image, and the tile was still declared 4:3: the picture sat inside a landscape box with bars
+at the sides, scaled down to fit between them. `aspect_ratio` became an install setting too in 0.5.3.
+Worth noting how this presented: it landed in the same session as the native-size encode, and the
+obvious suspect for a smaller picture was the smaller encode. It was not. Two changes at once, and
+the visible symptom pointed at the wrong one. A test now fails if any `.tmpl` uses a variable that is not both declared
+and configurable, because an unrendered `$NAME` reaches Moonraker as a literal and breaks the camera
+in a way that points at Moonraker rather than at us.
 
 ### Server-side
 
@@ -881,8 +897,110 @@ which is why `raw_to_celsius` left the hot path but not the plugin. CLAHE stays 
 someone looks at a real print. F-27, the upscale factor, is untouched because it matters most on the
 P3 and there is no P3 to measure.
 
-Unmeasured: the per-frame cost went up by a blend, a two-pass blur and a subtract. On 160x120 at 25 fps
-that should vanish into the noise, but nobody has checked, and a P3 frame is three times the pixels.
+Measured, and the answer was not where anyone was looking. 0.5.0 came in at 62.5% of a core on the
+printer, which prompted a stage-by-stage profile: the whole image pipeline, noise reduction, bounds,
+normalisation, detail and palette, is 0.33 ms per frame, while the JPEG encode at 4x upscale is
+1.16 ms, four fifths of the total. The pipeline was never the cost. The upscale was, and it bought
+nothing: the browser scales the tile to fit regardless, so all those pixels added was a second lossy
+resampling step.
+
+F-27 is therefore closed in 0.5.2 by encoding at the sensor's own size, with quality raised from 80 to
+88 to compensate, which the profile shows is free.
+
+Confirmed on hardware, and the prediction was wrong in an instructive way. Comparing like with like,
+the 30 second averages, it went from 64.5% of a core to 43%: a third off, not the three quarters the
+profile forecast. The encode was 78% of the work on an aarch64 VM and roughly a third of it on the
+printer's SoC, so the stage ratios did not transfer even though the architecture matched. The lesson
+for later tuning: the remaining 43% is spread across the USB read, the numpy pipeline and the HTTP
+serving, none of which has been measured *on the printer*, and extrapolating from a development
+machine has now been wrong once by a factor of two. The upscale survives as `--upscale` for anyone who wants
+it back.
+
+Two side effects worth keeping. The tuning constants moved into a frozen `RenderSettings` dataclass,
+because the argument count tripped the gate's own limit, and that is the shape the control page will
+want anyway: hand the renderer a whole new settings object rather than poking attributes. And the
+conftest loader was registering the module in `sys.modules` after executing it rather than before,
+which is the wrong order and only surfaced once a dataclass tried to resolve its annotations.
+
+### Phase 5b: the control page
+
+Shipped in 0.6.0, ahead of its place in this plan, because orientation forced it.
+
+The sequence is worth recording. Fluidd can rotate a camera itself, but only from a config file this
+plugin owns, so changing it means a reinstall; and the installer did not carry the chosen values into
+the rendered config, so every build came up with defaults and a sideways camera could not be corrected
+at all. Three rounds went into diagnosing that, including two wrong theories of mine (that Fluidd
+ignored `aspect_ratio`, and that server-side rotation would fix the bars) that hardware disproved.
+
+What shipped: a `SettingsStore` behind a lock, persisted as JSON to `$BESPOK3D/var`, a `RendererSource`
+that rebuilds the renderer when the revision changes so nothing mutates a renderer the capture thread
+is inside, a JSON endpoint at `/thermal/settings`, and a plain form at `/thermal/` with no JavaScript.
+Orientation moved into the renderer as a last step, after the pipeline, so the frame kept for noise
+reduction cannot change shape mid-run. Fluidd's own rotation is pinned to zero in the fragment, since
+setting it in both places rotates twice.
+
+The bars are not fixed and cannot be: a 3:4 picture cannot fill a 4:3 tile, and `aspect_ratio` does
+not reshape Fluidd's card. Mounting the camera the other way round is the only real answer, and the
+plugin now makes that a preference rather than a constraint.
+
+Confirmed on hardware, 2026-09-14: palette, rotation and both mirrors all change live from the page,
+the picture reorients within a second, and `$BESPOK3D/var/thermal-master-settings.json` holds the
+chosen values across a restart. The control page also shows the image without bars, since there it
+sizes itself rather than fitting someone else's tile.
+
+Still open from Phase 5: CLAHE. The colorbar closed in Phase 5c below.
+
+### Phase 5c: the temperature readout
+
+Shipped in 0.7.0. The colorbar and its companions, which is the last of Phase 5 except CLAHE.
+
+The design question was where to draw it. Burning it into the frame is ugly at 160x120 and costs
+encode time; drawing it in the control page from a `/stats` endpoint is crisp and free. Burning it
+in won, because the surface that matters is the Fluidd tile, and that is a plain `<img>` with
+nowhere to hang an annotation: a readout only the control page can show is a readout nobody sees
+during a print. `/stats` ships as well, so the choice costs nothing later.
+
+What shipped: a colorbar down the right edge labelled with the ends of the *display range* rather
+than the scene extremes, since the bar exists to say what a colour means; a centre crosshair with
+the temperature under it; a marker on the hottest pixel with its temperature; Celsius or Fahrenheit;
+an overlay toggle; and `/thermal/stats` carrying the same numbers plus the frame average and the
+coldest pixel, with both extremes given as pixel coordinates in the orientation being displayed.
+
+Three things are worth recording.
+
+**Marker coordinates are cross-checked, not derived.** `orient_point` follows `orient` step for
+step rather than collapsing to one transform, and the test marks a pixel, orients the frame with
+the real function, and asserts the marked pixel is where `orient_point` said. All eight orientation
+combinations. A marker that lands on the wrong pixel is worse than no marker, because it looks
+authoritative.
+
+**Text drawing nearly cost more than the picture.** Pillow charges about 0.2 ms per `draw.text`
+call, and four labels with a shadow each is eight calls: 2.0 ms a frame, against 1.4 ms for the
+whole rest of the pipeline including the encode. Caching a rendered tile per character and pasting
+took that to 0.19 ms, about nine times cheaper per label. Pillow's `stroke_width` outline was
+measured too and is four times worse than a plain draw, so the shadow stays a shadow. The cache is
+pinned by a test, because it is not an optimisation detail: without it the readout is unaffordable.
+
+**The overlay pays for its own resolution.** Nine pixel text at the sensor's own size is porridge
+after JPEG, so switching the readout on raises the encode until the frame's *short* side reaches
+240. The short side, not the width: a rotated camera is 120 across and 160 down, and measuring the
+width would triple that frame for no more legibility than doubling it. F-27's saving stays intact
+for anyone who turns the readout off.
+
+Statistics are computed for every frame whether or not the overlay is on, so `/stats` always
+answers about the frame a client is looking at. Five passes over a frame this small measured inside
+the noise floor.
+
+Cost, predicted and to be confirmed. On a development machine 0.6.0-equivalent is 1.35 ms a frame
+and the readout takes it to 2.63 ms, essentially all of it the doubled encode. Extrapolating from
+the *hardware* numbers instead, since development-machine ratios have already been wrong here by a
+factor of two: the printer went from 43% of a core at 1x to 64.5% at 4x, so an encode is worth
+about 1.4 points per frame-size and 2x should cost roughly four points, landing near 47%. That
+prediction is on the record so it can be checked rather than assumed.
+
+Not done, deliberately. No coldspot marker and no average burned in: both are in `/stats`, and at
+this size a fourth and fifth label is clutter rather than information. No ROI, which needs a pointer
+and therefore Phase 7.
 
 ### Phase 6: device controls
 

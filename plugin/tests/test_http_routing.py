@@ -24,8 +24,20 @@ def test_an_mjpg_streamer_style_action_still_routes_to_the_stream(thermal_stream
     assert thermal_streamer.resolve_route("/stream.mjpg?action=stream") == "serve_stream"
 
 
-def test_the_root_path_routes_to_the_stream(thermal_streamer):
-    assert thermal_streamer.resolve_route("/") == "serve_stream"
+def test_the_root_path_routes_to_the_control_page(thermal_streamer):
+    """The endpoint Fluidd links to is the page a person opens, not a bare stream."""
+
+    assert thermal_streamer.resolve_route("/") == "serve_control_page"
+
+
+def test_settings_are_posted_to_their_own_path(thermal_streamer):
+    assert thermal_streamer.POST_ROUTES["/settings"] == "apply_settings"
+
+
+def test_nothing_else_accepts_a_post(thermal_streamer):
+    """A GET route is not a POST route: the stream must not be writable by accident."""
+
+    assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
 
 
 def test_an_unknown_path_has_no_route(thermal_streamer):
@@ -36,3 +48,13 @@ def test_a_path_that_merely_starts_with_a_known_one_has_no_route(thermal_streame
     """Discarding the query must not turn into prefix matching."""
 
     assert thermal_streamer.resolve_route("/snapshot.jpg.bak") is None
+
+
+def test_the_statistics_have_their_own_path(thermal_streamer):
+    assert thermal_streamer.resolve_route("/stats") == "serve_stats"
+
+
+def test_the_statistics_are_read_only(thermal_streamer):
+    """The numbers come out of the camera; nothing on the network may post them back."""
+
+    assert "/stats" not in thermal_streamer.POST_ROUTES

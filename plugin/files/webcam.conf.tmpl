@@ -10,4 +10,10 @@
 service: mjpegstreamer-adaptive
 stream_url: /thermal/stream.mjpg
 snapshot_url: /thermal/snapshot.jpg
-aspect_ratio: 4:3
+aspect_ratio: $THERMAL_CAMERA_ASPECT
+# Left at zero on purpose. Orientation is applied by the plugin itself and changed live from the
+# control page at /thermal/, because a webcam defined by config is read-only in the UI and changing
+# it here needs a reinstall. Setting it in both places would rotate the picture twice.
+rotation: 0
+flip_horizontal: false
+flip_vertical: false
