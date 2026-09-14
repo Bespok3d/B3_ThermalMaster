@@ -24,9 +24,9 @@ cameras. There is nothing to add by hand under Settings.
 ## The control page
 
 Open `/thermal/` on the printer, or follow the plugin's link in the Bespok3d app. It shows the live
-view and lets you change the palette, rotate the image in quarter turns, mirror it, switch the
-temperature readout on or off, and pick Celsius or Fahrenheit. Changes take effect immediately and
-are remembered across restarts.
+view and everything there is to change: palette, rotation in quarter turns, mirroring, the
+temperature readout and its units, emissivity, sensor gain, and a button to recalibrate the sensor.
+Changes take effect immediately and are remembered across restarts.
 
 Rotation is applied here rather than in Fluidd's own camera settings, because a camera defined by a
 config file is read-only there: the panel shows "Managed by your Moonraker configuration" and greys
@@ -55,9 +55,29 @@ plugin to what it cost without a readout.
 `/thermal/stats` serves the same numbers as JSON, along with the frame average and the coldest
 pixel, and the pixel coordinates of both extremes in the orientation you are looking at.
 
-The temperatures are the camera's own uncorrected readings. Emissivity is not applied yet, so a
-shiny surface will read low and a matte one close to true. Good for watching a nozzle warm up or
-finding a cold corner of a bed; not metrology.
+## Camera controls
+
+**Emissivity** is how much of what a surface radiates is its own heat rather than a reflection of
+its surroundings. Matte plastic emits almost all of it, which is why the default is 0.95; bare
+aluminium emits almost none and reads far colder than it is until you say so. It changes the numbers
+only, never the picture, and it is applied to the temperatures reported rather than to the frame,
+which is both correct for the extremes and the only version this processor can afford.
+
+**Gain** picks what the sensor is measuring. High sensitivity covers -20 to 150 C and is the default,
+which is the right range for a bed, an enclosure and a warming nozzle. Wide range covers 0 to 550 C
+at lower sensitivity, which is what you want pointed at a hotend at printing temperature. The
+camera's own automatic mode is not offered because the protocol does not implement it.
+
+**Calibrate now** closes the shutter inside the camera for a moment and re-levels the sensor against
+a known uniform surface. The camera does this by itself about every ninety seconds, so the button is
+for when the picture has visibly drifted and you would rather not wait. It costs one frame.
+
+All three are sent from the thread that owns the camera, between two frames, never from the web
+request that asked for them: a command shares its USB endpoints with the video, so sending one
+mid-frame desynchronises the stream. Pressing the button repeatedly gets you one calibration.
+
+Temperatures remain the camera's own readings with an emissivity correction applied. Good for
+watching a nozzle warm up or finding a cold corner of a bed; not metrology.
 
 ## Notes
 
@@ -80,7 +100,9 @@ finding a cold corner of a bed; not metrology.
 
 Run end to end on a U1 with a P1 attached: the camera tile renders in Fluidd and Mainsail, the
 control page changes palette, orientation and the readout live, and the settings survive a restart.
-The P3 is driven by the same code path and the same protocol but has not been in front of one yet.
+Measured at 41.5% of one of the printer's four Cortex-A53 cores with the readout on, of which about
+half is the numpy pipeline rather than the JPEG encode. The P3 is driven by the same code path and
+the same protocol but has not been in front of one yet.
 
 Worth checking after an install:
 

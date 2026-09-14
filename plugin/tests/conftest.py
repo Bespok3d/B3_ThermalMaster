@@ -46,6 +46,9 @@ def install_stand_in_driver() -> ModuleType:
     driver.P3Camera = fake_camera.StandInCamera
     driver.get_model_config = fake_camera.get_model_config
     driver.raw_to_celsius = fake_camera.raw_to_celsius
+    driver.raw_to_celsius_corrected = fake_camera.raw_to_celsius_corrected
+    driver.EnvParams = fake_camera.EnvParams
+    driver.GainMode = fake_camera.GainMode
     driver.FrameMarkerMismatchError = type("FrameMarkerMismatchError", (Exception,), {})
     sys.modules["p3_camera"] = driver
     return driver

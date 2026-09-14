@@ -11,6 +11,7 @@ here, so a test describes a fault as data rather than by patching.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import ClassVar
 
 import numpy as np
@@ -49,6 +50,39 @@ def raw_to_celsius(raw: np.ndarray) -> np.ndarray:
     return np.asarray(raw, dtype=np.float32) / RAW_UNITS_PER_KELVIN - KELVIN_AT_ZERO_CELSIUS
 
 
+class GainMode(IntEnum):
+    """The driver's own gain modes. AUTO exists in the enum and not in the protocol."""
+
+    LOW = 0
+    HIGH = 1
+    AUTO = 2
+
+
+@dataclass
+class EnvParams:
+    """The driver's environmental parameters, of which only emissivity is exposed so far."""
+
+    emissivity: float = 0.95
+    ambient_temp: float = 25.0
+    reflected_temp: float = 25.0
+    distance: float = 1.0
+    humidity: float = 0.5
+
+
+def raw_to_celsius_corrected(raw, env: EnvParams):
+    """The driver's emissivity correction, reproduced here rather than imported.
+
+    The tests that use it assert the direction and the identity case, never an exact figure, so a
+    number that only this file agrees with cannot pass: a wrong sign or a swapped term fails, and
+    nothing depends on this arithmetic matching the driver digit for digit.
+    """
+
+    apparent_k = np.asarray(raw, dtype=np.float32) / RAW_UNITS_PER_KELVIN
+    reflected_k = env.reflected_temp + KELVIN_AT_ZERO_CELSIUS
+    object_k4 = (apparent_k**4 - (1.0 - env.emissivity) * reflected_k**4) / env.emissivity
+    return np.maximum(object_k4, 0.0) ** 0.25 - KELVIN_AT_ZERO_CELSIUS
+
+
 @dataclass
 class StandInModelConfig:
     model: str
@@ -85,6 +119,11 @@ class StandInCamera:
     frames_read: int = 0
     stop_streaming_calls: int = 0
     disconnect_calls: int = 0
+    # What the device was told to do, in order, so a test can assert both that a command was sent
+    # and that it was sent on the thread that owns the camera rather than from an HTTP handler.
+    gain_modes_set: list = field(default_factory=list)
+    shutter_triggers: int = 0
+    fail_next_shutter: BaseException | None = None
 
     def __post_init__(self) -> None:
         StandInCamera.instances.append(self)
@@ -110,6 +149,15 @@ class StandInCamera:
         if isinstance(scripted, BaseException):
             raise scripted
         return (None, scripted)
+
+    def set_gain_mode(self, mode: GainMode) -> None:
+        self.gain_modes_set.append(mode)
+
+    def trigger_shutter(self, return_partial: bool = False) -> None:
+        if self.fail_next_shutter is not None:
+            failure, self.fail_next_shutter = self.fail_next_shutter, None
+            raise failure
+        self.shutter_triggers += 1
 
     def disconnect(self) -> None:
         self.disconnect_calls += 1

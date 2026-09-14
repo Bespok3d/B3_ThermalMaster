@@ -168,9 +168,47 @@ def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer):
         "flip_vertical": False,
         "overlay": False,
         "units": "celsius",
+        "emissivity": 0.95,
+        "gain": "high",
     }
 
     page = thermal_streamer.render_control_page(state, ["ironbow", "sepia"])
 
     assert '<input type="checkbox" name="flip_horizontal" checked>' in page
     assert '<input type="checkbox" name="flip_vertical">' in page
+
+
+def test_the_control_page_offers_the_camera_controls(thermal_streamer, store):
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert 'name="gain"' in page
+    assert 'name="emissivity"' in page
+    assert 'name="action" value="shutter"' in page
+
+
+def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer):
+    state = dict(
+        palette="ironbow", rotation=0, flip_horizontal=False, flip_vertical=False,
+        overlay=True, units="celsius", emissivity=0.30, gain="high",
+    )
+
+    page = thermal_streamer.render_control_page(state, ["ironbow"], None)
+
+    assert '<option value="0.30"' in page
+    assert '<option value="0.30" selected' in page
+
+
+def test_the_control_page_says_what_the_shutter_last_did(thermal_streamer, store):
+    status = {"gain": "high", "shutter": {"state": "failed", "detail": "device disconnected"}}
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], status)
+
+    assert "device disconnected" in page
+
+
+def test_the_control_page_copes_with_no_device_at_all(thermal_streamer, store):
+    """The page is served whether or not the capture side was wired up."""
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert "not available" in page

@@ -33,11 +33,13 @@ import numpy as np  # noqa: E402
 import usb.core  # noqa: E402
 from p3_camera import (  # noqa: E402
     VID,
+    EnvParams,
     FrameMarkerMismatchError,
+    GainMode,
     Model,
     P3Camera,
     get_model_config,
-    raw_to_celsius,
+    raw_to_celsius_corrected,
 )
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
@@ -106,6 +108,49 @@ CELSIUS = "celsius"
 FAHRENHEIT = "fahrenheit"
 VALID_UNITS = (CELSIUS, FAHRENHEIT)
 DEFAULT_UNITS = CELSIUS
+
+# Gain is a device command; emissivity is arithmetic done here. They sit together on the control
+# page because to a person they are both "how the camera reads", but only one of them travels over
+# USB, and that difference decides which thread each one runs on.
+#
+# The driver's enum has an AUTO alongside these two, and its own comment says the protocol does not
+# implement it: set_gain_mode records the mode and sends nothing. So it is not offered.
+GAIN_HIGH = "high"
+GAIN_LOW = "low"
+VALID_GAINS = (GAIN_HIGH, GAIN_LOW)
+DEFAULT_GAIN = GAIN_HIGH
+GAIN_MODES = {GAIN_HIGH: GainMode.HIGH, GAIN_LOW: GainMode.LOW}
+GAIN_DESCRIPTIONS = {
+    GAIN_HIGH: "High sensitivity, -20 to 150 C",
+    GAIN_LOW: "Wide range, 0 to 550 C",
+}
+
+# Emissivity is how much of what a surface radiates is its own temperature rather than a reflection
+# of the room. A shiny surface reads cold because it is showing you the wall. The correction is
+# applied to the handful of temperatures reported, never to the frame: it is monotonic, so the
+# hottest pixel is the hottest pixel either way, and a full-frame pass is the one thing this
+# processor cannot afford (F-56).
+MIN_EMISSIVITY = 0.05
+MAX_EMISSIVITY = 1.0
+DEFAULT_EMISSIVITY = 0.95
+# Close enough to count as the same preset. The stored value is a float and the page's options are
+# strings, so they are compared by distance rather than by equality.
+EMISSIVITY_MATCH = 0.005
+EMISSIVITY_PRESETS = (
+    (1.00, "1.00 perfect emitter"),
+    (0.95, "0.95 matte plastic, PLA, painted"),
+    (0.90, "0.90 rough surfaces, ceramic"),
+    (0.85, "0.85 glossy plastic, PETG"),
+    (0.60, "0.60 oxidised steel"),
+    (0.30, "0.30 anodised aluminium"),
+    (0.10, "0.10 bare shiny metal"),
+)
+
+SHUTTER_IDLE = "idle"
+SHUTTER_PENDING = "pending"
+SHUTTER_DONE = "done"
+SHUTTER_FAILED = "failed"
+SHUTTER_ACTION = "shutter"
 
 # How many reads in a row may come back empty before the camera counts as stalled rather than slow.
 # At the idle sleep below this is a fifth of a second of nothing, where a healthy camera delivers
@@ -342,12 +387,19 @@ def frame_statistics(
     bounds: tuple[float, float],
     rotation: int,
     mirrors: tuple[bool, bool],
+    emissivity: float = DEFAULT_EMISSIVITY,
 ) -> FrameStats:
     """Read the temperatures out of a frame, and say where the extremes ended up on screen.
 
-    Computed for every frame whether or not the overlay is on. Five passes over a frame this small
-    cost about as much as one row of the colormap, and the alternative is a /stats endpoint that
-    answers about a frame nobody is looking at.
+    Computed for every frame whether or not the overlay is on. Five reductions over a frame this
+    small cost about as much as one row of the colormap, and the alternative is a /stats endpoint
+    that answers about a frame nobody is looking at.
+
+    The emissivity correction is applied to the six numbers this returns rather than to the frame.
+    It is monotonic, so correcting the hottest raw pixel gives the same answer as correcting every
+    pixel and then taking the hottest, for a millionth of the work. The average is the one
+    approximation: the correction is a fourth-power curve, so the corrected mean is not the mean of
+    the corrected pixels. It is close enough to report and not close enough to leave undocumented.
     """
 
     height, width = frame.shape
@@ -355,13 +407,18 @@ def frame_statistics(
     coldest_y, coldest_x = divmod(int(np.argmin(frame)), width)
     hotspot, oriented = orient_point((hottest_x, hottest_y), (width, height), rotation, mirrors)
     coldspot, _ = orient_point((coldest_x, coldest_y), (width, height), rotation, mirrors)
+    environment = EnvParams(emissivity=emissivity)
+
+    def celsius(raw_value: float) -> float:
+        return float(raw_to_celsius_corrected(float(raw_value), environment))
+
     return FrameStats(
-        minimum_celsius=float(raw_to_celsius(float(frame.min()))),
-        maximum_celsius=float(raw_to_celsius(float(frame.max()))),
-        average_celsius=float(raw_to_celsius(float(frame.mean()))),
-        centre_celsius=float(raw_to_celsius(float(frame[height // 2, width // 2]))),
-        range_low_celsius=float(raw_to_celsius(bounds[0])),
-        range_high_celsius=float(raw_to_celsius(bounds[1])),
+        minimum_celsius=celsius(float(frame.min())),
+        maximum_celsius=celsius(float(frame.max())),
+        average_celsius=celsius(float(frame.mean())),
+        centre_celsius=celsius(float(frame[height // 2, width // 2])),
+        range_low_celsius=celsius(bounds[0]),
+        range_high_celsius=celsius(bounds[1]),
         hotspot=hotspot,
         coldspot=coldspot,
         width=oriented[0],
@@ -371,11 +428,17 @@ def frame_statistics(
 
 @dataclasses.dataclass(frozen=True)
 class OverlayStyle:
-    """The sizes the overlay draws at, derived once from the picture it is going onto."""
+    """The geometry the overlay draws to, derived once from the picture it is going onto.
+
+    The colorbar's box is here rather than in the function that draws it, because every other label
+    needs to know where it is in order to stay off it.
+    """
 
     pixel_height: int
     line_height: int
     margin: int
+    bar_box: tuple[int, int, int, int]
+    content_right: int
 
 
 @dataclasses.dataclass(eq=False)
@@ -405,10 +468,16 @@ def overlay_font(pixel_height: int) -> object:
 def overlay_style(size: tuple[int, int]) -> OverlayStyle:
     width, height = size
     pixel_height = max(int(height * OVERLAY_FONT_HEIGHT_FRACTION), OVERLAY_MIN_FONT_PIXELS)
+    margin = max(int(width * OVERLAY_MARGIN_FRACTION), 2)
+    bar_width = max(int(width * COLORBAR_WIDTH_FRACTION), COLORBAR_MIN_WIDTH_PIXELS)
+    bar_height = max(int(height * COLORBAR_HEIGHT_FRACTION), 1)
+    bar_left = width - margin - bar_width
     return OverlayStyle(
         pixel_height=pixel_height,
         line_height=pixel_height + 2,
-        margin=max(int(width * OVERLAY_MARGIN_FRACTION), 2),
+        margin=margin,
+        bar_box=(bar_left, (height - bar_height) // 2, bar_width, bar_height),
+        content_right=bar_left - margin,
     )
 
 
@@ -465,14 +534,31 @@ def draw_label(image, position, text: str, style: OverlayStyle, colour=OVERLAY_T
         offset += glyph_advance(character, style.pixel_height)
 
 
+def marker_label_position(
+    anchor: tuple[int, int], arm: int, text: str, style: OverlayStyle
+) -> tuple[float, int]:
+    """Put a marker's number beside it, on whichever side has room, and never over the colorbar.
+
+    Right of the marker by default, because that reads first. On hardware the hotspot landed in the
+    bottom right corner and its label was clamped back into the picture straight on top of the
+    colorbar's low label, so a marker near the bar now labels itself on its left instead. Clear of
+    the arm rather than just past its tip: a number touching the cross reads as part of it, and the
+    hotspot usually sits on the brightest part of the picture already.
+    """
+
+    anchor_x, top = anchor
+    width = label_width(text, style.pixel_height)
+    right_of = anchor_x + arm + style.margin
+    if right_of + width <= style.content_right:
+        return (right_of, top)
+    return (max(anchor_x - arm - style.margin - width, 0.0), top)
+
+
 def draw_colorbar(image, overlay: Overlay, style: OverlayStyle) -> None:
     """The palette down the right edge, labelled with the range it currently spans."""
 
-    width, height = image.size
-    bar_width = max(int(width * COLORBAR_WIDTH_FRACTION), COLORBAR_MIN_WIDTH_PIXELS)
-    bar_height = max(int(height * COLORBAR_HEIGHT_FRACTION), 1)
-    left = width - style.margin - bar_width
-    top = (height - bar_height) // 2
+    width = image.size[0]
+    left, top, bar_width, bar_height = style.bar_box
     # Reversed, so the hot end of the palette is at the top where a reader expects to find it.
     ramp = overlay.palette[np.arange(PALETTE_STEPS - 1, -1, -1)].reshape(PALETTE_STEPS, 1, 3)
     bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
@@ -500,7 +586,8 @@ def draw_reticle(image, overlay: Overlay, style: OverlayStyle) -> None:
     draw.line((centre_x - arm, centre_y, centre_x + arm, centre_y), fill=RETICLE_RGB)
     draw.line((centre_x, centre_y - arm, centre_x, centre_y + arm), fill=RETICLE_RGB)
     label = format_temperature(overlay.stats.centre_celsius, overlay.units)
-    draw_label(image, (centre_x + arm + 2, centre_y + 2), label, style)
+    draw_label(image, marker_label_position((centre_x, centre_y + 2), arm, label, style),
+               label, style)
 
 
 def draw_hotspot(image, overlay: Overlay, style: OverlayStyle) -> None:
@@ -514,9 +601,8 @@ def draw_hotspot(image, overlay: Overlay, style: OverlayStyle) -> None:
     draw.line((x - arm, y, x + arm, y), fill=HOTSPOT_RGB)
     draw.line((x, y - arm, x, y + arm), fill=HOTSPOT_RGB)
     label = format_temperature(overlay.stats.maximum_celsius, overlay.units)
-    # Clear of the marker's arm, not just past its tip: a number touching the cross reads as part
-    # of it, and the hotspot is usually sitting on the brightest part of the picture already.
-    draw_label(image, (x + arm + style.margin, y - style.line_height), label, style, HOTSPOT_RGB)
+    draw_label(image, marker_label_position((x, y - style.line_height), arm, label, style),
+               label, style, HOTSPOT_RGB)
 
 
 def draw_overlay(image, overlay: Overlay) -> None:
@@ -564,12 +650,26 @@ class RenderSettings:
     flip_vertical: bool = False
     overlay: bool = True
     units: str = DEFAULT_UNITS
+    emissivity: float = DEFAULT_EMISSIVITY
 
     @property
     def mirrors(self) -> tuple[bool, bool]:
         """The two flips as one value, since nothing ever wants only one of them."""
 
         return (self.flip_horizontal, self.flip_vertical)
+
+
+@dataclasses.dataclass(frozen=True)
+class CameraSettings:
+    """What gets sent to the hardware, as opposed to what is done with what comes back.
+
+    Separate from RenderSettings, and with a revision of its own, because these travel over USB and
+    so can only be applied by the thread that owns the camera. Emissivity is deliberately not here:
+    it never reaches the device, it is arithmetic applied to the numbers on the way out, so it
+    belongs with the rendering.
+    """
+
+    gain: str = DEFAULT_GAIN
 
 
 class ThermalRenderer:
@@ -607,7 +707,11 @@ class ThermalRenderer:
         # Measured off the denoised frame rather than the raw one, so the number beside a marker is
         # the temperature of the pixel that was actually drawn there.
         stats = frame_statistics(
-            denoised, self._bounds, self._settings.rotation, self._settings.mirrors
+            denoised,
+            self._bounds,
+            self._settings.rotation,
+            self._settings.mirrors,
+            self._settings.emissivity,
         )
         normalized = normalize_to_bytes(denoised, *self._bounds)
         coloured = self._palette[enhance_detail(normalized, self._settings.detail_strength)]
@@ -707,6 +811,96 @@ class LatestFrame:
             return self._jpeg
 
 
+class DeviceController:
+    """Everything that has to be said to the camera, said on the thread that owns it.
+
+    `trigger_shutter` and `set_gain_mode` are not side channels: they write a control transfer and
+    then read the same bulk endpoint the frame loop reads. Called from an HTTP handler, one of two
+    things happens, and which one is a matter of timing: the command's acknowledgement is consumed
+    as pixels, or a frame is consumed as the acknowledgement. Either desynchronises the stream for
+    as long as the session lasts. So a request from the network only sets a flag here, and the
+    capture thread acts on it between two frames, where nothing else is in flight.
+
+    The gain is a setting and the shutter is an action, and they need different handling.
+
+    A setting is declarative: the store holds what the gain should be, and this compares its
+    revision against the last one applied. That makes it idempotent, so it can be checked every
+    frame for the cost of an integer comparison, and it makes a reconnect self-healing, because a
+    camera that has just been replugged comes up in its own default and `forget_session` is enough
+    to have the user's choice re-sent.
+
+    An action has no such resting state, so it is a flag that is cleared as it is taken. Repeated
+    presses coalesce into one pending shutter rather than queueing: a person clicking three times
+    wants a calibration, not three of them, and each one costs a dropped frame.
+    """
+
+    def __init__(self, settings_store: SettingsStore) -> None:
+        self._settings_store = settings_store
+        self._lock = threading.Lock()
+        self._shutter_requested = False
+        self._shutter_state = SHUTTER_IDLE
+        self._shutter_detail: str | None = None
+        self._applied_gain_revision: int | None = None
+        self._gain_in_effect: str | None = None
+
+    def request_shutter(self) -> None:
+        """Ask for a calibration. Safe from any thread; nothing here touches the camera."""
+
+        with self._lock:
+            self._shutter_requested = True
+            self._shutter_state = SHUTTER_PENDING
+
+    def forget_session(self) -> None:
+        """A camera that has just been opened is in its own default gain, not the chosen one."""
+
+        with self._lock:
+            self._applied_gain_revision = None
+            self._gain_in_effect = None
+
+    def apply(self, camera: P3Camera) -> None:
+        """Called by the capture thread between frames. The only place commands are sent."""
+
+        self._apply_gain(camera)
+        self._apply_shutter(camera)
+
+    def _apply_gain(self, camera: P3Camera) -> None:
+        revision, settings = self._settings_store.camera_snapshot()
+        with self._lock:
+            if revision == self._applied_gain_revision:
+                return
+        camera.set_gain_mode(GAIN_MODES[settings.gain])
+        with self._lock:
+            self._applied_gain_revision = revision
+            self._gain_in_effect = settings.gain
+
+    def _apply_shutter(self, camera: P3Camera) -> None:
+        with self._lock:
+            if not self._shutter_requested:
+                return
+            self._shutter_requested = False
+        try:
+            camera.trigger_shutter()
+        except Exception as error:  # noqa: BLE001 - recorded for the page, then re-raised
+            with self._lock:
+                self._shutter_state = SHUTTER_FAILED
+                self._shutter_detail = str(error)
+            # A control transfer that fails is a camera that has gone away, not a slow frame, so
+            # this belongs on the reconnect path rather than being swallowed into a stuck stream.
+            raise
+        with self._lock:
+            self._shutter_state = SHUTTER_DONE
+            self._shutter_detail = None
+
+    def status(self) -> dict:
+        """What the device is actually doing, as opposed to what it has been asked to do."""
+
+        with self._lock:
+            return {
+                "gain": self._gain_in_effect,
+                "shutter": {"state": self._shutter_state, "detail": self._shutter_detail},
+            }
+
+
 class CameraStalledError(Exception):
     """The camera is still connected but has stopped producing usable frames."""
 
@@ -749,6 +943,7 @@ def stream_frames(
     frame_store: LatestFrame,
     renderer_source: RendererSource,
     shutdown: threading.Event,
+    device: DeviceController | None = None,
 ) -> None:
     """Publish frames until the camera stalls or a shutdown is asked for.
 
@@ -761,6 +956,10 @@ def stream_frames(
 
     consecutive_failures = 0
     while not shutdown.is_set():
+        # Before the read rather than after it, so the first thing a fresh session does is put the
+        # camera into the gain the user chose, ahead of any frame being published from the default.
+        if device is not None:
+            device.apply(camera)
         thermal_raw = next_thermal_frame(camera)
         if thermal_raw is not None:
             consecutive_failures = 0
@@ -789,7 +988,10 @@ def release_camera(camera: P3Camera) -> None:
 
 
 def run_capture_session(
-    frame_store: LatestFrame, renderer_source: RendererSource, shutdown: threading.Event
+    frame_store: LatestFrame,
+    renderer_source: RendererSource,
+    shutdown: threading.Event,
+    device: DeviceController | None = None,
 ) -> None:
     model = detect_camera_model()
     if model is None:
@@ -798,8 +1000,10 @@ def run_capture_session(
     camera.connect()
     camera.init()
     camera.start_streaming()
+    if device is not None:
+        device.forget_session()
     try:
-        stream_frames(camera, frame_store, renderer_source, shutdown)
+        stream_frames(camera, frame_store, renderer_source, shutdown, device)
     finally:
         release_camera(camera)
 
@@ -815,7 +1019,10 @@ def next_reconnect_delay(current_delay: float) -> float:
 
 
 def capture_loop(
-    frame_store: LatestFrame, renderer_source: RendererSource, shutdown: threading.Event
+    frame_store: LatestFrame,
+    renderer_source: RendererSource,
+    shutdown: threading.Event,
+    device: DeviceController | None = None,
 ) -> None:
     """Keep a capture session running: an unplug or a read error reconnects, it never exits."""
 
@@ -823,7 +1030,7 @@ def capture_loop(
     while not shutdown.is_set():
         frames_before_session = frame_store.published_count
         try:
-            run_capture_session(frame_store, renderer_source, shutdown)
+            run_capture_session(frame_store, renderer_source, shutdown, device)
             return
         except Exception as error:  # noqa: BLE001
             print(f"thermal-master: capture error: {error}", file=sys.stderr, flush=True)
@@ -839,6 +1046,20 @@ def resolve_route(request_path: str) -> str | None:
     return ROUTES.get(urlparse(request_path).path)
 
 
+def restored(current, saved: dict):
+    """Rebuild a settings dataclass from a saved file, ignoring keys it does not have.
+
+    One function for both sets, because the file is flat: a key belongs to whichever dataclass
+    declares it, and a key from an older or newer version belongs to neither and is dropped rather
+    than raising on the way to a camera that then never starts.
+    """
+
+    known = {field.name for field in dataclasses.fields(current)}
+    return dataclasses.replace(
+        current, **{key: value for key, value in saved.items() if key in known}
+    )
+
+
 class SettingsStore:
     """The live settings, and the file they survive a restart in.
 
@@ -849,18 +1070,30 @@ class SettingsStore:
     """
 
     def __init__(
-        self, palette_name: str, settings: RenderSettings, state_file: Path | None
+        self,
+        palette_name: str,
+        settings: RenderSettings,
+        state_file: Path | None,
+        camera: CameraSettings = CameraSettings(),
     ) -> None:
         self._palette_name = palette_name
         self._settings = settings
+        self._camera = camera
         self._state_file = state_file
         self._revision = 0
+        self._camera_revision = 0
         self._lock = threading.Lock()
         self._load()
 
     def snapshot(self) -> tuple[int, str, RenderSettings]:
         with self._lock:
             return (self._revision, self._palette_name, self._settings)
+
+    def camera_snapshot(self) -> tuple[int, CameraSettings]:
+        """Counted separately, so changing a palette does not re-send a gain command over USB."""
+
+        with self._lock:
+            return (self._camera_revision, self._camera)
 
     def update(self, palette_name: str, settings: RenderSettings) -> None:
         with self._lock:
@@ -869,9 +1102,20 @@ class SettingsStore:
             self._revision += 1
         self._save()
 
+    def update_camera(self, camera: CameraSettings) -> None:
+        with self._lock:
+            self._camera = camera
+            self._camera_revision += 1
+        self._save()
+
     def as_dict(self) -> dict:
         _, palette_name, settings = self.snapshot()
-        return {"palette": palette_name, **dataclasses.asdict(settings)}
+        _, camera = self.camera_snapshot()
+        return {
+            "palette": palette_name,
+            **dataclasses.asdict(settings),
+            **dataclasses.asdict(camera),
+        }
 
     def _load(self) -> None:
         """Restore what was saved. A missing or unreadable file just means the defaults stand."""
@@ -884,10 +1128,8 @@ class SettingsStore:
             print(f"thermal-master: ignoring unreadable settings: {error}", file=sys.stderr)
             return
         self._palette_name = saved.pop("palette", self._palette_name)
-        known = {field.name for field in dataclasses.fields(RenderSettings)}
-        self._settings = dataclasses.replace(
-            self._settings, **{key: value for key, value in saved.items() if key in known}
-        )
+        self._settings = restored(self._settings, saved)
+        self._camera = restored(self._camera, saved)
 
     def _save(self) -> None:
         if self._state_file is None:
@@ -922,8 +1164,31 @@ def settings_from_form(
             flip_vertical="flip_vertical" in form,
             overlay="overlay" in form,
             units=posted_units if posted_units in VALID_UNITS else current.units,
+            emissivity=posted_emissivity(form, current.emissivity),
         ),
     )
+
+
+def posted_emissivity(form: dict, current: float) -> float:
+    """Read an emissivity, clamped rather than refused.
+
+    The page offers a list, but the settings file is a supported thing to hand-edit, so anything
+    parseable is accepted and pulled into range. Zero would divide by zero in the correction, which
+    is why the floor is not zero.
+    """
+
+    try:
+        posted = float(form.get("emissivity", [""])[0])
+    except ValueError:
+        return current
+    return min(max(posted, MIN_EMISSIVITY), MAX_EMISSIVITY)
+
+
+def camera_settings_from_form(form: dict, current: CameraSettings) -> CameraSettings:
+    """The half of the form that becomes a USB command rather than a rendering choice."""
+
+    gain = form.get("gain", [""])[0]
+    return dataclasses.replace(current, gain=gain if gain in VALID_GAINS else current.gain)
 
 
 CONTROL_PAGE_TEMPLATE = """<!doctype html>
@@ -944,8 +1209,10 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
   label span {{ min-width: 7rem; }}
   select {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
             border: 1px solid #33373f; border-radius: 4px; }}
-  button {{ margin-top: 0.8rem; padding: 0.5rem 1.1rem; border: 0; border-radius: 4px;
-            background: #d8752a; color: #14161a; font-weight: 600; cursor: pointer; }}
+  button {{ margin-top: 0.8rem; margin-right: 0.5rem; padding: 0.5rem 1.1rem; border: 0;
+            border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
+            cursor: pointer; }}
+  .status {{ margin: 0.6rem 0 0; font-size: 0.8rem; }}
   p {{ color: #9aa0aa; font-size: 0.85rem; }}
 </style>
 </head>
@@ -968,7 +1235,16 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><input type="checkbox" name="overlay"{overlay}>
              Show the colorbar, centre reading and hotspot</label>
       <label><span>Units</span><select name="units">{unit_options}</select></label>
+      <label><span>Emissivity</span>
+             <select name="emissivity">{emissivity_options}</select></label>
       <button type="submit">Apply</button>
+    </fieldset>
+    <fieldset>
+      <legend>Camera</legend>
+      <label><span>Gain</span><select name="gain">{gain_options}</select></label>
+      <button type="submit">Apply</button>
+      <button type="submit" name="action" value="shutter">Calibrate now</button>
+      <p class="status">{device_status}</p>
     </fieldset>
   </form>
   <p>Changes take effect immediately and survive a restart. The picture takes about a second to
@@ -976,21 +1252,57 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
   <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Turning it
      on encodes at a larger size, so the text stays legible. The same numbers, plus the frame
      average and the coldest pixel, are at <a href="/thermal/stats">/thermal/stats</a>.</p>
-  <p>Temperatures are the camera's own uncorrected readings. They track a scene well and are not
-     metrology: emissivity is not applied yet.</p>
+  <p>Emissivity is how much of what a surface radiates is its own heat rather than a reflection of
+     the room, so a shiny surface reads cold until you tell the plugin it is shiny. It changes the
+     numbers only, never the picture.</p>
+  <p>Calibration closes the camera's internal shutter for a moment and re-levels the sensor against
+     it. The camera does this by itself about every ninety seconds; the button is for when the
+     picture has drifted and you would rather not wait. It costs one frame.</p>
 </main>
 </body>
 </html>
 """
 
 
-def render_control_page(settings: dict, palette_names: list) -> str:
+def describe_device(status: dict | None) -> str:
+    """One line on what the camera is doing, since the page has no JavaScript to ask again.
+
+    The form posts and redirects, so the reload after a press is the report: by the time the page
+    comes back the capture thread has been round the loop and the shutter has either fired or said
+    why it could not.
+    """
+
+    if status is None:
+        return "Camera state is not available."
+    shutter = status.get("shutter", {})
+    detail = shutter.get("detail")
+    said = {
+        SHUTTER_IDLE: "Calibration has not been asked for since this service started.",
+        SHUTTER_PENDING: "Calibration requested, waiting for the next frame.",
+        SHUTTER_DONE: "Last calibration completed.",
+        SHUTTER_FAILED: f"Last calibration failed: {detail}",
+    }
+    return said.get(shutter.get("state"), "Camera state is not available.")
+
+
+def render_control_page(
+    settings: dict, palette_names: list, device_status: dict | None = None
+) -> str:
     """The page itself. Plain form, no JavaScript: it has to work in whatever opens it."""
 
     def option(value: str, label: str, selected: bool) -> str:
         return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
 
     return CONTROL_PAGE_TEMPLATE.format(
+        emissivity_options="".join(
+            option(f"{value:.2f}", label, abs(value - settings["emissivity"]) < EMISSIVITY_MATCH)
+            for value, label in EMISSIVITY_PRESETS
+        ),
+        gain_options="".join(
+            option(name, GAIN_DESCRIPTIONS[name], name == settings["gain"])
+            for name in VALID_GAINS
+        ),
+        device_status=describe_device(device_status),
         palette_options="".join(
             option(name, name.replace("-", " "), name == settings["palette"])
             for name in palette_names
@@ -1039,11 +1351,13 @@ class ThermalServer(ThreadingHTTPServer):
         frame_store: LatestFrame,
         settings_store: SettingsStore | None = None,
         palettes: dict | None = None,
+        device: DeviceController | None = None,
     ) -> None:
         super().__init__(address, ThermalRequestHandler)
         self.frame_store = frame_store
         self.settings_store = settings_store
         self.palettes = palettes if palettes is not None else build_palettes()
+        self.device = device
 
 
 class ThermalRequestHandler(BaseHTTPRequestHandler):
@@ -1058,6 +1372,10 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
     @property
     def palettes(self) -> dict:
         return self.server.palettes  # type: ignore[attr-defined]
+
+    @property
+    def device(self):
+        return self.server.device  # type: ignore[attr-defined]
 
     def do_GET(self) -> None:
         route = resolve_route(self.path)
@@ -1084,7 +1402,10 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         if self.settings_store is not None:
             _, _, settings = self.settings_store.snapshot()
             units = settings.units
-        self.send_json(stats.as_dict(units))
+        payload = stats.as_dict(units)
+        if self.device is not None:
+            payload["device"] = self.device.status()
+        self.send_json(payload)
 
     def serve_settings(self) -> None:
         if self.settings_store is None:
@@ -1100,10 +1421,16 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0"))
         form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
-        _, _, current = self.settings_store.snapshot()
+        _, current_palette, current = self.settings_store.snapshot()
         palette_name, settings = settings_from_form(form, self.palettes, current)
-        _, current_palette, _ = self.settings_store.snapshot()
         self.settings_store.update(palette_name or current_palette, settings)
+        _, current_camera = self.settings_store.camera_snapshot()
+        camera = camera_settings_from_form(form, current_camera)
+        if camera != current_camera:
+            self.settings_store.update_camera(camera)
+        # A button, not a setting: the capture thread picks this up between two frames.
+        if self.device is not None and SHUTTER_ACTION in form.get("action", []):
+            self.device.request_shutter()
         self.send_response(303)
         self.send_header("Location", "/")
         self.send_header("Content-Length", "0")
@@ -1113,7 +1440,10 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         if self.settings_store is None:
             self.serve_stream()
             return
-        page = render_control_page(self.settings_store.as_dict(), sorted(self.palettes)).encode()
+        status = self.device.status() if self.device is not None else None
+        page = render_control_page(
+            self.settings_store.as_dict(), sorted(self.palettes), status
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(page)))
@@ -1183,6 +1513,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flip-vertical", action="store_true")
     parser.add_argument("--no-overlay", action="store_true")
     parser.add_argument("--units", default=DEFAULT_UNITS, choices=VALID_UNITS)
+    parser.add_argument("--gain", default=DEFAULT_GAIN, choices=VALID_GAINS)
+    parser.add_argument("--emissivity", type=float, default=DEFAULT_EMISSIVITY)
     parser.add_argument("--settings-file", default=None)
     return parser.parse_args()
 
@@ -1219,17 +1551,22 @@ def main() -> None:
             flip_vertical=options.flip_vertical,
             overlay=not options.no_overlay,
             units=options.units,
+            emissivity=options.emissivity,
         ),
         Path(options.settings_file) if options.settings_file else None,
+        CameraSettings(gain=options.gain),
     )
     renderer_source = RendererSource(settings_store, palettes)
     frame_store = LatestFrame()
     shutdown = threading.Event()
+    device = DeviceController(settings_store)
     worker = threading.Thread(
-        target=capture_loop, args=(frame_store, renderer_source, shutdown), daemon=True
+        target=capture_loop, args=(frame_store, renderer_source, shutdown, device), daemon=True
     )
     worker.start()
-    server = ThermalServer((options.bind, options.port), frame_store, settings_store, palettes)
+    server = ThermalServer(
+        (options.bind, options.port), frame_store, settings_store, palettes, device
+    )
     install_shutdown_handlers(shutdown, server)
     listening_on = f"thermal-master: serving http://{options.bind}:{options.port}/stream.mjpg"
     print(listening_on, file=sys.stderr, flush=True)

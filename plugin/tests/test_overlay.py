@@ -85,7 +85,7 @@ def test_statistics_report_the_temperatures_in_the_frame(thermal_streamer, flat_
     frame[10, 20] = raw_for(80.0)
     frame[100, 30] = raw_for(5.0)
 
-    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False))
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
 
     assert stats.maximum_celsius == pytest.approx(80.0, abs=0.05)
     assert stats.minimum_celsius == pytest.approx(5.0, abs=0.05)
@@ -98,7 +98,7 @@ def test_statistics_report_the_centre_pixel(thermal_streamer, flat_frame):
     frame = flat_frame.copy()
     frame[P1_SENSOR_HEIGHT // 2, P1_SENSOR_WIDTH // 2] = raw_for(55.0)
 
-    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False))
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
 
     assert stats.centre_celsius == pytest.approx(55.0, abs=0.05)
 
@@ -111,7 +111,7 @@ def test_the_colorbar_ends_are_the_display_bounds_not_the_scene_extremes(thermal
     frame[0, 0] = raw_for(200.0)
     bounds = (float(raw_for(20.0)), float(raw_for(40.0)))
 
-    stats = thermal_streamer.frame_statistics(frame, bounds, 0, (False, False))
+    stats = thermal_streamer.frame_statistics(frame, bounds, 0, (False, False), 1.0)
 
     assert stats.range_low_celsius == pytest.approx(20.0, abs=0.05)
     assert stats.range_high_celsius == pytest.approx(40.0, abs=0.05)
@@ -119,7 +119,7 @@ def test_the_colorbar_ends_are_the_display_bounds_not_the_scene_extremes(thermal
 
 
 def test_the_stats_payload_converts_every_temperature_it_carries(thermal_streamer, flat_frame):
-    stats = thermal_streamer.frame_statistics(flat_frame, (0.0, 1.0), 0, (False, False))
+    stats = thermal_streamer.frame_statistics(flat_frame, (0.0, 1.0), 0, (False, False), 1.0)
 
     payload = stats.as_dict("fahrenheit")
 
@@ -132,7 +132,7 @@ def test_the_stats_payload_carries_marker_pixels_a_client_can_place(thermal_stre
     frame = flat_frame.copy()
     frame[7, 9] = raw_for(70.0)
 
-    payload = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False)).as_dict(
+    payload = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0).as_dict(
         "celsius"
     )
 
@@ -174,7 +174,9 @@ def test_a_frame_with_the_overlay_is_still_a_jpeg(thermal_streamer, palettes):
 
 def test_a_rendered_frame_carries_the_statistics_of_the_frame_it_encoded(thermal_streamer,
                                                                         palettes):
-    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"])
+    renderer = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], thermal_streamer.RenderSettings(emissivity=1.0)
+    )
 
     rendered = renderer.render_frame(thermal_frame(celsius_low=24.0, celsius_high=40.0))
 
@@ -272,3 +274,40 @@ def test_a_label_is_as_wide_as_the_font_says_its_string_is(thermal_streamer):
     assert thermal_streamer.label_width("213.7C", 14) == pytest.approx(
         font.getlength("213.7C"), abs=1.0
     )
+
+
+def test_a_marker_near_the_colorbar_labels_itself_on_its_other_side(thermal_streamer):
+    """The hardware defect this fixes: a corner hotspot's label landed on the colorbar's own."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((225, 300), 7, "31.3C", style)
+
+    assert left < 225
+    assert left + thermal_streamer.label_width("31.3C", style.pixel_height) <= style.content_right
+
+
+def test_a_marker_with_room_labels_itself_on_the_right(thermal_streamer):
+    style = thermal_streamer.overlay_style((320, 240))
+
+    left, _ = thermal_streamer.marker_label_position((60, 100), 9, "31.3C", style)
+
+    assert left > 60
+
+
+def test_a_marker_label_never_starts_off_the_left_edge(thermal_streamer):
+    """A cramped picture must not push a flipped label to a negative position."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((4, 10), 7, "31.3C", style)
+
+    assert left >= 0
+
+
+def test_the_colorbar_box_leaves_room_for_content_beside_it(thermal_streamer):
+    style = thermal_streamer.overlay_style((320, 240))
+    bar_left, _, bar_width, _ = style.bar_box
+
+    assert style.content_right < bar_left
+    assert bar_left + bar_width <= 320

@@ -519,6 +519,46 @@ Healthy baseline for comparison, taken 2026-09-14 with 0.4.1, both Safari and Ch
 fifteen frames a second each: a snapshot in 15 ms, 768 sockets against port 8082, 6 threads. The
 decay was not reproducible at that moment, so the investigation waits for it to happen again.
 
+**F-56. The numpy pipeline, not the JPEG encode, is what this plugin spends its time on.** Open, and
+it invalidates the assumption the last three rounds of tuning were built on.
+
+Profiled on the printer with `scripts/profile-frame-cost.py`, P1 frame rotated 270, four cumulative
+stages:
+
+| stage | cost | delta |
+| --- | --- | --- |
+| pipeline and statistics | 8.20 ms | |
+| plus the 1x encode | 9.79 ms | +1.59 ms |
+| plus the 2x encode instead | 13.31 ms | +3.51 ms |
+| plus the readout drawn on it | 16.62 ms | +3.31 ms |
+
+The pipeline is half the frame and the 1x encode is a tenth of it. Every earlier estimate had that
+the other way round, because on a development machine the same pipeline is 0.36 ms and the printer's
+is 8.20: **twenty-three times slower, while the encode is only about twenty times slower**, so it is
+not a flat scaling factor and the ratios cannot be carried across. That is the mechanism behind all
+three bad forecasts, and it also explains why removing the 4x upscale in 0.5.2 returned a third
+rather than the three quarters predicted: the upscale was never four fifths of the work on hardware,
+it was four fifths of the work on a laptop.
+
+Where the pipeline time plausibly goes, in order of suspicion, none of it measured yet:
+
+- `frame_bounds` calls `np.percentile` twice, and each call sorts or partitions all 19,200 pixels.
+  One call asking for both percentiles would halve it, and taking them from a 2x2 subsample would
+  quarter that again, at no cost to a display range that is smoothed over a second anyway.
+- `enhance_detail` and `blur_3x3` make about six full-frame passes in float32, on data that arrived
+  as uint8.
+- `reduce_temporal_noise` casts to float32 and back for what is, at the default weight, an average
+  of two integers.
+
+The readout is the other half of the story: 6.82 ms of the 16.62, split about evenly between the
+doubled encode and the drawing. The drawing is 3.31 ms on the printer against 0.19 ms on a
+development machine, so pasting glyph tiles with an alpha mask is far more expensive there than the
+glyph cache measurements suggested. Worth revisiting whether the tiles can be pasted without a mask,
+or composited once into a strip.
+
+Sequencing: fix the pipeline first. It is the largest single stage, it is paid whether or not the
+readout is on, and unlike the readout it has no toggle.
+
 Reducing the connection churn is worth doing regardless, and there is a constraint worth recording
 before anyone plans it: `keepalive` is only valid inside an nginx `upstream` block, which belongs to
 the `http` context, and a `web-location` file is included inside a `server` block. So the nginx half
@@ -991,12 +1031,30 @@ Statistics are computed for every frame whether or not the overlay is on, so `/s
 answers about the frame a client is looking at. Five passes over a frame this small measured inside
 the noise floor.
 
-Cost, predicted and to be confirmed. On a development machine 0.6.0-equivalent is 1.35 ms a frame
-and the readout takes it to 2.63 ms, essentially all of it the doubled encode. Extrapolating from
-the *hardware* numbers instead, since development-machine ratios have already been wrong here by a
-factor of two: the printer went from 43% of a core at 1x to 64.5% at 4x, so an encode is worth
-about 1.4 points per frame-size and 2x should cost roughly four points, landing near 47%. That
-prediction is on the record so it can be checked rather than assumed.
+Cost, predicted and then measured, and the prediction was wrong again. I forecast 47% of a core,
+reasoning from the printer's own 43% at 1x and 64.5% at 4x: 21.5 points for fifteen extra
+frame-sizes of encoding is about 1.4 points each, so doubling should cost four. Hardware said
+**57%**, so the readout cost 14 points, three and a half times the forecast.
+
+That is the third extrapolation in this project to miss, and the second to miss by more than a
+factor of two, so the conclusion is no longer about this particular number. The model that keeps
+failing is *cost is linear in pixels with no fixed term*, and it fails in both directions: it
+overestimated what removing the 4x upscale would save (predicted three quarters, got a third) and
+underestimated what adding a 2x one would cost. Something in the encode path scales with neither
+the pixel count nor the stage ratios of any development machine available here.
+
+The response is a tool rather than another estimate. `scripts/profile-frame-cost.py` times the
+pipeline, the 1x encode, the 2x encode and the readout as four cumulative stages, runs under the
+plugin's own venv against the installed streamer, and never opens the camera, so it is safe beside
+a live service. From here the rule for this repo is that a performance claim about the printer
+comes from that script run on the printer, and a number from anywhere else is labelled as such.
+
+Confirmed on hardware, 2026-09-14: the readout renders in the Fluidd tile at 16 fps with the
+colorbar, centre crosshair and hotspot marker all correct, `/thermal/stats` agrees with the
+picture, and rotation is right. One defect showed up that no synthetic scene had produced: with the
+hotspot in the bottom right corner, its label was clamped back inside the frame directly on top of
+the colorbar's low label. Fixed in 0.7.1 by giving the colorbar's box to the shared style and
+labelling a crowded marker on its left instead, with tests for both sides and for the left edge.
 
 Not done, deliberately. No coldspot marker and no average burned in: both are in `/stats`, and at
 this size a fourth and fifth label is clutter rather than information. No ROI, which needs a pointer
@@ -1004,8 +1062,50 @@ and therefore Phase 7.
 
 ### Phase 6: device controls
 
-Shutter/NUC, gain mode and emissivity through a command queue drained by the capture thread (F-18), with
-the concurrency rule written into the plugin doc.
+Shipped in 0.8.0. Shutter, gain and emissivity, with the concurrency rule written into the plugin
+doc and pinned by tests.
+
+The plan said "a command queue drained by the capture thread" for all three. Reading the driver
+first split that into three different problems, and only one of them turned out to need a queue.
+
+**Emissivity never reaches the camera.** `raw_to_celsius_corrected` is a pure function of a raw
+value and an `EnvParams`, so emissivity is arithmetic done here, on the way out. That makes it a
+rendering setting rather than a device one, and it needs no thread discipline at all. It is applied
+to the six temperatures `FrameStats` reports rather than to the frame, because the correction is
+monotonic: correcting the hottest raw pixel gives the same answer as correcting all 19,200 and then
+taking the hottest, and after F-56 a full-frame float pass is the one thing this processor cannot
+be asked for. The average is the single approximation, since a fourth-power curve does not commute
+with a mean, and it is documented in the function rather than quietly shipped.
+
+**Gain is a setting, not a command.** Modelling it as a queued action would have been wrong in a way
+that only shows up on a replug: a camera that has just been opened is in its own default, and a
+queue that has already delivered its message has nothing left to re-send. So `CameraSettings` holds
+what the gain should be, with a revision of its own, and `DeviceController` compares that revision
+against the last one it applied. Idempotent, so it can be checked every frame for an integer
+comparison, and self-healing across a reconnect through `forget_session`. The separate revision is
+why changing a palette does not put a control transfer on the USB bus.
+
+**Only the shutter is genuinely an action**, and it coalesces rather than queues: three presses want
+a calibration, not three of them, and each one costs a frame. A failure is recorded for the page and
+then re-raised, because a control transfer that fails is a camera that has gone rather than a frame
+that was slow, and that belongs on the reconnect path.
+
+F-18 is closed by all of the above. The rule it was about is unchanged and now has tests that fail
+if it is broken: `trigger_shutter` and `set_gain_mode` write a control transfer and then read the
+same bulk endpoint the frame loop reads, so from an HTTP handler either the acknowledgement is
+consumed as pixels or a frame is consumed as the acknowledgement, and the stream is desynchronised
+for the rest of the session. The fake camera records what it was told, so a command sent from the
+wrong thread fails in the suite rather than on hardware, where it presents as a camera that has
+started returning nonsense.
+
+`GainMode.AUTO` is not offered. The driver's own comment says the protocol does not implement it:
+`set_gain_mode` records the mode and sends nothing, which would be a control that silently does
+nothing.
+
+Two user-visible consequences worth stating plainly. The default emissivity is 0.95 rather than 1.0,
+so readings are slightly higher than 0.7.x, which applied no correction at all. And the shutter
+button works with no JavaScript, because the form posts and redirects and the reload is the report:
+by the time the page comes back the capture thread has been round the loop.
 
 Exit: each control is exercised on hardware and the stream survives all of them.
 

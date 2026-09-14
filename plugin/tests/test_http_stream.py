@@ -237,3 +237,62 @@ def test_the_statistics_endpoint_serves_what_the_last_frame_measured(thermal_str
     assert payload["maximum"] == 60.0
     assert payload["hotspot"] == {"x": 12, "y": 34}
     connection.close()
+
+
+def posting(connection, body: str) -> int:
+    connection.request(
+        "POST", "/settings", body,
+        {"Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(body))},
+    )
+    response = connection.getresponse()
+    response.read()
+    return response.status
+
+
+def test_pressing_calibrate_queues_a_shutter_without_touching_the_camera(thermal_streamer):
+    """The request arrives on a handler thread, and no command may be sent from there."""
+
+    import fake_camera
+
+    frame_store = thermal_streamer.LatestFrame()
+    frame_store.publish(FAKE_JPEG)
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    device = thermal_streamer.DeviceController(store)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), frame_store, store, thermal_streamer.build_palettes(), device
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    camera = fake_camera.StandInCamera()
+    connection = connect_to(server)
+    try:
+        status = posting(connection, "action=shutter&palette=ironbow&rotation=0")
+
+        assert status == 303
+        assert device.status()["shutter"]["state"] == "pending"
+        assert camera.shutter_triggers == 0
+        device.apply(camera)
+        assert camera.shutter_triggers == 1
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_posting_a_gain_records_it_without_sending_it(thermal_streamer):
+    frame_store = thermal_streamer.LatestFrame()
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    device = thermal_streamer.DeviceController(store)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), frame_store, store, thermal_streamer.build_palettes(), device
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+    try:
+        assert posting(connection, "gain=low&palette=ironbow&rotation=0") == 303
+
+        assert store.camera_snapshot()[1].gain == "low"
+        assert device.status()["gain"] is None
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()

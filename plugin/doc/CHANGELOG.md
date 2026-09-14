@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.8.0
+
+Camera controls, from the same page.
+
+- **Gain.** High sensitivity, which covers -20 to 150 C, or wide range, which covers 0 to 550 C at
+  lower sensitivity. High is the default. The choice is re-sent automatically if the camera is
+  unplugged and replugged, since a camera that has just been opened is in its own default.
+- **Calibrate now.** Closes the camera's internal shutter for a moment and re-levels the sensor
+  against it. The camera does this by itself about every ninety seconds; the button is for when the
+  picture has drifted and you would rather not wait. It costs one frame.
+- **Emissivity.** How much of what a surface radiates is its own heat rather than a reflection of
+  the room. A shiny surface reads cold until you tell the plugin it is shiny. Presets from 1.00
+  down to 0.10, and any value in between if you edit the settings file.
+
+Note that the default emissivity is 0.95, which suits matte plastic, so readings are slightly
+higher than in 0.7.x where no correction was applied at all. Set it to 1.00 for the old numbers.
+
+Emissivity changes the numbers only, never the picture. Gain does change the picture, because it
+changes what the sensor is measuring.
+
+## 0.7.1
+
+- A marker sitting near the right edge no longer labels itself on top of the colorbar's own label.
+  Its number goes on its left instead. Seen on hardware with the hotspot in the bottom corner.
+
 ## 0.7.0
 
 A temperature readout, drawn into the picture.
