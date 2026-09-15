@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0
+
+- The coldest pixel is now marked too, in blue, with its own tick on the ruler. A cold corner of a
+  bed is as much a fault as a hot nozzle.
+- Every part of the readout is its own switch: the ruler, the centre crosshair, the hottest pixel
+  and the coldest pixel, in any combination.
+- Labels no longer write over each other. With three markers, two of them landing close together is
+  the normal case rather than the unlucky one, so each label now takes the first position that is
+  clear of the ones already drawn.
+- The ruler ticks whichever extremes you are marking, so the two always agree.
+
+Settings files from earlier versions are carried through both renames, so whatever you had switched
+off stays off.
+
 ## 0.9.0
 
 - The temperature ruler and the on-image readings are now separate switches. One switch could not

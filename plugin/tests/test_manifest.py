@@ -97,3 +97,44 @@ def test_every_select_option_list_contains_its_default():
         if entry.get("type") != "select":
             continue
         assert entry["default"] in entry["options"], entry["key"]
+
+
+def test_the_package_facade_exports_everything_public():
+    """The facade is how the tests and anything else see the plugin as one namespace.
+
+    It is also the one thing in the split that goes stale silently: a name added to a module is
+    simply missing from the package, and the first sign is an AttributeError in whatever reaches
+    for it next. This compares the two rather than trusting anyone to remember.
+    """
+
+    import ast
+    from pathlib import Path
+
+    package = Path(__file__).resolve().parent.parent / "files" / "lib" / "thermal_master"
+    exported = {
+        alias.name
+        for node in ast.parse((package / "__init__.py").read_text()).body
+        if isinstance(node, ast.ImportFrom) and node.level > 0
+        for alias in node.names
+    }
+
+    defined = set()
+    for source in sorted(package.glob("*.py")):
+        if source.name == "__init__.py":
+            continue
+        for node in ast.parse(source.read_text()).body:
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                defined.add(node.name)
+            elif isinstance(node, ast.Assign):
+                defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+
+    assert not {name for name in defined if not name.startswith("_")} - exported
+
+
+def test_the_facade_declares_everything_it_imports():
+    """__all__ and the imports have to agree, or `from thermal_master import *` lies."""
+
+    import thermal_master
+
+    for name in thermal_master.__all__:
+        assert hasattr(thermal_master, name), name

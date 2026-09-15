@@ -181,10 +181,12 @@ def test_upscaling_is_still_available_and_changes_the_image_size(thermal_streame
     settings = thermal_streamer.RenderSettings
     # Overlay off on both, because it raises the encode size itself: see test_overlay.
     native = thermal_streamer.ThermalRenderer(
-        palettes["ironbow"], settings(upscale=1, colorbar=False, markers=False)
+        palettes["ironbow"],
+        settings(upscale=1, colorbar=False, reticle=False, hotspot=False, coldspot=False),
     )
     doubled = thermal_streamer.ThermalRenderer(
-        palettes["ironbow"], settings(upscale=2, colorbar=False, markers=False)
+        palettes["ironbow"],
+        settings(upscale=2, colorbar=False, reticle=False, hotspot=False, coldspot=False),
     )
 
     native_size = Image.open(io.BytesIO(native.render_jpeg(frame))).size

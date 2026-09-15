@@ -40,11 +40,10 @@ other way round.
 
 ## The temperature readout
 
-Two switches, both on by default. The ruler is one, the readings on the picture are the other, and
-they can be used in any combination. With both off the plugin costs exactly what it did before there
-was a readout at all.
+Four switches, all on by default, usable in any combination. With all of them off the plugin costs
+exactly what it did before there was a readout at all.
 
-It draws three things into the picture itself:
+It draws four things into the picture itself:
 
 - A colorbar down the right edge, labelled with the temperatures at each end of the palette, and
   marked in red with where the hottest pixel falls.
@@ -56,7 +55,12 @@ It draws three things into the picture itself:
   the scale and is being drawn in the brightest colour the palette has. When that happens the red
   mark becomes a triangle at the end of the bar.
 - A crosshair in the middle, with the temperature under it.
-- A marker on the hottest pixel in view, with its temperature.
+- A red marker on the hottest pixel in view, with its temperature.
+- A blue marker on the coldest pixel, with its temperature.
+
+Where two markers land close together, the second one moves its number rather than writing over the
+first. The ruler ticks whichever extremes are switched on, so what the bar says and what the markers
+say never disagree.
 
 Into the picture rather than onto this page, because the camera tile in Fluidd and Mainsail is a
 plain image and there is nowhere else to put them. The cost is that switching the readout on doubles

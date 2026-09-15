@@ -1211,6 +1211,35 @@ The migration is narrower than "if overlay is present, use it": it applies only 
 is there. A file written by this version carries both and may still carry the old key beside them,
 and in that case the old key is a leftover that must not win. Three tests, one per case.
 
+### Phase 6c: the coldest pixel, and a switch per surface
+
+Shipped in 0.10.0, asked for after 0.9.0 landed: a coldspot marker, and each part of the readout
+switchable on its own.
+
+The interesting part was not the coldspot. Adding a third marker turned an occasional cosmetic flaw
+into the normal case: with the centre crosshair, the hottest pixel and the coldest pixel all drawn,
+two of them landing near each other is ordinary, and the rendered output showed "21.2" and "70.9"
+written across each other the first time the hotspot passed near the middle. Labels now take the
+first position that is inside the picture and clear of the ones already drawn, trying beside the
+marker first, then below, then above. A lone marker is unaffected, which has its own test, and a
+label with nowhere clear to go is still drawn, because the cross already says where and a tight
+number beats no number.
+
+That also collapsed three drawing functions into one. The reticle, the hotspot and the coldspot
+differ in which pixel, which temperature, which colour and how long the arms are, and in nothing
+else. They were three copies of a placement rule that had already changed twice and was about to
+change a third time.
+
+The ruler ticks only the extremes being marked, so switching a marker off takes its tick with it and
+the bar cannot contradict the picture.
+
+Two pieces of housekeeping came out of it. The settings migration is now a list of splits applied in
+order, `overlay` into `colorbar` and `markers`, then `markers` into the three marker switches, so a
+file old enough to need both gets both. And the package facade had gone stale: names added to a
+module after the split were simply missing from `__init__.py`, with an AttributeError in whatever
+reached for them as the only sign. There is now a test comparing what the modules define against
+what the facade exports, which is the sort of thing that should never rely on anyone remembering.
+
 ### Phase 7: the embedded page
 
 The WebSocket temperature channel and the client-side features: readout, ROI, hotspots, zoom, reticle,

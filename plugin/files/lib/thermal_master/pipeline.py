@@ -164,7 +164,9 @@ class RenderSettings:
     # of the width; the markers are numbers drawn over the picture itself. Wanting either
     # without the other is reasonable, and one switch could not express it.
     colorbar: bool = True
-    markers: bool = True
+    reticle: bool = True
+    hotspot: bool = True
+    coldspot: bool = True
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
 
@@ -177,7 +179,7 @@ class RenderSettings:
         was a readout.
         """
 
-        return self.colorbar or self.markers
+        return self.colorbar or self.reticle or self.hotspot or self.coldspot
 
     @property
     def mirrors(self) -> tuple[bool, bool]:
@@ -243,7 +245,15 @@ class ThermalRenderer:
         image, stats = self.render_image(thermal_raw)
         settings = self._settings
         overlay = (
-            Overlay(self._palette, stats, settings.units, settings.colorbar, settings.markers)
+            Overlay(
+                self._palette,
+                stats,
+                settings.units,
+                settings.colorbar,
+                settings.reticle,
+                settings.hotspot,
+                settings.coldspot,
+            )
             if settings.readout
             else None
         )

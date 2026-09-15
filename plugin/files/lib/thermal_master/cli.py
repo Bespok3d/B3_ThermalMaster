@@ -36,7 +36,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flip-horizontal", action="store_true")
     parser.add_argument("--flip-vertical", action="store_true")
     parser.add_argument("--no-colorbar", action="store_true")
-    parser.add_argument("--no-markers", action="store_true")
+    parser.add_argument("--no-reticle", action="store_true")
+    parser.add_argument("--no-hotspot", action="store_true")
+    parser.add_argument("--no-coldspot", action="store_true")
     # Kept as the one switch it used to be, so an older service definition still means something.
     parser.add_argument("--no-overlay", action="store_true")
     parser.add_argument("--units", default=DEFAULT_UNITS, choices=VALID_UNITS)
@@ -77,7 +79,9 @@ def main() -> None:
             flip_horizontal=options.flip_horizontal,
             flip_vertical=options.flip_vertical,
             colorbar=not (options.no_colorbar or options.no_overlay),
-            markers=not (options.no_markers or options.no_overlay),
+            reticle=not (options.no_reticle or options.no_overlay),
+            hotspot=not (options.no_hotspot or options.no_overlay),
+            coldspot=not (options.no_coldspot or options.no_overlay),
             units=options.units,
             emissivity=options.emissivity,
         ),

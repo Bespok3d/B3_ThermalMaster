@@ -72,8 +72,12 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <legend>Readout</legend>
       <label><input type="checkbox" name="colorbar"{colorbar}>
              Temperature ruler down the edge</label>
-      <label><input type="checkbox" name="markers"{markers}>
-             Centre reading and hotspot marker</label>
+      <label><input type="checkbox" name="reticle"{reticle}>
+             Centre crosshair and its reading</label>
+      <label><input type="checkbox" name="hotspot"{hotspot}>
+             Hottest pixel</label>
+      <label><input type="checkbox" name="coldspot"{coldspot}>
+             Coldest pixel</label>
       <label><span>Units</span><select name="units">{unit_options}</select></label>
       <label><span>Emissivity</span>
              <select name="emissivity">{emissivity_options}</select></label>
@@ -89,9 +93,10 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
   </form>
   <p>Changes take effect immediately and survive a restart. The picture takes about a second to
      settle afterwards, while the auto-ranging finds the scene again.</p>
-  <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Turning
-     either part on encodes at a larger size, so the text stays legible; turning both off costs
-     nothing at all. The same numbers, plus the frame
+  <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Anything
+     switched on here encodes at a larger size, so the text stays legible; switching all of it off
+     costs nothing at all. The ruler also ticks whichever extremes you are marking, so the two
+     always agree. The same numbers, plus the frame
      average and the coldest pixel, are at <a href="stats">stats</a>.</p>
   <p>Emissivity is how much of what a surface radiates is its own heat rather than a reflection of
      the room, so a shiny surface reads cold until you tell the plugin it is shiny. It changes the
@@ -226,5 +231,7 @@ def render_control_page(
         flip_horizontal=" checked" if settings["flip_horizontal"] else "",
         flip_vertical=" checked" if settings["flip_vertical"] else "",
         colorbar=" checked" if settings["colorbar"] else "",
-        markers=" checked" if settings["markers"] else "",
+        reticle=" checked" if settings["reticle"] else "",
+        hotspot=" checked" if settings["hotspot"] else "",
+        coldspot=" checked" if settings["coldspot"] else "",
     )

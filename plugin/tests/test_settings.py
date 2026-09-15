@@ -157,7 +157,7 @@ def test_the_control_page_shows_the_current_state(thermal_streamer, store):
     assert '<option value="ironbow" selected>' in page
     assert '<option value="0" selected>' in page
     assert '<option value="celsius" selected>' in page
-    assert page.count("checked") == 2  # the ruler and the markers, both on by default
+    assert page.count("checked") == 4  # the ruler and the three markers, all on by default
 
 
 def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer):
@@ -167,7 +167,9 @@ def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer):
         "flip_horizontal": True,
         "flip_vertical": False,
         "colorbar": False,
-        "markers": False,
+        "reticle": False,
+        "hotspot": False,
+        "coldspot": False,
         "units": "celsius",
         "emissivity": 0.95,
         "gain": "high",
@@ -190,7 +192,8 @@ def test_the_control_page_offers_the_camera_controls(thermal_streamer, store):
 def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer):
     state = dict(
         palette="ironbow", rotation=0, flip_horizontal=False, flip_vertical=False,
-        colorbar=True, markers=True, units="celsius", emissivity=0.30, gain="high",
+        colorbar=True, reticle=True, hotspot=True, coldspot=True,
+        units="celsius", emissivity=0.30, gain="high",
     )
 
     page = thermal_streamer.render_control_page(state, ["ironbow"], None)
@@ -291,7 +294,9 @@ def test_a_settings_file_from_before_the_split_keeps_its_choice(thermal_streamer
     )
 
     assert store.as_dict()["colorbar"] is False
-    assert store.as_dict()["markers"] is False
+    assert store.as_dict()["reticle"] is False
+    assert store.as_dict()["hotspot"] is False
+    assert store.as_dict()["coldspot"] is False
 
 
 def test_an_old_file_that_had_it_on_stays_on(thermal_streamer, tmp_path):
@@ -303,7 +308,8 @@ def test_an_old_file_that_had_it_on_stays_on(thermal_streamer, tmp_path):
     )
 
     assert store.as_dict()["colorbar"] is True
-    assert store.as_dict()["markers"] is True
+    assert store.as_dict()["hotspot"] is True
+    assert store.as_dict()["coldspot"] is True
 
 
 def test_a_leftover_overlay_key_does_not_override_the_real_ones(thermal_streamer, tmp_path):
@@ -311,7 +317,7 @@ def test_a_leftover_overlay_key_does_not_override_the_real_ones(thermal_streamer
 
     state_file = tmp_path / "settings.json"
     state_file.write_text(
-        json.dumps({"palette": "ironbow", "overlay": False, "colorbar": True, "markers": False})
+        json.dumps({"palette": "ironbow", "overlay": False, "colorbar": True, "hotspot": False})
     )
 
     store = thermal_streamer.SettingsStore(
@@ -319,11 +325,78 @@ def test_a_leftover_overlay_key_does_not_override_the_real_ones(thermal_streamer
     )
 
     assert store.as_dict()["colorbar"] is True
-    assert store.as_dict()["markers"] is False
+    assert store.as_dict()["hotspot"] is False
 
 
 def test_the_page_offers_both_switches(thermal_streamer, store):
     page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
 
     assert 'name="colorbar"' in page
-    assert 'name="markers"' in page
+    assert 'name="reticle"' in page
+    assert 'name="hotspot"' in page
+    assert 'name="coldspot"' in page
+
+
+def test_a_settings_file_from_before_both_splits_is_carried_through_each(thermal_streamer,
+                                                                        tmp_path):
+    """0.8.x knew only `overlay`. It became `markers`, which became three switches."""
+
+    state_file = tmp_path / "settings.json"
+    state_file.write_text(json.dumps({"palette": "ironbow", "overlay": False}))
+
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), state_file
+    )
+
+    state = store.as_dict()
+    assert [state["colorbar"], state["reticle"], state["hotspot"], state["coldspot"]] == [
+        False, False, False, False
+    ]
+
+
+def test_a_settings_file_from_between_the_splits_keeps_its_markers_choice(thermal_streamer,
+                                                                         tmp_path):
+    """0.9.x had `colorbar` and `markers`. Only the second split applies to it."""
+
+    state_file = tmp_path / "settings.json"
+    state_file.write_text(json.dumps({"palette": "ironbow", "colorbar": True, "markers": False}))
+
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), state_file
+    )
+
+    state = store.as_dict()
+    assert state["colorbar"] is True
+    assert [state["reticle"], state["hotspot"], state["coldspot"]] == [False, False, False]
+
+
+def test_a_current_file_is_not_touched_by_either_split(thermal_streamer, tmp_path):
+    state_file = tmp_path / "settings.json"
+    state_file.write_text(json.dumps({
+        "palette": "ironbow", "overlay": False, "markers": False,
+        "colorbar": True, "reticle": False, "hotspot": True, "coldspot": False,
+    }))
+
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), state_file
+    )
+
+    state = store.as_dict()
+    assert [state["colorbar"], state["reticle"], state["hotspot"], state["coldspot"]] == [
+        True, False, True, False
+    ]
+
+
+def test_a_saved_file_carries_no_setting_that_no_longer_exists(thermal_streamer, tmp_path):
+    """What this version writes should not need migrating by the next one."""
+
+    state_file = tmp_path / "settings.json"
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), state_file
+    )
+
+    store.update("sepia", thermal_streamer.RenderSettings())
+    written = json.loads(state_file.read_text())
+
+    assert "overlay" not in written
+    assert "markers" not in written

@@ -72,6 +72,7 @@ OVERLAY_SHADOW_RGB = (0, 0, 0)
 
 
 HOTSPOT_RGB = (255, 90, 90)
+COLDSPOT_RGB = (120, 185, 255)
 
 
 RETICLE_RGB = (235, 235, 235)
@@ -85,6 +86,7 @@ class OverlayStyle:
     needs to know where it is in order to stay off it.
     """
 
+    size: tuple[int, int]
     pixel_height: int
     line_height: int
     margin: int
@@ -100,7 +102,9 @@ class Overlay:
     stats: FrameStats
     units: str
     colorbar: bool = True
-    markers: bool = True
+    reticle: bool = True
+    hotspot: bool = True
+    coldspot: bool = True
 
 
 @functools.lru_cache(maxsize=8)
@@ -136,6 +140,7 @@ def overlay_style(size: tuple[int, int], colorbar: bool = True) -> OverlayStyle:
         else 0
     )
     return OverlayStyle(
+        size=size,
         pixel_height=pixel_height,
         line_height=pixel_height + 2,
         margin=margin,
@@ -248,7 +253,9 @@ def bar_position(value: float, low: float, high: float, height: int) -> tuple[in
     return (int(round((1.0 - fraction) * (height - 1))), 0)
 
 
-def mark_bar(image: Image.Image, row: int, beyond: int, style: OverlayStyle) -> None:
+def mark_bar(
+    image: Image.Image, row: int, beyond: int, style: OverlayStyle, colour: tuple[int, int, int]
+) -> None:
     """Show where the hottest pixel falls on the scale, or that it is off the end of it.
 
     Without this the bar and the hotspot marker read as contradicting each other, and on hardware
@@ -265,15 +272,15 @@ def mark_bar(image: Image.Image, row: int, beyond: int, style: OverlayStyle) -> 
     draw = ImageDraw.Draw(image)
     if beyond == 0:
         y = top + row
-        draw.line((left, y, left + width - 1, y), fill=HOTSPOT_RGB)
-        draw.line((left - style.margin, y, left - 1, y), fill=HOTSPOT_RGB)
+        draw.line((left, y, left + width - 1, y), fill=colour)
+        draw.line((left - style.margin, y, left - 1, y), fill=colour)
         return
     arrow = max(width // 2, 3)
     apex = top + 1 if beyond > 0 else top + height - 2
     base = apex + arrow if beyond > 0 else apex - arrow
     middle = left + width // 2
     draw.polygon(
-        [(middle, apex), (left + 1, base), (left + width - 2, base)], fill=HOTSPOT_RGB
+        [(middle, apex), (left + 1, base), (left + width - 2, base)], fill=colour
     )
 
 
@@ -290,13 +297,21 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
     draw.rectangle(
         (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
     )
-    row, beyond = bar_position(
-        overlay.stats.maximum_celsius,
-        overlay.stats.range_low_celsius,
-        overlay.stats.range_high_celsius,
-        bar_height,
-    )
-    mark_bar(image, row, beyond, style)
+    # A tick per extreme that is being marked on the picture, so the bar and the markers always
+    # tell the same story. Switching a marker off takes its tick with it.
+    for shown, celsius, colour in (
+        (overlay.hotspot, overlay.stats.maximum_celsius, HOTSPOT_RGB),
+        (overlay.coldspot, overlay.stats.minimum_celsius, COLDSPOT_RGB),
+    ):
+        if not shown:
+            continue
+        row, beyond = bar_position(
+            celsius,
+            overlay.stats.range_low_celsius,
+            overlay.stats.range_high_celsius,
+            bar_height,
+        )
+        mark_bar(image, row, beyond, style, colour)
     high = format_temperature(overlay.stats.range_high_celsius, overlay.units)
     low = format_temperature(overlay.stats.range_low_celsius, overlay.units)
     right = width - style.margin
@@ -306,42 +321,144 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
                low, style)
 
 
-def draw_reticle(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
-    """A crosshair in the middle, with what the middle reads. The one fixed point of reference."""
+@dataclasses.dataclass(frozen=True)
+class Marker:
+    """One pixel worth pointing at: where it is in the sensor frame, how hot, and in what colour."""
 
-    width, height = image.size
-    centre_x, centre_y = width // 2, height // 2
-    arm = max(int(width * RETICLE_ARM_FRACTION), 3)
-    draw = ImageDraw.Draw(image)
-    draw.line((centre_x - arm, centre_y, centre_x + arm, centre_y), fill=RETICLE_RGB)
-    draw.line((centre_x, centre_y - arm, centre_x, centre_y + arm), fill=RETICLE_RGB)
-    label = format_temperature(overlay.stats.centre_celsius, overlay.units)
-    draw_label(image, marker_label_position((centre_x, centre_y + 2), arm, label, style),
-               label, style)
+    spot: tuple[int, int]
+    celsius: float
+    colour: tuple[int, int, int]
+    arm_fraction: float = HOTSPOT_ARM_FRACTION
 
 
-def draw_hotspot(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
-    """Mark the hottest pixel. On a printer that is the whole reason to point a thermal camera."""
+# Internal aliases, underscored to match `_Settings` in settings.py: a label's position is its top
+# left corner, and its rectangle is that corner and the opposite one.
+_Position = tuple[float, float]
+_Rectangle = tuple[float, float, float, float]
+
+
+def overlapping(one: _Rectangle, other: _Rectangle) -> bool:
+    """Whether two label rectangles share any pixel."""
+
+    return bool(
+        one[0] < other[2] and other[0] < one[2] and one[1] < other[3] and other[1] < one[3]
+    )
+
+
+def label_candidates(
+    anchor: tuple[int, int], arm: int, text: str, style: OverlayStyle
+) -> list[_Position]:
+    """Places to try putting a marker's number, best first.
+
+    Beside it reads best, which is why that comes first and why it is what a lone marker gets. The
+    rest are for when markers are close together: on hardware the centre crosshair and a hotspot a
+    few pixels away produced "21.2" and "70.9" written across each other, unreadable and wrong
+    looking, and with three markers that is the normal case rather than the unlucky one.
+    """
+
+    x, y = anchor
+    width = label_width(text, style.pixel_height)
+    beside = marker_label_position((x, y - style.line_height), arm, text, style)
+    return [
+        beside,
+        (beside[0], y + arm),
+        (x - width / 2, y - arm - style.line_height - 2),
+        (x - width / 2, y + arm + 2),
+        (beside[0], y - arm - 2 * style.line_height),
+        (beside[0], y + arm + style.line_height),
+    ]
+
+
+def place_label(
+    anchor: tuple[int, int], arm: int, text: str, style: OverlayStyle, placed: list[_Rectangle]
+) -> _Position:
+    """The first candidate that is inside the picture and clear of the labels already drawn.
+
+    Falls back to the first candidate when none is clear, because a label in a crowded spot still
+    beats no label: the marker itself says where, and the number is worth reading even if it is
+    tight.
+    """
+
+    width = label_width(text, style.pixel_height)
+    for candidate in label_candidates(anchor, arm, text, style):
+        left, top = candidate
+        rect = (left, top, left + width, top + style.line_height)
+        inside = (
+            left >= 0
+            and rect[2] <= style.content_right
+            and top >= 0
+            and rect[3] <= style.size[1]
+        )
+        if inside and not any(overlapping(rect, other) for other in placed):
+            return candidate
+    return label_candidates(anchor, arm, text, style)[0]
+
+
+def draw_marker(
+    image: Image.Image,
+    marker: Marker,
+    overlay: Overlay,
+    style: OverlayStyle,
+    placed: list[_Rectangle],
+) -> None:
+    """A cross on a pixel with its temperature beside it.
+
+    One function for all three markers rather than one each. They differ in which pixel, which
+    temperature and which colour, and nothing else; copies would drift the moment the placement
+    rule changed, and that rule has now changed three times.
+
+    `placed` accumulates the label rectangles already drawn on this frame, so each marker can avoid
+    the ones before it.
+    """
 
     scale = image.size[0] / overlay.stats.width
-    x = int((overlay.stats.hotspot[0] + 0.5) * scale)
-    y = int((overlay.stats.hotspot[1] + 0.5) * scale)
-    arm = max(int(image.size[0] * HOTSPOT_ARM_FRACTION), 3)
+    x = int((marker.spot[0] + 0.5) * scale)
+    y = int((marker.spot[1] + 0.5) * scale)
+    arm = max(int(image.size[0] * marker.arm_fraction), 3)
     draw = ImageDraw.Draw(image)
-    draw.line((x - arm, y, x + arm, y), fill=HOTSPOT_RGB)
-    draw.line((x, y - arm, x, y + arm), fill=HOTSPOT_RGB)
-    label = format_temperature(overlay.stats.maximum_celsius, overlay.units)
-    draw_label(image, marker_label_position((x, y - style.line_height), arm, label, style),
-               label, style, HOTSPOT_RGB)
+    draw.line((x - arm, y, x + arm, y), fill=marker.colour)
+    draw.line((x, y - arm, x, y + arm), fill=marker.colour)
+    label = format_temperature(marker.celsius, overlay.units)
+    position = place_label((x, y), arm, label, style, placed)
+    placed.append((
+        position[0], position[1],
+        position[0] + label_width(label, style.pixel_height), position[1] + style.line_height,
+    ))
+    draw_label(image, position, label, style, marker.colour)
+
+
+def markers_for(overlay: Overlay) -> list[Marker]:
+    """The markers this overlay wants, in the order they get first refusal on a label position.
+
+    The extremes come before the centre because they are the ones being looked for. The centre is a
+    fixed point of reference and the one that can most afford to be nudged.
+    """
+
+    stats = overlay.stats
+    wanted = [
+        (overlay.hotspot, Marker(stats.hotspot, stats.maximum_celsius, HOTSPOT_RGB)),
+        (overlay.coldspot, Marker(stats.coldspot, stats.minimum_celsius, COLDSPOT_RGB)),
+        (
+            overlay.reticle,
+            Marker(
+                (stats.width // 2, stats.height // 2),
+                stats.centre_celsius,
+                RETICLE_RGB,
+                RETICLE_ARM_FRACTION,
+            ),
+        ),
+    ]
+    return [marker for shown, marker in wanted if shown]
 
 
 def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
     style = overlay_style(image.size, overlay.colorbar)
     if overlay.colorbar:
         draw_colorbar(image, overlay, style)
-    if overlay.markers:
-        draw_reticle(image, overlay, style)
-        draw_hotspot(image, overlay, style)
+    # Every marker in one pass, so each can see where the ones before it put their labels.
+    placed: list[_Rectangle] = []
+    for marker in markers_for(overlay):
+        draw_marker(image, marker, overlay, style, placed)
 
 
 def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:

@@ -25,21 +25,30 @@ from .temperature import MAX_EMISSIVITY, MIN_EMISSIVITY, VALID_UNITS
 _Settings = TypeVar("_Settings", RenderSettings, CameraSettings)
 
 
+# Each entry is a setting that was split, and the settings that replaced it, oldest first. Applied
+# in order, so a file old enough to need both steps gets both: `overlay` became `colorbar` and
+# `markers` in 0.9.0, and `markers` became the three individual marker switches in 0.10.0.
+SETTING_SPLITS = (
+    ("overlay", ("colorbar", "markers")),
+    ("markers", ("reticle", "hotspot", "coldspot")),
+)
+
+
 def migrated(saved: dict) -> dict:
     """Read a settings file written by an older version.
 
-    Up to 0.8.5 the readout was one switch called `overlay` covering the colorbar, the centre
-    reading and the hotspot marker together. It is now two, and someone who deliberately turned the
-    readout off should not have it come back on because the field was renamed underneath them. So an
-    `overlay` with neither new key beside it sets both.
+    Someone who deliberately turned part of the readout off should not have it come back because a
+    field was renamed underneath them, so an old switch sets the switches that replaced it.
 
-    Only when neither is present: a file written by this version has both, and its `overlay` is a
-    leftover that must not override them.
+    Only when none of the replacements is present. A file written by a newer version carries them,
+    and may still carry the old key beside them, where it is a leftover that must not win.
     """
 
-    if "overlay" not in saved or "colorbar" in saved or "markers" in saved:
-        return saved
-    return {**saved, "colorbar": saved["overlay"], "markers": saved["overlay"]}
+    updated = dict(saved)
+    for old, replacements in SETTING_SPLITS:
+        if old in updated and not any(new in updated for new in replacements):
+            updated.update(dict.fromkeys(replacements, updated[old]))
+    return updated
 
 
 def restored(current: _Settings, saved: dict) -> _Settings:
@@ -159,7 +168,9 @@ def settings_from_form(
             flip_horizontal="flip_horizontal" in form,
             flip_vertical="flip_vertical" in form,
             colorbar="colorbar" in form,
-            markers="markers" in form,
+            reticle="reticle" in form,
+            hotspot="hotspot" in form,
+            coldspot="coldspot" in form,
             units=posted_units if posted_units in VALID_UNITS else current.units,
             emissivity=posted_emissivity(form, current.emissivity),
         ),
