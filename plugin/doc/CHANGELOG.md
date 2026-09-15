@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0
+
+- The temperature ruler and the on-image readings are now separate switches. One switch could not
+  say "ruler, but no numbers over the picture", or the reverse, and both are reasonable things to
+  want.
+- With the ruler off, the readings use the full width instead of avoiding the column it used to sit
+  in.
+- Turning both off returns the plugin to exactly the cost it had before there was any readout.
+
+A settings file from an earlier version carries the single old switch, and whichever way it was set
+is applied to both, so a readout you had deliberately turned off stays off.
+
 ## 0.8.5
 
 Internal only. Nothing about the plugin behaves differently.

@@ -35,6 +35,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rotate", type=int, default=0, choices=VALID_ROTATIONS)
     parser.add_argument("--flip-horizontal", action="store_true")
     parser.add_argument("--flip-vertical", action="store_true")
+    parser.add_argument("--no-colorbar", action="store_true")
+    parser.add_argument("--no-markers", action="store_true")
+    # Kept as the one switch it used to be, so an older service definition still means something.
     parser.add_argument("--no-overlay", action="store_true")
     parser.add_argument("--units", default=DEFAULT_UNITS, choices=VALID_UNITS)
     parser.add_argument("--gain", default=DEFAULT_GAIN, choices=VALID_GAINS)
@@ -73,7 +76,8 @@ def main() -> None:
             rotation=options.rotate,
             flip_horizontal=options.flip_horizontal,
             flip_vertical=options.flip_vertical,
-            overlay=not options.no_overlay,
+            colorbar=not (options.no_colorbar or options.no_overlay),
+            markers=not (options.no_markers or options.no_overlay),
             units=options.units,
             emissivity=options.emissivity,
         ),

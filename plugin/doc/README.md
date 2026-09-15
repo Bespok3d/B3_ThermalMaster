@@ -40,7 +40,11 @@ other way round.
 
 ## The temperature readout
 
-On by default. It draws three things into the picture itself:
+Two switches, both on by default. The ruler is one, the readings on the picture are the other, and
+they can be used in any combination. With both off the plugin costs exactly what it did before there
+was a readout at all.
+
+It draws three things into the picture itself:
 
 - A colorbar down the right edge, labelled with the temperatures at each end of the palette, and
   marked in red with where the hottest pixel falls.

@@ -159,9 +159,25 @@ class RenderSettings:
     rotation: int = 0
     flip_horizontal: bool = False
     flip_vertical: bool = False
-    overlay: bool = True
+    # Two switches rather than one, because they are two things to a person looking at a tile.
+    # The colorbar is a ruler down the edge that says what a colour means and costs five percent
+    # of the width; the markers are numbers drawn over the picture itself. Wanting either
+    # without the other is reasonable, and one switch could not express it.
+    colorbar: bool = True
+    markers: bool = True
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
+
+    @property
+    def readout(self) -> bool:
+        """Whether anything is drawn on top of the picture at all.
+
+        What the encode size keys off, since it is text that needs the extra pixels and both
+        surfaces draw text. Turning both off returns the plugin to the cost it had before there
+        was a readout.
+        """
+
+        return self.colorbar or self.markers
 
     @property
     def mirrors(self) -> tuple[bool, bool]:
@@ -226,9 +242,13 @@ class ThermalRenderer:
     def render_frame(self, thermal_raw: np.ndarray) -> RenderedFrame:
         image, stats = self.render_image(thermal_raw)
         settings = self._settings
-        overlay = Overlay(self._palette, stats, settings.units) if settings.overlay else None
+        overlay = (
+            Overlay(self._palette, stats, settings.units, settings.colorbar, settings.markers)
+            if settings.readout
+            else None
+        )
         upscale = encode_upscale(
-            (image.shape[1], image.shape[0]), settings.upscale, settings.overlay
+            (image.shape[1], image.shape[0]), settings.upscale, settings.readout
         )
         return RenderedFrame(
             encode_jpeg(image, upscale, settings.jpeg_quality, overlay), stats

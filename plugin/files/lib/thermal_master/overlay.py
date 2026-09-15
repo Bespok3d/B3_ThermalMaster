@@ -99,6 +99,8 @@ class Overlay:
     palette: np.ndarray
     stats: FrameStats
     units: str
+    colorbar: bool = True
+    markers: bool = True
 
 
 @functools.lru_cache(maxsize=8)
@@ -116,7 +118,7 @@ def overlay_font(pixel_height: int) -> ImageFont.FreeTypeFont | ImageFont.ImageF
         return ImageFont.load_default()
 
 
-def overlay_style(size: tuple[int, int]) -> OverlayStyle:
+def overlay_style(size: tuple[int, int], colorbar: bool = True) -> OverlayStyle:
     width, height = size
     pixel_height = max(int(height * OVERLAY_FONT_HEIGHT_FRACTION), OVERLAY_MIN_FONT_PIXELS)
     margin = max(int(width * OVERLAY_MARGIN_FRACTION), 2)
@@ -126,7 +128,13 @@ def overlay_style(size: tuple[int, int]) -> OverlayStyle:
     # Reserved against the bar's own labels rather than against the bar. They are right-aligned to
     # the margin and are several times wider than it, which is how a hotspot in the bottom corner
     # still landed on top of the low label after the first attempt at this in 0.7.1.
-    reserved = max(bar_width, int(label_width(WIDEST_TEMPERATURE_LABEL, pixel_height)) + 1)
+    # Nothing to stay clear of when the ruler is off, so the markers get the whole width back
+    # rather than flipping their labels away from an empty column.
+    reserved = (
+        max(bar_width, int(label_width(WIDEST_TEMPERATURE_LABEL, pixel_height)) + 1)
+        if colorbar
+        else 0
+    )
     return OverlayStyle(
         pixel_height=pixel_height,
         line_height=pixel_height + 2,
@@ -328,19 +336,21 @@ def draw_hotspot(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> N
 
 
 def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
-    style = overlay_style(image.size)
-    draw_colorbar(image, overlay, style)
-    draw_reticle(image, overlay, style)
-    draw_hotspot(image, overlay, style)
+    style = overlay_style(image.size, overlay.colorbar)
+    if overlay.colorbar:
+        draw_colorbar(image, overlay, style)
+    if overlay.markers:
+        draw_reticle(image, overlay, style)
+        draw_hotspot(image, overlay, style)
 
 
-def encode_upscale(frame_size: tuple[int, int], upscale: int, overlay_enabled: bool) -> int:
+def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:
     """The upscale actually used, which the overlay can raise but never lower.
 
     Text is the only part of the picture that does not survive being drawn at the sensor's own size
     and scaled up by a browser, so the overlay pays for its own resolution and nothing else does.
     """
 
-    if not overlay_enabled:
+    if not readout_enabled:
         return upscale
     return max(upscale, -(-OVERLAY_MIN_ENCODE_EDGE // min(frame_size)))

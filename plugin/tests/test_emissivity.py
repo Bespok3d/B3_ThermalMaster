@@ -76,10 +76,10 @@ def test_emissivity_does_not_move_a_single_pixel(thermal_streamer):
     palettes = thermal_streamer.build_palettes()
     settings = thermal_streamer.RenderSettings
     plain = thermal_streamer.ThermalRenderer(
-        palettes["ironbow"], settings(overlay=False, emissivity=1.0)
+        palettes["ironbow"], settings(colorbar=False, markers=False, emissivity=1.0)
     )
     shiny = thermal_streamer.ThermalRenderer(
-        palettes["ironbow"], settings(overlay=False, emissivity=0.3)
+        palettes["ironbow"], settings(colorbar=False, markers=False, emissivity=0.3)
     )
 
     first = np.asarray(Image.open(io.BytesIO(plain.render_jpeg(frame))))

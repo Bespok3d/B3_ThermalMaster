@@ -141,29 +141,29 @@ def test_the_stats_payload_carries_marker_pixels_a_client_can_place(thermal_stre
 
 
 def test_the_overlay_raises_the_encode_until_text_fits(thermal_streamer):
-    assert thermal_streamer.encode_upscale((160, 120), 1, overlay_enabled=True) == 2
-    assert thermal_streamer.encode_upscale((256, 192), 1, overlay_enabled=True) == 2
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=True) == 2
+    assert thermal_streamer.encode_upscale((256, 192), 1, readout_enabled=True) == 2
 
 
 def test_a_rotated_frame_is_not_scaled_further_than_an_upright_one(thermal_streamer):
     """Measuring the width would triple a portrait frame for no more legibility than doubling it."""
 
-    assert thermal_streamer.encode_upscale((120, 160), 1, overlay_enabled=True) == 2
+    assert thermal_streamer.encode_upscale((120, 160), 1, readout_enabled=True) == 2
 
 
 def test_the_overlay_never_lowers_an_upscale_someone_asked_for(thermal_streamer):
-    assert thermal_streamer.encode_upscale((160, 120), 4, overlay_enabled=True) == 4
+    assert thermal_streamer.encode_upscale((160, 120), 4, readout_enabled=True) == 4
 
 
 def test_without_the_overlay_the_encode_is_left_exactly_as_asked(thermal_streamer):
     """The 43% of a core F-27 bought back stays bought for anyone who turns the readout off."""
 
-    assert thermal_streamer.encode_upscale((160, 120), 1, overlay_enabled=False) == 1
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=False) == 1
 
 
 def test_a_frame_with_the_overlay_is_still_a_jpeg(thermal_streamer, palettes):
     renderer = thermal_streamer.ThermalRenderer(
-        palettes["ironbow"], thermal_streamer.RenderSettings(overlay=True)
+        palettes["ironbow"], thermal_streamer.RenderSettings()
     )
 
     rendered = renderer.render_frame(thermal_frame())
@@ -189,10 +189,12 @@ def test_the_overlay_actually_marks_the_picture(thermal_streamer, palettes):
 
     frame = thermal_frame()
     settings = thermal_streamer.RenderSettings
-    plain = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings(upscale=2,
-                                                                          overlay=False))
-    marked = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings(upscale=2,
-                                                                           overlay=True))
+    plain = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], settings(upscale=2, colorbar=False, markers=False)
+    )
+    marked = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], settings(upscale=2, colorbar=True, markers=True)
+    )
 
     plain_pixels = np.asarray(Image.open(io.BytesIO(plain.render_jpeg(frame))))
     marked_pixels = np.asarray(Image.open(io.BytesIO(marked.render_jpeg(frame))))
@@ -221,7 +223,7 @@ def test_the_overlay_survives_every_rotation(thermal_streamer, palettes, rotatio
     size = Image.open(io.BytesIO(rendered.jpeg)).size
 
     assert size[0] == rendered.stats.width * thermal_streamer.encode_upscale(
-        (rendered.stats.width, rendered.stats.height), 1, overlay_enabled=True
+        (rendered.stats.width, rendered.stats.height), 1, readout_enabled=True
     )
 
 
@@ -230,13 +232,14 @@ def test_a_font_is_available_at_whatever_size_is_asked_for(thermal_streamer):
 
 
 def test_the_posted_form_can_turn_the_readout_off_and_change_its_units(thermal_streamer, palettes):
-    current = thermal_streamer.RenderSettings(overlay=True, units="celsius")
+    current = thermal_streamer.RenderSettings(colorbar=True, markers=True, units="celsius")
 
     _, settings = thermal_streamer.settings_from_form(
         {"units": ["fahrenheit"]}, palettes, current
     )
 
-    assert settings.overlay is False
+    assert settings.colorbar is False
+    assert settings.markers is False
     assert settings.units == "fahrenheit"
 
 
@@ -244,11 +247,11 @@ def test_an_unknown_unit_leaves_the_setting_alone(thermal_streamer, palettes):
     current = thermal_streamer.RenderSettings(units="fahrenheit")
 
     _, settings = thermal_streamer.settings_from_form(
-        {"units": ["kelvin"], "overlay": ["on"]}, palettes, current
+        {"units": ["kelvin"], "colorbar": ["on"], "markers": ["on"]}, palettes, current
     )
 
     assert settings.units == "fahrenheit"
-    assert settings.overlay is True
+    assert settings.colorbar is True
 
 
 def test_a_glyph_is_rendered_once_and_reused(thermal_streamer):
@@ -364,3 +367,61 @@ def test_a_label_for_a_marker_inside_the_reserved_column_is_pulled_clear_of_it(t
     left, _ = thermal_streamer.marker_label_position((236, 300), 7, "31.3C", style)
 
     assert left + thermal_streamer.label_width("31.3C", style.pixel_height) <= style.content_right
+
+
+def rendered_pixels(thermal_streamer, palettes, **flags):
+    import io
+
+    from PIL import Image
+
+    settings = thermal_streamer.RenderSettings(upscale=2, **flags)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings)
+    return np.asarray(Image.open(io.BytesIO(renderer.render_jpeg(thermal_frame()))))
+
+
+def test_the_ruler_and_the_markers_are_separate_switches(thermal_streamer, palettes):
+    """One switch could not say "ruler but no numbers over the picture", which people want."""
+
+    bare = rendered_pixels(thermal_streamer, palettes, colorbar=False, markers=False)
+    ruler_only = rendered_pixels(thermal_streamer, palettes, colorbar=True, markers=False)
+    markers_only = rendered_pixels(thermal_streamer, palettes, colorbar=False, markers=True)
+
+    assert not np.array_equal(bare, ruler_only)
+    assert not np.array_equal(bare, markers_only)
+    assert not np.array_equal(ruler_only, markers_only)
+
+
+def test_the_ruler_stays_out_of_the_middle_of_the_picture(thermal_streamer, palettes):
+    """The ruler lives in its reserved column, so turning it on alone must not touch the image."""
+
+    bare = rendered_pixels(thermal_streamer, palettes, colorbar=False, markers=False)
+    ruler_only = rendered_pixels(thermal_streamer, palettes, colorbar=True, markers=False)
+    style = thermal_streamer.overlay_style((bare.shape[1], bare.shape[0]))
+
+    assert np.array_equal(bare[:, : style.content_right], ruler_only[:, : style.content_right])
+
+
+def test_either_surface_alone_still_buys_the_bigger_encode(thermal_streamer):
+    """Both draw text, so either one on needs the pixels for it."""
+
+    for flags in ({"colorbar": True, "markers": False}, {"colorbar": False, "markers": True}):
+        assert thermal_streamer.RenderSettings(**flags).readout is True
+
+
+def test_both_off_is_no_readout_at_all(thermal_streamer):
+    """And therefore exactly the cost the plugin had before there was one."""
+
+    settings = thermal_streamer.RenderSettings(colorbar=False, markers=False)
+
+    assert settings.readout is False
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=settings.readout) == 1
+
+
+def test_with_the_ruler_off_the_markers_get_the_whole_width(thermal_streamer):
+    """Otherwise a hotspot on the right flips its label away from a column holding nothing."""
+
+    with_ruler = thermal_streamer.overlay_style((320, 240), True)
+    without = thermal_streamer.overlay_style((320, 240), False)
+
+    assert without.content_right > with_ruler.content_right
+    assert without.content_right == 320 - without.margin

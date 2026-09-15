@@ -1186,7 +1186,7 @@ what produced F-57, and needs one more run on 0.8.1.
 
 ### Phase 6b: separate switches for the readout and the ruler
 
-Next, and asked for directly: the readout is currently one switch that turns off the colorbar, the
+Shipped in 0.9.0. Asked for directly: the readout is currently one switch that turns off the colorbar, the
 centre reading and the hotspot marker together. Those are two different things to a person looking
 at a tile. The colorbar is a ruler down the edge that says what a colour means; the readings are
 numbers drawn over the picture. Wanting the ruler without numbers over the image, or numbers without
@@ -1200,6 +1200,16 @@ keeps a deliberate off staying off across the upgrade. One test for that migrati
 
 Worth doing before Phase 7, because Phase 7 adds a second tile and the question of what the plain
 tile shows becomes a setting people will actually reach for.
+
+Built as planned, with one thing the plan missed and the rendered output caught. The reserved column
+that keeps a marker's label off the ruler's labels was still being reserved when the ruler was off,
+so a hotspot on the right flipped its number away from a column holding nothing. `overlay_style`
+now takes the flag and reserves nothing when there is nothing to avoid. Visible only by looking at
+the four combinations side by side, which is why they were rendered rather than reasoned about.
+
+The migration is narrower than "if overlay is present, use it": it applies only when neither new key
+is there. A file written by this version carries both and may still carry the old key beside them,
+and in that case the old key is a leftover that must not win. Three tests, one per case.
 
 ### Phase 7: the embedded page
 

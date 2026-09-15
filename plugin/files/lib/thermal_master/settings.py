@@ -25,6 +25,23 @@ from .temperature import MAX_EMISSIVITY, MIN_EMISSIVITY, VALID_UNITS
 _Settings = TypeVar("_Settings", RenderSettings, CameraSettings)
 
 
+def migrated(saved: dict) -> dict:
+    """Read a settings file written by an older version.
+
+    Up to 0.8.5 the readout was one switch called `overlay` covering the colorbar, the centre
+    reading and the hotspot marker together. It is now two, and someone who deliberately turned the
+    readout off should not have it come back on because the field was renamed underneath them. So an
+    `overlay` with neither new key beside it sets both.
+
+    Only when neither is present: a file written by this version has both, and its `overlay` is a
+    leftover that must not override them.
+    """
+
+    if "overlay" not in saved or "colorbar" in saved or "markers" in saved:
+        return saved
+    return {**saved, "colorbar": saved["overlay"], "markers": saved["overlay"]}
+
+
 def restored(current: _Settings, saved: dict) -> _Settings:
     """Rebuild a settings dataclass from a saved file, ignoring keys it does not have.
 
@@ -107,7 +124,7 @@ class SettingsStore:
             print(f"thermal-master: ignoring unreadable settings: {error}", file=sys.stderr)
             return
         self._palette_name = saved.pop("palette", self._palette_name)
-        self._settings = restored(self._settings, saved)
+        self._settings = restored(self._settings, migrated(saved))
         self._camera = restored(self._camera, saved)
 
     def _save(self) -> None:
@@ -141,7 +158,8 @@ def settings_from_form(
             rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
             flip_horizontal="flip_horizontal" in form,
             flip_vertical="flip_vertical" in form,
-            overlay="overlay" in form,
+            colorbar="colorbar" in form,
+            markers="markers" in form,
             units=posted_units if posted_units in VALID_UNITS else current.units,
             emissivity=posted_emissivity(form, current.emissivity),
         ),
