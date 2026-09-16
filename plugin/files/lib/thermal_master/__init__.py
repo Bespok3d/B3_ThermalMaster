@@ -81,7 +81,9 @@ from .overlay import (
     Marker,
     Overlay,
     OverlayStyle,
-    bar_position,
+    bar_axis,
+    bar_gradient,
+    bar_row,
     clamp_label,
     draw_colorbar,
     draw_label,
@@ -198,7 +200,9 @@ from .viewer import (
 
 __all__ = [
     "annotations",
-    "bar_position",
+    "bar_axis",
+    "bar_gradient",
+    "bar_row",
     "blur_3x3",
     "BOUNDS_SMOOTHING",
     "build_palettes",

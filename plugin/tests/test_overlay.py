@@ -322,37 +322,76 @@ def test_the_colorbar_box_leaves_room_for_content_beside_it(thermal_streamer):
     assert bar_left + bar_width <= 320
 
 
-def test_a_hotspot_inside_the_range_is_ticked_on_the_bar(thermal_streamer):
-    row, beyond = thermal_streamer.bar_position(30.0, 20.0, 40.0, 101)
+class Measured:
+    """Just enough of FrameStats for the bar, which only reads four numbers off it."""
 
-    assert beyond == 0
-    assert row == 50
-
-
-def test_the_top_of_the_bar_is_the_high_end(thermal_streamer):
-    row, beyond = thermal_streamer.bar_position(40.0, 20.0, 40.0, 101)
-
-    assert (row, beyond) == (0, 0)
+    def __init__(self, minimum, maximum, low, high):
+        self.minimum_celsius = minimum
+        self.maximum_celsius = maximum
+        self.range_low_celsius = low
+        self.range_high_celsius = high
 
 
-def test_a_hotspot_above_the_range_is_marked_as_past_the_top(thermal_streamer):
-    """The case seen on hardware: a bar labelled 29.2 beside a marker reading 35.8."""
+def test_the_ruler_spans_the_scene_rather_than_the_display_range(thermal_streamer):
+    """The change of 0.14.0, and the reason for it: a ruler must agree with the markers.
 
-    _, beyond = thermal_streamer.bar_position(35.8, 20.9, 29.2, 100)
+    Before this the ends were the auto-ranged bounds, so a ruler topped 25.3 sat beside a marker
+    reading 30.0 and read as a contradiction. Hardware produced exactly that, twice, to two
+    different people looking at it.
+    """
 
-    assert beyond == 1
+    axis = thermal_streamer.bar_axis(Measured(19.6, 30.0, 21.7, 25.3))
+
+    assert axis == (19.6, 30.0)
 
 
-def test_a_value_below_the_range_is_marked_as_past_the_bottom(thermal_streamer):
-    row, beyond = thermal_streamer.bar_position(10.0, 20.0, 40.0, 100)
+def test_a_flat_scene_falls_back_to_the_display_range(thermal_streamer):
+    """A scene with no span of its own would otherwise give the bar no height at all."""
 
-    assert (row, beyond) == (99, -1)
+    axis = thermal_streamer.bar_axis(Measured(25.0, 25.0, 24.0, 26.0))
+
+    assert axis == (24.0, 26.0)
 
 
-def test_a_collapsed_range_does_not_divide_by_zero(thermal_streamer):
-    row, beyond = thermal_streamer.bar_position(25.0, 25.0, 25.0, 100)
+def test_the_top_of_the_ruler_is_the_hottest_pixel(thermal_streamer):
+    assert thermal_streamer.bar_row(30.0, (20.0, 30.0), 101) == 0
 
-    assert (row, beyond) == (50, 0)
+
+def test_the_bottom_of_the_ruler_is_the_coldest(thermal_streamer):
+    assert thermal_streamer.bar_row(20.0, (20.0, 30.0), 101) == 100
+
+
+def test_a_temperature_halfway_up_lands_halfway_up(thermal_streamer):
+    assert thermal_streamer.bar_row(25.0, (20.0, 30.0), 101) == 50
+
+
+def test_a_collapsed_axis_does_not_divide_by_zero(thermal_streamer):
+    assert thermal_streamer.bar_row(25.0, (25.0, 25.0), 100) == 50
+
+
+def test_the_gradient_is_flat_where_the_picture_is_flat(thermal_streamer, palettes):
+    """Above the auto-ranged part the picture is one colour, and so is the ruler. That is the point.
+
+    The bands are not decoration: a pixel hotter than the display range is drawn in the top colour,
+    so colour carries no information up there, and a ruler that pretended otherwise would be lying
+    about what the picture means.
+    """
+
+    stats = Measured(10.0, 50.0, 20.0, 30.0)
+    ramp = thermal_streamer.bar_gradient(palettes["ironbow"], (10.0, 50.0), stats, 101)
+
+    assert np.array_equal(ramp[0], ramp[5])
+    assert np.array_equal(ramp[-1], ramp[-5])
+    assert not np.array_equal(ramp[0], ramp[-1])
+
+
+def test_the_gradient_varies_across_the_ranged_part(thermal_streamer, palettes):
+    stats = Measured(10.0, 50.0, 20.0, 30.0)
+    ramp = thermal_streamer.bar_gradient(palettes["ironbow"], (10.0, 50.0), stats, 101)
+
+    middle = [ramp[row][0].tolist() for row in (52, 60, 68)]
+
+    assert len({tuple(colour) for colour in middle}) == 3
 
 
 def test_the_reserved_column_is_wider_than_the_bar(thermal_streamer):

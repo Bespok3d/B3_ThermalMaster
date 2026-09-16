@@ -1353,6 +1353,44 @@ The screenshot saves at the sensor's own resolution with the region drawn on it,
 whatever size the window happens to be, because a picture of a measurement that does not show what
 was measured is not evidence of anything.
 
+### Phase 7 hardware round, 0.14.0
+
+Three findings from the printer, and the first two were one bug.
+
+**F-62. The live tile showed its controls and no camera.** Every browser check ran in a window, and
+in a window the page was fine. Fluidd gives an iframe tile about 260 by 340 CSS pixels, where the
+toolbar wrapped to three rows and the readout to two, taking 299 of those 340; the stage, being
+`flex: 1` with `min-height: 0`, was flexed down to 41 pixels. So the tile showed a toolbar and no
+picture, and the controls appeared to do nothing because the thing they controlled had no height.
+The maintainer reported it as two separate problems, reasonably, since that is how it looks.
+
+Fixed by giving the picture a floor of 55% and hiding the toolbar below 460 pixels of height, with a
+line saying where it went. A tile is for looking at and pointing at, and both work without any of
+those controls; zooming and saving are things you do once you have opened it properly, which is
+exactly when the room appears. The harness now runs a pass at tile size, which is the lesson: a
+responsive page tested at one size is tested at one size.
+
+**F-63. The ruler and the markers disagreed, again.** 0.8.1 answered this by adding a tick and a
+triangle to show that an extreme was off the end of the scale. That was true, and it did not work:
+the same question came back from the same person looking at a ruler topped 25.3 beside a marker
+reading 30.0. Being right about the labels is not the same as being understood, and after the second
+report the design is the thing that is wrong.
+
+The bar now spans the scene, coldest at the bottom and hottest at the top, so its ends are the
+numbers the markers show and there is nothing left to explain. The colours still come from the
+auto-ranged mapping, which means the rows above and below that range come out flat, and that is
+honest rather than a compromise: those pixels really are drawn in one colour, so colour really does
+stop carrying information there. Two ticks mark where. The end labels take the marker colours, so
+the eye ties the number at the top of the ruler to the red cross without being told.
+
+Rejected again: mapping the palette across the true extremes, which would make the bar linear and
+bring back the flicker F-26 removed. One glint should not restage the whole picture.
+
+**A process note.** Editing this by slicing the file between two function names deleted five
+unrelated functions that happened to live between them, which the suite caught immediately and
+`git show HEAD:` restored exactly. Worth preferring anchored replacements over positional slices,
+which is how every other edit in this project has been made.
+
 ### Phase 7d: MP4 recording
 
 MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome

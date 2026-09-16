@@ -237,105 +237,100 @@ def marker_label_position(
     return (max(left_of, 0.0), top)
 
 
-def bar_position(value: float, low: float, high: float, height: int) -> tuple[int, int]:
-    """Which row of the bar a temperature sits on, and which end it is past if it is past one.
+# Internal aliases, underscored to match `_Settings` in settings.py: a label's position is its top
+# left corner, and its rectangle is that corner and the opposite one.
+_Position = tuple[float, float]
+_Rectangle = tuple[float, float, float, float]
 
-    Returns the row and one of -1, 0, 1 for below the bar, on it, and above it.
+
+def bar_axis(stats: FrameStats) -> tuple[float, float]:
+    """The temperatures the bar spans, bottom and top.
+
+    The frame's own coldest and hottest, so the ends of the ruler are the numbers the markers show.
+    They were the ends of the *display range* until 0.14.0, which was defensible and confused every
+    person who looked at it: a ruler topped 25.3 beside a marker reading 30.0 reads as a
+    contradiction, however carefully the difference is explained. A ruler whose top is the hottest
+    thing in view needs no explaining.
+
+    A flat scene has no span of its own, so the display range stands in and the bar keeps a height.
     """
 
+    if stats.maximum_celsius > stats.minimum_celsius:
+        return (stats.minimum_celsius, stats.maximum_celsius)
+    return (stats.range_low_celsius, stats.range_high_celsius)
+
+
+def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
+    """Which row of the bar a temperature falls on, clamped to it."""
+
+    low, high = axis
     span = high - low
     if span <= 0.0:
-        return (height // 2, 0)
-    fraction = (value - low) / span
-    if fraction > 1.0:
-        return (0, 1)
-    if fraction < 0.0:
-        return (height - 1, -1)
-    return (int(round((1.0 - fraction) * (height - 1))), 0)
+        return height // 2
+    fraction = min(max((value - low) / span, 0.0), 1.0)
+    return int(round((1.0 - fraction) * (height - 1)))
+
+
+def bar_gradient(
+    palette: np.ndarray, axis: tuple[float, float], stats: FrameStats, height: int
+) -> np.ndarray:
+    """The bar's colours, built by asking the picture's own mapping what each row would be.
+
+    This is what makes the ruler honest rather than decorative. The bar spans the whole scene, and
+    the palette spans only the auto-ranged middle of it, so the rows above and below that come out
+    in the end colours, flat. Which is exactly what the picture does to those pixels: anything
+    hotter than the range is drawn in the top colour. The flat bands are not a drawing shortcut,
+    they are the truth about where colour stops carrying information.
+    """
+
+    low, high = axis
+    temperatures = np.linspace(high, low, max(height, 1), dtype=np.float32)
+    span = max(stats.range_high_celsius - stats.range_low_celsius, 1e-6)
+    fraction = (temperatures - stats.range_low_celsius) / span
+    indices = np.clip(fraction * (PALETTE_STEPS - 1), 0, PALETTE_STEPS - 1).astype(np.uint8)
+    gradient: np.ndarray = palette[indices].reshape(-1, 1, 3)
+    return gradient
 
 
 def mark_bar(
-    image: Image.Image, row: int, beyond: int, style: OverlayStyle, colour: tuple[int, int, int]
+    image: Image.Image, row: int, style: OverlayStyle, colour: tuple[int, int, int]
 ) -> None:
-    """Show where the hottest pixel falls on the scale, or that it is off the end of it.
+    """A thin tick across the bar, for showing where the auto-ranged part of it begins and ends."""
 
-    Without this the bar and the hotspot marker read as contradicting each other, and on hardware
-    they did: a bar labelled 29.2 at the top beside a marker reading 35.8. Both are right. The bar
-    is labelled with the range the palette covers, which is a percentile of the scene rather than
-    its extremes, because otherwise one glint or one dead pixel washes the whole picture out. A
-    hotter pixel than that is drawn in the top colour and is genuinely off the top of the scale.
-
-    A tick says where. A triangle at the end of the bar, drawn inside it so it cannot collide with
-    the label above, says past here.
-    """
-
-    left, top, width, height = style.bar_box
+    left, top, width, _ = style.bar_box
     draw = ImageDraw.Draw(image)
-    if beyond == 0:
-        y = top + row
-        draw.line((left, y, left + width - 1, y), fill=colour)
-        draw.line((left - style.margin, y, left - 1, y), fill=colour)
-        return
-    arrow = max(width // 2, 3)
-    apex = top + 1 if beyond > 0 else top + height - 2
-    base = apex + arrow if beyond > 0 else apex - arrow
-    middle = left + width // 2
-    draw.polygon(
-        [(middle, apex), (left + 1, base), (left + width - 2, base)], fill=colour
-    )
+    y = top + row
+    draw.line((left, y, left + width - 1, y), fill=colour)
 
 
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
-    """The palette down the right edge, labelled with the range it currently spans."""
+    """The ruler down the right edge, spanning the scene and labelled with its ends."""
 
     width = image.size[0]
     left, top, bar_width, bar_height = style.bar_box
-    # Reversed, so the hot end of the palette is at the top where a reader expects to find it.
-    ramp = overlay.palette[np.arange(PALETTE_STEPS - 1, -1, -1)].reshape(PALETTE_STEPS, 1, 3)
+    stats = overlay.stats
+    axis = bar_axis(stats)
+    ramp = bar_gradient(overlay.palette, axis, stats, bar_height)
     bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
     image.paste(bar.resize((bar_width, bar_height), Image.Resampling.NEAREST), (left, top))
     draw = ImageDraw.Draw(image)
     draw.rectangle(
         (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
     )
-    # A tick per extreme that is being marked on the picture, so the bar and the markers always
-    # tell the same story. Switching a marker off takes its tick with it.
-    for shown, celsius, colour in (
-        (overlay.hotspot, overlay.stats.maximum_celsius, HOTSPOT_RGB),
-        (overlay.coldspot, overlay.stats.minimum_celsius, COLDSPOT_RGB),
-    ):
-        if not shown:
-            continue
-        row, beyond = bar_position(
-            celsius,
-            overlay.stats.range_low_celsius,
-            overlay.stats.range_high_celsius,
-            bar_height,
-        )
-        mark_bar(image, row, beyond, style, colour)
-    high = format_temperature(overlay.stats.range_high_celsius, overlay.units)
-    low = format_temperature(overlay.stats.range_low_celsius, overlay.units)
+    # Where the auto-ranging stops. Above the upper tick and below the lower one the bar is one
+    # flat colour, because so is the picture, and the ticks are what say that is deliberate.
+    for bound in (stats.range_high_celsius, stats.range_low_celsius):
+        if axis[0] < bound < axis[1]:
+            mark_bar(image, bar_row(bound, axis, bar_height), style, OVERLAY_SHADOW_RGB)
+    hottest = format_temperature(axis[1], overlay.units)
+    coldest = format_temperature(axis[0], overlay.units)
     right = width - style.margin
-    draw_label(image, (right - label_width(high, style.pixel_height), top - style.line_height),
-               high, style)
-    draw_label(image, (right - label_width(low, style.pixel_height), top + bar_height + 1),
-               low, style)
-
-
-@dataclasses.dataclass(frozen=True)
-class Marker:
-    """One pixel worth pointing at: where it is in the sensor frame, how hot, and in what colour."""
-
-    spot: tuple[int, int]
-    celsius: float
-    colour: tuple[int, int, int]
-    arm_fraction: float = HOTSPOT_ARM_FRACTION
-
-
-# Internal aliases, underscored to match `_Settings` in settings.py: a label's position is its top
-# left corner, and its rectangle is that corner and the opposite one.
-_Position = tuple[float, float]
-_Rectangle = tuple[float, float, float, float]
+    # Coloured to match the markers they name, so the eye ties the number at the top of the ruler
+    # to the red cross on the picture without being told.
+    draw_label(image, (right - label_width(hottest, style.pixel_height), top - style.line_height),
+               hottest, style, HOTSPOT_RGB)
+    draw_label(image, (right - label_width(coldest, style.pixel_height), top + bar_height + 1),
+               coldest, style, COLDSPOT_RGB)
 
 
 def overlapping(one: _Rectangle, other: _Rectangle) -> bool:
@@ -393,6 +388,16 @@ def place_label(
         if inside and not any(overlapping(rect, other) for other in placed):
             return candidate
     return label_candidates(anchor, arm, text, style)[0]
+
+
+@dataclasses.dataclass(frozen=True)
+class Marker:
+    """One pixel worth pointing at: where it is in the sensor frame, how hot, and in what colour."""
+
+    spot: tuple[int, int]
+    celsius: float
+    colour: tuple[int, int, int]
+    arm_fraction: float = HOTSPOT_ARM_FRACTION
 
 
 def draw_marker(

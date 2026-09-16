@@ -45,18 +45,34 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   body {{ margin: 0; background: #0d0f12; color: #e8e8ea;
          font: 14px/1.45 system-ui, sans-serif; }}
   main {{ display: flex; flex-direction: column; height: 100vh; }}
-  .stage {{ position: relative; flex: 1; min-height: 0; background: #000; }}
+  /* The picture comes first and keeps most of the room. In a Fluidd tile this page is about 260
+     by 340 CSS pixels, and the controls laid out for a window wrapped to three rows and took all
+     of it: the stage was flexed down to 41 pixels and the tile showed a toolbar and no camera.
+     A flex basis rather than flex: 1, so the picture is sized from the space rather than from
+     whatever is left after the chrome. */
+  .stage {{ position: relative; flex: 1 1 auto; min-height: 55%; background: #000; }}
   .stage {{ overflow: hidden; }}
   /* Positioned and sized from the script on every paint, so the picture, the overlay and the
      pointer mapping all come from one rectangle and cannot disagree about where anything is. */
   .stage img {{ position: absolute; display: block; image-rendering: pixelated; }}
   .stage canvas {{ position: absolute; inset: 0; width: 100%; height: 100%;
                    touch-action: none; cursor: crosshair; }}
-  .bar {{ display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;
-          padding: 0.5rem 0.75rem; background: #14161a; border-top: 1px solid #23262c; }}
-  .tools {{ display: flex; gap: 0.35rem; align-items: center; padding: 0.4rem 0.75rem;
-            background: #14161a; border-top: 1px solid #23262c; flex-wrap: wrap; }}
-  .tools button {{ padding: 0.3rem 0.6rem; border: 1px solid #33373f; border-radius: 4px;
+  .bar {{ display: flex; gap: 0.5rem 0.9rem; align-items: baseline; flex-wrap: wrap;
+          padding: 0.35rem 0.6rem; background: #14161a; border-top: 1px solid #23262c;
+          font-size: 0.8rem; }}
+  @media (min-height: 460px) {{
+    .bar {{ gap: 1rem; padding: 0.5rem 0.75rem; font-size: 1rem; }}
+  }}
+  /* Hidden in a tile, shown when there is room. A tile is for looking at and for pointing at,
+     both of which work without any of these; zooming and saving an image are things you do once
+     you have opened it properly, and that is exactly when the room appears. */
+  .tools {{ display: none; gap: 0.3rem; align-items: center; padding: 0.35rem 0.6rem;
+            background: #14161a; border-top: 1px solid #23262c; flex-wrap: wrap;
+            font-size: 0.8rem; }}
+  @media (min-height: 460px) {{
+    .tools {{ display: flex; }}
+  }}
+  .tools button {{ padding: 0.25rem 0.5rem; border: 1px solid #33373f; border-radius: 4px;
                    background: #1d2026; color: #e8e8ea; font: inherit; cursor: pointer; }}
   .tools button[aria-pressed="true"] {{ background: #d8752a; border-color: #d8752a;
                                         color: #14161a; font-weight: 600; }}
@@ -65,11 +81,16 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   .bar b {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
   .bar span {{ color: #9aa0aa; font-size: 0.8rem; text-transform: uppercase;
                letter-spacing: 0.04em; }}
-  .reading {{ font-size: 1.15rem; }}
+  .reading {{ font-size: 1.05em; }}
   .offline {{ color: #d8752a; }}
   .group {{ display: flex; gap: 0.6rem; align-items: baseline; }}
   .group.idle {{ opacity: 0.45; }}
-  .hint {{ color: #6c727c; font-size: 0.75rem; }}
+  .hint {{ color: #6c727c; font-size: 0.75em; }}
+  /* The other half of hiding the toolbar: say where it went, but only while it is gone. */
+  #tile-note {{ display: flex; }}
+  @media (min-height: 460px) {{
+    #tile-note {{ display: none; }}
+  }}
   a {{ color: #9aa0aa; margin-left: auto; font-size: 0.8rem; }}
 </style>
 </head>
@@ -99,6 +120,10 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     <div class="group idle" id="region-group">
       <span>Region</span><b id="region-max">-</b><b id="region-min">-</b><b id="region-avg">-</b>
       <span class="hint" id="region-hint">drag a box</span>
+    </div>
+    <div class="group hint" id="tile-note">
+    </div>
+      open me to zoom, save or change units
     </div>
     <a href="./">settings</a>
   </div>

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.14.0
+
+Three fixes, all found by looking at it on a real printer.
+
+- **The live tile showed controls and no camera.** Laid out for a window, the controls wrapped to
+  three rows and took the whole tile, leaving the picture 41 pixels tall. The picture now keeps most
+  of the tile and the toolbar appears only when the page is opened properly, which is when you want
+  it anyway.
+- **The ruler now spans the coldest and hottest in view**, so its ends are the same numbers the
+  markers show. It used to be labelled with the auto-ranged bounds, which is a different and more
+  defensible thing, and which read as a contradiction to everyone who looked at it: a ruler topped
+  25.3 next to a marker reading 30.0. The auto-ranged part is now shown by two ticks, and the flat
+  bands above and below them are the truth about where colour stops carrying information.
+- The ruler's end labels are coloured to match the markers they name.
+
+Worth knowing about the two tiles: they are separate. The plain one is a picture and always will be;
+pointing and measuring happen on the live one.
+
 ## 0.13.0
 
 Tools on the viewer.

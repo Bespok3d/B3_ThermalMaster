@@ -48,15 +48,14 @@ exactly what it did before there was a readout at all.
 
 It draws four things into the picture itself:
 
-- A colorbar down the right edge, labelled with the temperatures at each end of the palette, and
-  marked in red with where the hottest pixel falls.
+- A colorbar down the right edge, spanning the coldest and hottest temperatures in view and
+  labelled with them, in the same colours as the markers that name those pixels.
 
-  Those labels are the ends of the range currently being mapped, not the hottest and coldest pixels
-  in view. The mapping ignores the top and bottom two percent of the scene so that one glint or one
-  dead pixel cannot wash the picture out, which means the hotspot marker often reads higher than the
-  top of the bar. That is not a disagreement: it means the hottest thing in frame is off the top of
-  the scale and is being drawn in the brightest colour the palette has. When that happens the red
-  mark becomes a triangle at the end of the bar.
+  Two ticks across it mark where the auto-ranging stops. Between them the colour varies; above and
+  below them the bar is one flat colour, because so is the picture. The mapping ignores the top and
+  bottom two percent of the scene so that one glint or one dead pixel cannot wash everything out,
+  and anything past that is drawn in the end colour. The flat bands are not decoration: they are
+  where colour stops carrying information.
 - A crosshair in the middle, with the temperature under it.
 - A red marker on the hottest pixel in view, with its temperature.
 - A blue marker on the coldest pixel, with its temperature.
@@ -76,7 +75,12 @@ pixel, and the pixel coordinates of both extremes in the orientation you are loo
 ## The interactive viewer
 
 `/thermal/view`, and it registers itself as a second tile in Fluidd and Mainsail, named after your
-camera with "live" on the end. Point at the picture and it tells you the temperature of the pixel
+camera with "live" on the end. The two tiles are separate views of the same camera: the plain one is
+a picture, and pointing and measuring happen on this one.
+
+In a tile it shows the picture and the readout, and hovering works there. The zoom, units and save
+controls appear once you open it full size, because a tile has no room for them and a tile full of
+buttons with no camera in it is worse than no buttons. Point at the picture and it tells you the temperature of the pixel
 under the pointer, along with the hottest and coldest in view.
 
 It is a second tile rather than a replacement because the two fail differently. The plain tile is an

@@ -412,6 +412,42 @@ def run_cold_start_checks(browser, port: int) -> list:
     return [("a box drawn before the first frame still lands", reported.endswith("C"), True)]
 
 
+# What Fluidd gives an iframe tile, roughly, on a 4:3 camera rotated to portrait.
+TILE_VIEWPORT = {"width": 260, "height": 340}
+
+
+def run_tile_checks(browser, port: int) -> list:
+    """The viewer at the size Fluidd actually gives it.
+
+    Everything else here runs in a window, and in a window the page was fine. In a tile the
+    controls, laid out for a window, wrapped to three rows and took all of it: the picture flexed
+    down to 41 pixels and the tile showed a toolbar and no camera. Every window-sized check passed
+    throughout.
+    """
+
+    page = browser.new_page(viewport=TILE_VIEWPORT)
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    measured = page.evaluate(
+        """() => {
+            const stage = document.querySelector(".stage").getBoundingClientRect();
+            return { stage: stage.height,
+                     tools: getComputedStyle(document.querySelector(".tools")).display };
+        }"""
+    )
+    rect = canvas_rect(page)
+    page.mouse.move(rect["left"] + rect["width"] / 2, rect["top"] + rect["height"] / 2)
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    reads = reading(page)
+    page.close()
+    return [
+        ("a tile gives the picture most of its height",
+         measured["stage"] > TILE_VIEWPORT["height"] * 0.4, True),
+        ("a tile hides the toolbar rather than the camera", measured["tools"], "none"),
+        ("and pointing still works in a tile", reads is not None, True),
+    ]
+
+
 def main() -> None:
     try:
         from playwright.sync_api import sync_playwright
@@ -450,6 +486,9 @@ def main() -> None:
         print("viewer")
         report(run_viewer_checks(viewer, requests), problems)
         report(run_cold_start_checks(browser, PORT), problems)
+        print("")
+        print("viewer in a tile")
+        report(run_tile_checks(browser, PORT), problems)
         browser.close()
     print("")
     for problem in problems:
