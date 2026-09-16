@@ -51,19 +51,24 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
      readout underneath spends the one dimension the picture actually needed. The script decides,
      because only it knows the picture's shape, and that changes when the camera is rotated. */
   body.beside main {{ flex-direction: row; }}
-  body.beside .panel {{ flex: 0 1 auto; min-width: 7rem; max-width: 50%;
+  /* Narrow on purpose. The readout is four short numbers, and letting it size itself gave it half
+     the tile, which is half the width the picture could have had. It takes a fixed narrow column
+     now, capped at a third, and the picture keeps the rest. */
+  body.beside .panel {{ flex: 0 0 auto; width: 7.5rem; max-width: 34%;
                         border-left: 1px solid #23262c; }}
   body.beside .group {{ flex-wrap: wrap; }}
   body.beside .bar {{ flex-direction: column; align-items: flex-start; gap: 0.15rem;
                       border-top: 0; }}
-  body.beside .tools {{ border-top: 0; }}
   /* The picture comes first and keeps most of the room. In a Fluidd tile this page is about 260
      by 340 CSS pixels, and the controls laid out for a window wrapped to three rows and took all
      of it: the stage was flexed down to 41 pixels and the tile showed a toolbar and no camera.
      A flex basis rather than flex: 1, so the picture is sized from the space rather than from
      whatever is left after the chrome. */
-  .stage {{ position: relative; flex: 1 1 auto; min-height: 55%; background: #000; }}
-  .stage {{ overflow: hidden; }}
+  /* The picture and its controls, in that order and always together. Only the readout moves to
+     the side when the page is laid out beside; the controls belong under the picture either way. */
+  .view {{ display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }}
+  .stage {{ position: relative; flex: 1 1 auto; min-height: 50%; background: #000;
+            overflow: hidden; }}
   /* Two layouts in one rule. The inset and object-fit are what the picture gets with no script
      at all: letterboxed inside the stage, right shape, whatever the tile is. The script overrides
      left, top, width and height on every paint, so the picture, the overlay and the pointer
@@ -74,32 +79,39 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
                 display: block; image-rendering: pixelated; }}
   .stage canvas {{ position: absolute; inset: 0; width: 100%; height: 100%;
                    touch-action: none; cursor: crosshair; }}
-  .bar {{ display: flex; gap: 0.5rem 0.9rem; align-items: baseline; flex-wrap: wrap;
-          padding: 0.35rem 0.6rem; background: #14161a; border-top: 1px solid #23262c;
-          font-size: 0.8rem; }}
+  /* Tight enough that the readout is one line of a tile rather than three. Every line it takes
+     is a line the picture does not get, and the picture is the reason the tile is there. */
+  .bar {{ display: flex; gap: 0.2rem 0.7rem; align-items: baseline; flex-wrap: wrap;
+          padding: 0.25rem 0.5rem; background: #14161a; border-top: 1px solid #23262c;
+          font-size: 0.78rem; }}
   @media (min-height: 460px) {{
     .bar {{ gap: 1rem; padding: 0.5rem 0.75rem; font-size: 1rem; }}
   }}
-  /* Hidden in a tile, shown when there is room. A tile is for looking at and for pointing at,
-     both of which work without any of these; zooming and saving an image are things you do once
-     you have opened it properly, and that is exactly when the room appears. */
-  .tools {{ display: none; gap: 0.3rem; align-items: center; padding: 0.35rem 0.6rem;
-            background: #14161a; border-top: 1px solid #23262c; flex-wrap: wrap;
-            font-size: 0.8rem; }}
+  /* Always there, in a tile as well. Hiding them below a height breakpoint put the controls out
+     of reach in the one place they are most wanted, the dashboard, and left the tile advertising
+     tools it would not show. They are compact instead: small type, tight padding, and free to wrap
+     to a second row when the tile is narrow. */
+  .tools {{ display: flex; flex: 0 0 auto; gap: 0.25rem; align-items: center;
+            padding: 0.3rem 0.4rem; background: #14161a; border-top: 1px solid #23262c;
+            flex-wrap: wrap; font-size: 0.72rem; }}
   @media (min-height: 460px) {{
-    .tools {{ display: flex; }}
+    .tools {{ gap: 0.3rem; padding: 0.35rem 0.6rem; font-size: 0.8rem; }}
   }}
-  /* Beside the picture the panel is a narrow column, and a column of buttons is not worth the
-     width it costs. They come back when the page is opened properly, which is when it is wide. */
-  @media (max-width: 700px) {{
-    body.beside .tools {{ display: none; }}
-  }}
-  .tools button {{ padding: 0.25rem 0.5rem; border: 1px solid #33373f; border-radius: 4px;
+  .tools button {{ padding: 0.2rem 0.4rem; border: 1px solid #33373f; border-radius: 4px;
                    background: #1d2026; color: #e8e8ea; font: inherit; cursor: pointer; }}
+  @media (min-height: 460px) {{
+    .tools button {{ padding: 0.25rem 0.5rem; }}
+  }}
   .tools button[aria-pressed="true"] {{ background: #d8752a; border-color: #d8752a;
                                         color: #14161a; font-weight: 600; }}
-  .tools .zoom {{ min-width: 3.2rem; text-align: center; color: #9aa0aa;
+  .tools .zoom {{ min-width: 2.7rem; text-align: center; color: #9aa0aa;
                   font-variant-numeric: tabular-nums; }}
+  /* The one thing in the toolbar that is a readout rather than a control. In a narrow tile it is
+     what pushes the row to wrap, and a second row of chrome costs the picture more than knowing
+     the zoom percentage is worth: the buttons still say which way they go, and Fit still resets. */
+  @media (max-width: 340px) {{
+    .tools .zoom {{ display: none; }}
+  }}
   .bar b {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
   .bar span {{ color: #9aa0aa; font-size: 0.8rem; text-transform: uppercase;
                letter-spacing: 0.04em; }}
@@ -108,29 +120,27 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   .group {{ display: flex; gap: 0.6rem; align-items: baseline; }}
   .group.idle {{ opacity: 0.45; }}
   .hint {{ color: #6c727c; font-size: 0.75em; }}
-  /* The other half of hiding the toolbar: say where it went, but only while it is gone. */
-  #tile-note {{ display: flex; }}
-  @media (min-height: 460px) {{
-    #tile-note {{ display: none; }}
-  }}
   a {{ color: #9aa0aa; margin-left: auto; font-size: 0.8rem; }}
 </style>
 </head>
 <body>
 <main>
-  <div class="stage">
-    <img id="feed" src="stream.mjpg" alt="Live thermal view"{picture_shape}>
-    <canvas id="surface"></canvas>
-  </div>
-  <div class="panel-tools tools">
-    <button type="button" id="zoom-out" title="Zoom out">-</button>
-    <span class="zoom" id="zoom-level">100%</span>
-    <button type="button" id="zoom-in" title="Zoom in">+</button>
-    <button type="button" id="fit">Fit</button>
-    <button type="button" id="mode-measure" aria-pressed="true">Measure</button>
-    <button type="button" id="mode-pan" aria-pressed="false">Pan</button>
-    <button type="button" id="units">C</button>
-    <button type="button" id="shot">Save image</button>
+  <div class="view">
+    <div class="stage">
+      <img id="feed" src="stream.mjpg" alt="Live thermal view"{picture_shape}>
+      <canvas id="surface"></canvas>
+    </div>
+    <div class="panel-tools tools">
+      <button type="button" id="zoom-out" title="Zoom out">-</button>
+      <span class="zoom" id="zoom-level">100%</span>
+      <button type="button" id="zoom-in" title="Zoom in">+</button>
+      <button type="button" id="fit">Fit</button>
+      <button type="button" id="mode-measure" aria-pressed="true"
+              title="Measure: drag a box on the picture">Box</button>
+      <button type="button" id="mode-pan" aria-pressed="false">Pan</button>
+      <button type="button" id="units">C</button>
+      <button type="button" id="shot" title="Save image">Save</button>
+    </div>
   </div>
   <div class="panel">
   <div class="bar">
@@ -143,10 +153,6 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     <div class="group idle" id="region-group">
       <span>Region</span><b id="region-max">-</b><b id="region-min">-</b><b id="region-avg">-</b>
       <span class="hint" id="region-hint">drag a box</span>
-    </div>
-    <div class="group hint" id="tile-note">
-    </div>
-      open for tools
     </div>
     <a href="./">settings</a>
   </div>

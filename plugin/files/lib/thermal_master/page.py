@@ -51,11 +51,16 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
             border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
             cursor: pointer; }}
   .status {{ margin: 0.6rem 0 0; font-size: 0.8rem; }}
+  /* The way back. This page is reached from a link in the viewer, and in a Fluidd tile that link
+     navigates the tile itself: there is no browser chrome around an iframe, so without this the
+     only way back to the camera was to reload the dashboard. */
+  .back {{ display: inline-block; margin-bottom: 0.6rem; color: #9aa0aa; font-size: 0.85rem; }}
   p {{ color: #9aa0aa; font-size: 0.85rem; }}
 </style>
 </head>
 <body>
 <main>
+  <a class="back" href="view">Back to the camera</a>
   <img src="stream.mjpg" alt="Live thermal view">
   <form id="controls" method="post" action="settings">
     <fieldset>

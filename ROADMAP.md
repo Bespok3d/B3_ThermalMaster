@@ -1455,6 +1455,36 @@ picture is. The check now computes the painted rectangle from the natural size, 
 that the page's own script really did not run, because `page.evaluate` still works in that context
 and a check that quietly tested the scripted layout would have passed forever.
 
+**F-67. The controls were hidden in the one place they were wanted.** 0.14.0 answered a tile that
+showed a toolbar and no camera by hiding the toolbar below 460 pixels of height, which is every
+dashboard tile there is. That fixed the picture and made the controls reachable only by opening the
+viewer full screen, and left the tile printing "open for tools" where the tools should have been.
+Reported as "I always have to open it to actually use the controls", along with the picture being
+too small, which was the same budget seen from the other side.
+
+The height was not the problem; the spending was. The readout was taking half the width beside the
+picture and three lines underneath it, for four short numbers. It now takes a fixed narrow column
+capped at a third, and one line. The toolbar is always shown, compact, under the picture in both
+layouts, which needed the picture and the controls to become one flex column so that only the
+readout moves to the side. The row fits across a 260 pixel tile once the mode button says "Box"
+rather than "Measure" and the zoom percentage hides below 340 pixels of width. Measured: in a
+540 by 400 tile the picture is 273 by 364, the same as it was with no toolbar at all; in a 260 by
+340 tile it is 174 by 232, against 143 by 190 when the toolbar wrapped to two rows.
+
+The check that pins it is a budget rather than a bound: the picture keeps at least two fifths of the
+tile, at both tile shapes. A toolbar that wraps to a second row or a readout that takes three lines
+fails it, which is exactly the regression, and it does not care how the space was reclaimed.
+
+Also found here, by reading the markup while changing it: the tile note was malformed. Its `<div>`
+was closed before its text, so "open for tools" was loose content in the readout bar and the bar
+closed early. The browser papered over it and the screenshot showed it plainly once I looked.
+
+**F-68. The settings page was a one way trip.** The viewer links to it, and in a Fluidd tile that
+link navigates the tile itself. An iframe has no browser chrome, so there was no back button, and
+the only way to the camera was reloading the dashboard. The control page now carries a relative
+`view` link at the top. The browser harness walks the round trip, because a link that goes one way
+is only visibly broken from inside a tile.
+
 ### Phase 7d: MP4 recording
 
 MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome

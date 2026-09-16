@@ -78,11 +78,10 @@ pixel, and the pixel coordinates of both extremes in the orientation you are loo
 you chose at install time. There is one tile, and this is it. Point at the picture and it tells you
 the temperature of the pixel under the pointer, along with the hottest and coldest in view.
 
-In a tile it shows the picture and the readout, and hovering works there. When the tile is wider
-than the picture needs, which it usually is with a rotated camera, the numbers sit beside the picture
-rather than underneath it, so the picture gets the height. The zoom, units and save controls appear
-once you open it full size, because a tile has no room for them and a tile full of buttons with no
-camera in it is worse than no buttons.
+In a tile it shows the picture, the readout and the controls, and hovering works there. When the
+tile is wider than the picture needs, which it usually is with a rotated camera, the numbers sit
+beside the picture rather than underneath it, so the picture gets the height. The controls sit under
+the picture in a single compact row, and grow when you open the page full size.
 
 The stream on its own is still there at `/thermal/stream.mjpg`, and the still at
 `/thermal/snapshot.jpg`, for anything that wants a plain picture rather than a page. The viewer does

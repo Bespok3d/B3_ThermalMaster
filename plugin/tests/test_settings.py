@@ -268,6 +268,18 @@ def test_the_calibrate_button_posts_the_field_the_handler_reads(thermal_streamer
     assert f'value="{thermal_streamer.SHUTTER_ACTION}"' in page
 
 
+def test_the_control_page_offers_the_way_back_to_the_camera(thermal_streamer, store):
+    """A tile has no browser chrome around it.
+
+    The viewer links here, and in Fluidd that link navigates the tile itself, so a page with no way
+    back strands the user on the settings until they reload the whole dashboard.
+    """
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert 'href="view"' in page
+
+
 def test_the_page_carries_no_absolute_paths_of_its_own(thermal_streamer, store):
     """The plugin cannot know its mount point, so every URL it emits has to be relative.
 

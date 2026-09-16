@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.0
+
+- **The controls are in the tile now.** They used to appear only above a certain height, which no
+  dashboard tile reaches, so the buttons were unreachable without opening the viewer full screen.
+  They sit under the picture in one compact row, and grow when the page is opened properly.
+- **The picture is bigger in a tile, not smaller, despite the extra row.** The readout took half the
+  width when it sat beside the picture and three lines when it sat underneath; it now takes a narrow
+  column and a single line. In a wide tile the picture is the same size it was with no controls at
+  all, and in a narrow one it is about a fifth larger than it was in 0.16.0.
+- **The settings page has a way back to the camera.** A tile is an iframe with no browser chrome, so
+  following the settings link stranded you there until you reloaded the dashboard.
+- The mode button is labelled "Box" rather than "Measure", which is what lets the whole row fit
+  across a narrow tile, and the zoom percentage hides on a tile too narrow to hold it.
+
 ## 0.16.0
 
 - **One camera instead of two.** The dashboard listed `Thermal` and `Thermal live`, two views of the

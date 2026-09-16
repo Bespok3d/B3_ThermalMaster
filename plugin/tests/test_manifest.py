@@ -173,21 +173,6 @@ def test_the_registered_camera_is_not_a_second_name():
     assert "[webcam $THERMAL_CAMERA_NAME]" in fragment
 
 
-def test_the_viewer_lays_the_picture_out_without_a_script():
-    """The fallback the second tile used to be.
-
-    With no JavaScript the page still has to be a camera, which means the stylesheet, not the
-    script, is what fits the picture into the stage.
-    """
-
-    page = (
-        Path(__file__).resolve().parent.parent / "files" / "lib" / "thermal_master" / "viewer.py"
-    ).read_text()
-
-    rule = page.split(".stage img {{", 1)[1].split("}}", 1)[0]
-    for declaration in ("inset: 0", "object-fit: contain", "width: 100%", "height: 100%"):
-        assert declaration in rule, declaration
-
 
 def test_the_frame_endpoint_is_proxied_and_uncacheable():
     """A cached frame of temperatures is a wrong frame of temperatures."""

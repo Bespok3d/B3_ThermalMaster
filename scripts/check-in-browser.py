@@ -444,20 +444,24 @@ def run_cold_start_checks(browser, port: int) -> list:
     return [("a box drawn before the first frame still lands", reported.endswith("C"), True)]
 
 
-# What Fluidd gives an iframe tile, roughly, on a 4:3 camera rotated to portrait.
+# What Fluidd gives an iframe tile. The portrait one is a narrow dashboard column; the landscape
+# one is the shape the maintainer photographed, where the picture had been squeezed into a quarter
+# of the tile and the toolbar was hidden outright.
 TILE_VIEWPORT = {"width": 260, "height": 340}
+WIDE_TILE_VIEWPORT = {"width": 540, "height": 400}
 
 
-def run_tile_checks(browser, port: int) -> list:
+def run_tile_checks(browser, port: int, viewport: dict) -> list:
     """The viewer at the size Fluidd actually gives it.
 
     Everything else here runs in a window, and in a window the page was fine. In a tile the
     controls, laid out for a window, wrapped to three rows and took all of it: the picture flexed
-    down to 41 pixels and the tile showed a toolbar and no camera. Every window-sized check passed
-    throughout.
+    down to 41 pixels and the tile showed a toolbar and no camera. The answer then was to hide the
+    toolbar below a height breakpoint, which fixed the picture and made the controls unreachable
+    in the one place they are most wanted. Both halves are checked here now.
     """
 
-    page = browser.new_page(viewport=TILE_VIEWPORT)
+    page = browser.new_page(viewport=viewport)
     page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     # Measured before any pointer goes near it, because the picture is positioned by the script
@@ -466,21 +470,35 @@ def run_tile_checks(browser, port: int) -> list:
         """() => {
             const stage = document.querySelector(".stage").getBoundingClientRect();
             const picture = document.getElementById("feed").getBoundingClientRect();
-            return { stage: stage.height, picture: picture.width,
-                     tools: getComputedStyle(document.querySelector(".tools")).display };
+            const tools = document.querySelector(".tools");
+            const buttons = tools.getBoundingClientRect();
+            return { stage: stage.height, picture: picture.width, area: picture.width * picture.height,
+                     tools: getComputedStyle(tools).display, toolbar: buttons.height,
+                     beside: document.body.classList.contains("beside") };
         }"""
     )
     rect = canvas_rect(page)
     page.mouse.move(rect["left"] + rect["width"] / 2, rect["top"] + rect["height"] / 2)
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     reads = reading(page)
+    # A control the pointer can actually reach, which is the whole point of showing the toolbar.
+    page.click("#zoom-in")
+    zoomed = page.inner_text("#zoom-level")
     page.close()
+    area = viewport["width"] * viewport["height"]
     return [
         ("a tile shows the picture before anything is touched",
          measured["picture"] > 0, True),
         ("a tile gives the picture most of its height",
-         measured["stage"] > TILE_VIEWPORT["height"] * 0.4, True),
-        ("a tile hides the toolbar rather than the camera", measured["tools"], "none"),
+         measured["stage"] > viewport["height"] * 0.4, True),
+        ("a tile shows the toolbar", measured["tools"], "flex"),
+        ("and the toolbar leaves the picture the tile",
+         measured["toolbar"] < viewport["height"] * 0.25, True),
+        # A budget rather than a bound. Both rows of chrome fit inside it at either tile shape, and
+        # a toolbar that wraps to a second row, or a readout that takes three lines, spends enough
+        # of the tile to fail it. That is the regression: the picture is what the tile is for.
+        ("the picture keeps at least two fifths of the tile", measured["area"] > area * 0.4, True),
+        ("a control in a tile can be pressed", zoomed != "100%", True),
         ("and pointing still works in a tile", reads is not None, True),
     ]
 
@@ -490,6 +508,35 @@ def run_tile_checks(browser, port: int) -> list:
 # for here.
 NO_SCRIPT_VIEWPORT = {"width": 320, "height": 700}
 PICTURE_ASPECT = 160 / 120
+
+
+def run_navigation_checks(browser, port: int) -> list:
+    """Getting to the settings and back, the way a tile does it.
+
+    A Fluidd tile is an iframe with no browser chrome around it, so a link that navigates the tile
+    is one way unless the page it lands on offers a way back. The settings page did not, and the
+    only way back to the camera was to reload the whole dashboard.
+    """
+
+    page = browser.new_page(viewport=TILE_VIEWPORT)
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    page.click("text=settings")
+    page.wait_for_load_state("domcontentloaded")
+    settings = page.url
+    page.click("text=Back to the camera")
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    returned = page.url
+    picture = page.evaluate(
+        '() => document.getElementById("feed").getBoundingClientRect().width'
+    )
+    page.close()
+    return [
+        ("the viewer reaches the settings", settings.endswith("/"), True),
+        ("and the settings reach the viewer", returned.endswith("/view"), True),
+        ("and the picture is there when it lands", picture > 0, True),
+    ]
 
 
 def run_no_script_checks(browser, port: int) -> list:
@@ -593,8 +640,14 @@ def main() -> None:
         report(run_viewer_checks(viewer, requests), problems)
         report(run_cold_start_checks(browser, PORT), problems)
         print("")
-        print("viewer in a tile")
-        report(run_tile_checks(browser, PORT), problems)
+        print("viewer in a tall tile")
+        report(run_tile_checks(browser, PORT, TILE_VIEWPORT), problems)
+        print("")
+        print("viewer in a wide tile")
+        report(run_tile_checks(browser, PORT, WIDE_TILE_VIEWPORT), problems)
+        print("")
+        print("getting there and back")
+        report(run_navigation_checks(browser, PORT), problems)
         print("")
         print("viewer with no script")
         report(run_no_script_checks(browser, PORT), problems)
