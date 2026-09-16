@@ -32,6 +32,13 @@ VIEWER_MINIMUM_REGION_PIXELS = 3
 VIEWER_REGION_KEY = "thermal-master.region"
 VIEWER_MAXIMUM_ZOOM = 8.0
 VIEWER_ZOOM_STEP = 1.4
+# Frames a second written into a recording. The camera itself runs at about fifteen and the tile
+# polls at that rate, so asking for more would write duplicates; asking for much less makes a clip
+# of a heating nozzle look like a slideshow.
+VIEWER_RECORD_FPS = 12
+# A recording is held in memory until it is stopped, so it cannot be left running all afternoon by
+# a tab nobody is looking at. Ten minutes at this frame rate is a few tens of megabytes.
+VIEWER_RECORD_LIMIT_MILLISECONDS = 600000
 
 VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -92,8 +99,8 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
      tools it would not show. They are compact instead: small type, tight padding, and free to wrap
      to a second row when the tile is narrow. */
   .tools {{ display: flex; flex: 0 0 auto; gap: 0.25rem; align-items: center;
-            padding: 0.3rem 0.4rem; background: #14161a; border-top: 1px solid #23262c;
-            flex-wrap: wrap; font-size: 0.72rem; }}
+            justify-content: center; padding: 0.3rem 0.4rem; background: #14161a;
+            border-top: 1px solid #23262c; flex-wrap: wrap; font-size: 0.72rem; }}
   @media (min-height: 460px) {{
     .tools {{ gap: 0.3rem; padding: 0.35rem 0.6rem; font-size: 0.8rem; }}
   }}
@@ -112,6 +119,16 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   @media (max-width: 340px) {{
     .tools .zoom {{ display: none; }}
   }}
+  /* Same bargain as the zoom readout, one size up. Recording is something you set up deliberately,
+     which means the page is open properly; a narrow tile spends the width on the controls you
+     reach for while glancing at a print. */
+  @media (max-width: 380px) {{
+    .tools .record {{ display: none; }}
+  }}
+  /* Not the toolbar's orange. A recording is running until you stop it, and it should not look
+     like one more thing that is merely switched on. */
+  .tools .record[aria-pressed="true"] {{ background: #c0392b; border-color: #c0392b;
+                                         color: #fff; }}
   .bar b {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
   .bar span {{ color: #9aa0aa; font-size: 0.8rem; text-transform: uppercase;
                letter-spacing: 0.04em; }}
@@ -140,6 +157,8 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
       <button type="button" id="mode-pan" aria-pressed="false">Pan</button>
       <button type="button" id="units">C</button>
       <button type="button" id="shot" title="Save image">Save</button>
+      <button type="button" id="record" class="record" aria-pressed="false"
+              title="Record video">Rec</button>
     </div>
   </div>
   <div class="panel">
@@ -183,6 +202,7 @@ VIEWER_SCRIPT = """
   var panButton = document.getElementById("mode-pan");
   var unitsButton = document.getElementById("units");
   var shotButton = document.getElementById("shot");
+  var recordButton = document.getElementById("record");
   var regionGroup = document.getElementById("region-group");
   var regionOut = {
     max: document.getElementById("region-max"),
@@ -194,6 +214,8 @@ VIEWER_SCRIPT = """
   var REGION_KEY = "REGION_KEY_NAME";
   var MAX_ZOOM = MAX_ZOOM_VALUE;
   var ZOOM_STEP = ZOOM_STEP_VALUE;
+  var RECORD_FPS = RECORD_FPS_VALUE;
+  var RECORD_LIMIT = RECORD_LIMIT_MS;
 
   var zoom = 1;
   var pan = { x: 0, y: 0 };   // CSS pixels, applied after the zoom, clamped so the picture stays
@@ -650,33 +672,145 @@ VIEWER_SCRIPT = """
       + "-" + two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());
   }
 
-  // Saved at the sensor's own resolution rather than at whatever size the window happens to be,
-  // and with the region drawn on, because a picture of a measurement that does not show what was
-  // measured is not evidence of anything.
+  // The picture as it should be kept: at the sensor's own resolution rather than at whatever size
+  // the window happens to be, and with the region drawn on, because a picture of a measurement
+  // that does not show what was measured is not evidence of anything. One painter, used by both
+  // the still and the recording, so a saved frame and a saved clip cannot disagree.
+  function paintKeepsake(pen, width, height) {
+    pen.drawImage(feed, 0, 0, width, height);
+    if (!region || !frame) { return; }
+    var scaleX = width / frame.width;
+    var scaleY = height / frame.height;
+    pen.strokeStyle = "rgba(120,220,160,0.95)";
+    pen.lineWidth = Math.max(1, Math.round(width / 160));
+    pen.strokeRect(region.left * scaleX, region.top * scaleY,
+                   (region.right - region.left + 1) * scaleX,
+                   (region.bottom - region.top + 1) * scaleY);
+  }
+
+  function offer(blob, extension) {
+    var link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "thermal-" + stamp() + "." + extension;
+    link.click();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 10000);
+  }
+
   shotButton.addEventListener("click", function () {
     if (!feed.naturalWidth) { return; }
     var shot = document.createElement("canvas");
     shot.width = feed.naturalWidth;
     shot.height = feed.naturalHeight;
-    var pen = shot.getContext("2d");
-    pen.drawImage(feed, 0, 0, shot.width, shot.height);
-    if (region && frame) {
-      var scaleX = shot.width / frame.width;
-      var scaleY = shot.height / frame.height;
-      pen.strokeStyle = "rgba(120,220,160,0.95)";
-      pen.lineWidth = Math.max(1, Math.round(shot.width / 160));
-      pen.strokeRect(region.left * scaleX, region.top * scaleY,
-                     (region.right - region.left + 1) * scaleX,
-                     (region.bottom - region.top + 1) * scaleY);
-    }
-    shot.toBlob(function (blob) {
-      var link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = "thermal-" + stamp() + ".png";
-      link.click();
-      setTimeout(function () { URL.revokeObjectURL(link.href); }, 10000);
-    }, "image/png");
+    paintKeepsake(shot.getContext("2d"), shot.width, shot.height);
+    shot.toBlob(function (blob) { offer(blob, "png"); }, "image/png");
   });
+
+  // Recording. The browser will only mux what it will mux, so the formats are tried in the order
+  // of what opens without being asked questions: MP4 first, which Safari produces natively and
+  // recent Chrome does too, then WebM, which is what Chrome has always produced. The clip is
+  // named for what it actually is rather than for what was asked for.
+  var RECORDING_FORMATS = [
+    { type: "video/mp4;codecs=avc1.42E01E", extension: "mp4" },
+    { type: "video/mp4", extension: "mp4" },
+    { type: "video/webm;codecs=vp9", extension: "webm" },
+    { type: "video/webm;codecs=vp8", extension: "webm" },
+    { type: "video/webm", extension: "webm" }
+  ];
+  var recorder = null;
+  var recorded = [];
+  var recordingSince = 0;
+  var recordingPainter = null;
+  var recordingClock = null;
+
+  function canRecord() {
+    return typeof MediaRecorder !== "undefined"
+      && !!document.createElement("canvas").captureStream
+      && RECORDING_FORMATS.some(function (format) {
+        return MediaRecorder.isTypeSupported(format.type);
+      });
+  }
+
+  // Asked for in order of preference, and actually built rather than merely asked about:
+  // `isTypeSupported` is a browser's opinion, and at least one of them says yes to a container it
+  // then refuses to construct a recorder for. The one that constructs is the one that muxes.
+  function makeRecorder(stream) {
+    for (var index = 0; index < RECORDING_FORMATS.length; index += 1) {
+      var format = RECORDING_FORMATS[index];
+      if (!MediaRecorder.isTypeSupported(format.type)) { continue; }
+      try {
+        return { recorder: new MediaRecorder(stream, { mimeType: format.type }), format: format };
+      } catch (refused) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  function elapsed() {
+    var seconds = Math.floor((Date.now() - recordingSince) / 1000);
+    return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+  }
+
+  function showRecording(running) {
+    recordButton.setAttribute("aria-pressed", running ? "true" : "false");
+    recordButton.textContent = running ? "Stop " + elapsed() : "Rec";
+    recordButton.title = running ? "Stop recording and save the clip" : "Record video";
+  }
+
+  function startRecording() {
+    // Drawn at the picture's own resolution, which is the resolution the readout was burned in
+    // at. Recording the stage instead would record the letterboxing and the zoom.
+    var film = document.createElement("canvas");
+    film.width = feed.naturalWidth;
+    film.height = feed.naturalHeight;
+    var pen = film.getContext("2d");
+    // One frame before the recorder starts, so a clip stopped almost immediately still holds a
+    // picture rather than nothing at all.
+    paintKeepsake(pen, film.width, film.height);
+    var made = makeRecorder(film.captureStream(RECORD_FPS));
+    if (made === null) { return; }
+    var format = made.format;
+    recorded = [];
+    recorder = made.recorder;
+    recorder.ondataavailable = function (event) {
+      if (event.data && event.data.size) { recorded.push(event.data); }
+    };
+    recorder.onstop = function () {
+      recorder = null;
+      showRecording(false);
+      if (recorded.length) { offer(new Blob(recorded, { type: format.type }), format.extension); }
+      recorded = [];
+    };
+    recorder.start();
+    recordingSince = Date.now();
+    recordingPainter = setInterval(function () {
+      paintKeepsake(pen, film.width, film.height);
+      if (Date.now() - recordingSince >= RECORD_LIMIT) { stopRecording(); }
+    }, Math.round(1000 / RECORD_FPS));
+    recordingClock = setInterval(function () { showRecording(true); }, 1000);
+    showRecording(true);
+  }
+
+  function stopRecording() {
+    if (recordingPainter !== null) { clearInterval(recordingPainter); recordingPainter = null; }
+    if (recordingClock !== null) { clearInterval(recordingClock); recordingClock = null; }
+    if (recorder && recorder.state !== "inactive") { recorder.stop(); }
+  }
+
+  recordButton.addEventListener("click", function () {
+    if (recorder) { stopRecording(); return; }
+    if (!feed.naturalWidth) { return; }
+    startRecording();
+  });
+
+  // A clip nobody stops is a clip nobody gets, so leaving the page ends it rather than dropping it.
+  window.addEventListener("pagehide", stopRecording);
+
+  (function () {
+    if (canRecord()) { return; }
+    recordButton.disabled = true;
+    recordButton.title = "This browser cannot record video";
+  })();
 
   // The unit in force belongs to the plugin, so it is asked for rather than assumed.
   fetch("settings", { headers: { "Accept": "application/json" } })
@@ -727,6 +861,8 @@ def render_viewer_page(shape: tuple[int, int] | None = None) -> str:
         .replace("REGION_KEY_NAME", VIEWER_REGION_KEY)
         .replace("MAX_ZOOM_VALUE", str(VIEWER_MAXIMUM_ZOOM))
         .replace("ZOOM_STEP_VALUE", str(VIEWER_ZOOM_STEP))
+        .replace("RECORD_FPS_VALUE", str(VIEWER_RECORD_FPS))
+        .replace("RECORD_LIMIT_MS", str(VIEWER_RECORD_LIMIT_MILLISECONDS))
     )
     picture_shape = (
         f' data-width="{shape[0]}" data-height="{shape[1]}"' if shape else ""

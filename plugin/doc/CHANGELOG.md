@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.18.0
+
+- **Record a clip.** A Rec button in the viewer writes what the camera is showing to a video file,
+  with the readout and any region box on it, at the picture's own resolution rather than at
+  whatever size the window happens to be. Press it again to stop and the file is saved.
+- MP4 where the browser will produce one, which is Safari and recent Chrome, and WebM where it will
+  not. The file is named for what it actually is, so a clip that says `.mp4` is an MP4.
+- A recording stops itself after ten minutes, and leaving the page saves what it has rather than
+  losing it. It is held in memory until it stops, which is why there is a limit at all.
+- The controls are centred under the picture instead of pressed against the left edge.
+
+Recording needs the page open. A tile hides the button, because recording is something you set up
+deliberately and a tile has no room for a button you press twice a year.
+
 ## 0.17.0
 
 - **The controls are in the tile now.** They used to appear only above a certain height, which no

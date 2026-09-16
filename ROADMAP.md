@@ -1485,10 +1485,62 @@ the only way to the camera was reloading the dashboard. The control page now car
 `view` link at the top. The browser harness walks the round trip, because a link that goes one way
 is only visibly broken from inside a tile.
 
-### Phase 7d: MP4 recording
+### Phase 7d: MP4 recording. Shipped in 0.18.0.
 
-MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome
-disagree about codecs.
+MediaRecorder over a canvas that is drawn at the picture's own resolution, which is the resolution
+the readout was burned in at. Recording the stage instead would have recorded the letterboxing and
+whatever the zoom happened to be, which is a recording of a browser window rather than of a camera.
+The still and the clip share one painter, so a saved frame and a saved clip cannot disagree about
+what was on screen.
+
+The browser-specific part turned out to be smaller than expected and in a different place. The
+formats are offered in preference order, MP4 first because it opens on a phone and in a chat window
+without a conversation about codecs, then WebM; the clip is named for the container it actually is
+rather than for the one that was asked for. The trap is that `isTypeSupported` is an opinion: the
+container the check ran against answers yes to `video/mp4` and no to the same type with an explicit
+`avc1` profile string, and a browser is allowed to accept a type there and then refuse to construct
+a recorder for it. So the format is chosen by constructing the recorder and keeping the first one
+that is built, not by asking.
+
+Two bounds, both because a recording is held in memory until it is stopped: ten minutes stops
+itself, and leaving the page stops it rather than dropping it on the floor.
+
+Still owed: this has run in Chromium and not yet in the maintainer's Safari, which is the browser
+that decides whether the MP4 preference is worth anything.
+
+**An unreproduced flake, recorded rather than explained away.** One run of the browser harness
+failed "an unwatched viewer fetches no frames", which is the promise that an idle tile costs the
+printer nothing beyond the stream. It has not recurred in five full harness runs since, nor in
+twenty one instrumented page loads. What those loads did show is that a `pointerover` at the origin
+fires on every load, because the canvas lands under a stationary cursor at (0, 0), and that no
+`pointermove` follows it, so nothing starts fetching. The obvious fix, ignoring a pointermove that
+does not move, would therefore have been a fix to something that was not happening. Left alone,
+with the check as it is: it encodes a real promise, and widening it would bury the next occurrence.
+
+### Phase 7e: arbitrary spot markers
+
+Requested from hardware use: place points on the picture and keep reading all of them at once, for
+watching several areas of a print at the same time. Not necessarily single pixels; a small patch,
+averaged, is steadier and easier to hit than one pixel.
+
+Decisions to take when it is built, none of them settled yet:
+
+- **A spot is a small square, not a pixel.** A 3 by 3 patch reported as its average, with its own
+  maximum available, because one pixel of a 160 by 120 sensor is noisy and hard to land on. The
+  patch size is a candidate for a control rather than a constant.
+- **Several at once, each labelled.** The readout already places labels that avoid each other
+  (`place_label` in `overlay.py`), which is the mechanism to reuse rather than reinvent.
+- **They belong to the browser, not to the plugin.** The region box is remembered in
+  `localStorage` and measured from the frame the page already holds, which costs the printer
+  nothing per viewer. Spots should work the same way: the alternative, holding them in the settings
+  file and burning them into the stream, spends printer CPU per spot and makes one viewer's
+  measurements everybody's.
+- **Which means the burned-in readout does not show them.** Worth confirming with the maintainer
+  before building, because it is the one real argument for the other design: a spot that only
+  exists in the viewer cannot appear in a recorded clip made from the stream picture, and cannot
+  be seen from a second browser.
+- **Placing, moving and removing.** Click to place, drag to move, click again or a modifier to
+  remove, and a limit (four? six?) so the picture does not disappear under its own labels.
 
 **F-61. A camera plugged in after boot is not picked up until a reboot.** Reported from hardware,
 not yet diagnosed, and taken last by agreement.

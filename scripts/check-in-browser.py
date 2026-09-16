@@ -510,6 +510,42 @@ NO_SCRIPT_VIEWPORT = {"width": 320, "height": 700}
 PICTURE_ASPECT = 160 / 120
 
 
+def run_recording_checks(browser, port: int) -> list:
+    """Record a short clip and check a real file comes out of it.
+
+    The recorder is browser machinery from end to end: a canvas stream, a muxer, and a download.
+    Nothing about it is visible from Python, and the formats a browser will actually mux differ
+    between browsers, so the check asserts the clip is one of the two this page asks for and that
+    it is named for the container it really is.
+    """
+
+    import os
+
+    page = browser.new_page(viewport={"width": 900, "height": 700})
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    page.click("#record")
+    page.wait_for_timeout(1500)
+    running = page.inner_text("#record")
+    pressed = page.get_attribute("#record", "aria-pressed")
+    with page.expect_download() as download:
+        page.click("#record")
+    clip = download.value
+    name = clip.suggested_filename
+    size = os.path.getsize(clip.path())
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    stopped = page.inner_text("#record")
+    page.close()
+    return [
+        ("recording says it is recording", running.startswith("Stop"), True),
+        ("and marks the button pressed", pressed, "true"),
+        ("a clip is offered when it stops", name.startswith("thermal-"), True),
+        ("named for the container it is in", name.endswith((".mp4", ".webm")), True),
+        ("and there is something in it", size > 1000, True),
+        ("the button goes back to offering a recording", stopped, "Rec"),
+    ]
+
+
 def run_navigation_checks(browser, port: int) -> list:
     """Getting to the settings and back, the way a tile does it.
 
@@ -645,6 +681,9 @@ def main() -> None:
         print("")
         print("viewer in a wide tile")
         report(run_tile_checks(browser, PORT, WIDE_TILE_VIEWPORT), problems)
+        print("")
+        print("recording")
+        report(run_recording_checks(browser, PORT), problems)
         print("")
         print("getting there and back")
         report(run_navigation_checks(browser, PORT), problems)

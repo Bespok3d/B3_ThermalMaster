@@ -90,12 +90,19 @@ tile by itself, so the worst a broken script costs you is the pointing.
 
 Zoom with the wheel or the buttons and it magnifies towards what you are pointing at; Fit puts it
 back. Pan mode drags the picture when you are zoomed in, which is a mode rather than a held key
-because Measure mode uses the same gesture for the box and a phone has no key to hold.
+because Box mode uses the same gesture for the region and a phone has no key to hold.
 
 The units button changes the unit for the whole plugin rather than just this page, so the readout
-burned into the picture agrees with it. Save image writes a PNG at the sensor's own resolution
-with the region drawn on it, because a picture of a measurement that does not show what was measured
-is not evidence of anything.
+burned into the picture agrees with it. Save writes a PNG at the sensor's own resolution with the
+region drawn on it, because a picture of a measurement that does not show what was measured is not
+evidence of anything.
+
+Rec records a clip of what the camera is showing, with the readout and the region box on it, at the
+sensor's own resolution rather than at the size of your window. Press it again to stop and the file
+is saved. It is an MP4 where your browser will produce one and a WebM where it will not, and the
+file is named for what it actually is. A recording is held in memory until you stop it, so it stops
+itself after ten minutes, and leaving the page saves what it has rather than losing it. The button
+appears when the page has room for it, which means not in a dashboard tile.
 
 Drag a box on the picture and it reports the hottest, coldest and average temperature inside it,
 updating as fast as you drag. Click anywhere to clear it, or press Escape. The box is remembered
