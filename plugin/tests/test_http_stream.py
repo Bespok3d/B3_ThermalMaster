@@ -407,3 +407,57 @@ def test_the_viewer_page_is_served_without_a_settings_store(serving):
     assert 'id="surface"' in body
     assert "frame.bin" in body
     connection.close()
+
+
+def test_a_json_post_leaves_unmentioned_settings_alone(thermal_streamer):
+    """End to end, because the trap is in the handler choosing a dialect, not in the parser."""
+
+    store = thermal_streamer.SettingsStore(
+        "ironbow",
+        thermal_streamer.RenderSettings(colorbar=True, reticle=True, hotspot=True, coldspot=True),
+        None,
+    )
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store, thermal_streamer.build_palettes()
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+    try:
+        body = json.dumps({"units": "fahrenheit"})
+        connection.request(
+            "POST", "/settings", body,
+            {"Content-Type": "application/json", "Accept": "application/json",
+             "Content-Length": str(len(body))},
+        )
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+
+        assert response.status == 200
+        assert payload["units"] == "fahrenheit"
+        assert payload["colorbar"] is True
+        assert payload["coldspot"] is True
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_form_post_still_means_absent_is_off(thermal_streamer):
+    """The other dialect is unchanged, and that difference is the point of having two."""
+
+    store = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(coldspot=True), None
+    )
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store, thermal_streamer.build_palettes()
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+    try:
+        assert posting(connection, "palette=ironbow&rotation=0") == 303
+
+        assert store.as_dict()["coldspot"] is False
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()

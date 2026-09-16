@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0
+
+Tools on the viewer.
+
+- Zoom with the wheel or the buttons, up to eight times, towards whatever you are pointing at. Fit
+  puts it back.
+- A Pan mode for dragging the picture around when zoomed in, since Measure mode uses the same
+  gesture for the region box and a phone has no key to hold down.
+- A units button. It changes the unit for the whole plugin, not just this page, so the burned-in
+  readout on the plain tile says the same thing.
+- Save image writes a PNG at the sensor's own resolution with the region drawn on it.
+
+`/thermal/settings` now also accepts JSON, which is how the units button changes one setting without
+disturbing the others. A posted form cannot express that: an unticked checkbox and an absent one look
+identical, so a form carrying only a unit would read as every part of the readout switched off.
+
 ## 0.12.0
 
 - Drag a box on the viewer and it reports the hottest, coldest and average temperature inside it,

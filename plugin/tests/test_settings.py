@@ -400,3 +400,60 @@ def test_a_saved_file_carries_no_setting_that_no_longer_exists(thermal_streamer,
 
     assert "overlay" not in written
     assert "markers" not in written
+
+
+def test_a_json_update_changes_only_what_it_names(thermal_streamer, palettes):
+    """The whole reason JSON exists here: a form cannot say "just this one".
+
+    An unticked checkbox and an absent one look identical in a form, so a form carrying only a unit
+    would read as every readout switch turned off. JSON distinguishes them.
+    """
+
+    current = thermal_streamer.RenderSettings(
+        colorbar=True, reticle=True, hotspot=True, coldspot=True, rotation=90
+    )
+
+    _, settings = thermal_streamer.settings_from_json(
+        {"units": "fahrenheit"}, palettes, current
+    )
+
+    assert settings.units == "fahrenheit"
+    assert [settings.colorbar, settings.reticle, settings.hotspot, settings.coldspot] == [
+        True, True, True, True
+    ]
+    assert settings.rotation == 90
+
+
+def test_a_json_update_can_still_switch_something_off(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings(coldspot=True)
+
+    _, settings = thermal_streamer.settings_from_json({"coldspot": False}, palettes, current)
+
+    assert settings.coldspot is False
+
+
+def test_json_validates_what_a_form_validates(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings(units="celsius", rotation=90, emissivity=0.85)
+
+    _, settings = thermal_streamer.settings_from_json(
+        {"units": "kelvin", "rotation": 45, "emissivity": 99}, palettes, current
+    )
+
+    assert settings.units == "celsius"
+    assert settings.rotation == 90
+    assert settings.emissivity == thermal_streamer.MAX_EMISSIVITY
+
+
+def test_an_unknown_palette_is_refused_in_json_too(thermal_streamer, palettes):
+    palette_name, _ = thermal_streamer.settings_from_json(
+        {"palette": "../../etc/passwd"}, palettes, thermal_streamer.RenderSettings()
+    )
+
+    assert palette_name is None
+
+
+def test_a_json_update_can_change_the_gain(thermal_streamer):
+    current = thermal_streamer.CameraSettings(gain="high")
+
+    assert thermal_streamer.camera_settings_from_json({"gain": "low"}, current).gain == "low"
+    assert thermal_streamer.camera_settings_from_json({}, current).gain == "high"

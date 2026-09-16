@@ -17,7 +17,8 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Temperatures: `/thermal/stats`
 - Interactive viewer: `/thermal/view`
 - Every pixel's temperature: `/thermal/frame.bin`
-- Settings and camera state: `/thermal/settings`
+- Settings and camera state: `/thermal/settings`, which also accepts a JSON POST to change
+  individual settings without disturbing the rest
 
 ## Setting it up
 
@@ -80,6 +81,15 @@ under the pointer, along with the hottest and coldest in view.
 
 It is a second tile rather than a replacement because the two fail differently. The plain tile is an
 image and will render in anything; this one is a script, and if it breaks you still have a camera.
+
+Zoom with the wheel or the buttons and it magnifies towards what you are pointing at; Fit puts it
+back. Pan mode drags the picture when you are zoomed in, which is a mode rather than a held key
+because Measure mode uses the same gesture for the box and a phone has no key to hold.
+
+The units button changes the unit for the whole plugin rather than just this page, so the readout
+burned into the plain tile agrees with it. Save image writes a PNG at the sensor's own resolution
+with the region drawn on it, because a picture of a measurement that does not show what was measured
+is not evidence of anything.
 
 Drag a box on the picture and it reports the hottest, coldest and average temperature inside it,
 updating as fast as you drag. Click anywhere to clear it, or press Escape. The box is remembered

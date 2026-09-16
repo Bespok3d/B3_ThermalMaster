@@ -154,10 +154,13 @@ from .settings import (
     RendererSource,
     SettingsStore,
     camera_settings_from_form,
+    camera_settings_from_json,
+    clamped_emissivity,
     migrated,
     posted_emissivity,
     restored,
     settings_from_form,
+    settings_from_json,
 )
 from .temperature import (
     CELSIUS,
@@ -183,11 +186,13 @@ from .temperature import (
 )
 from .viewer import (
     VIEWER_LINGER_MILLISECONDS,
+    VIEWER_MAXIMUM_ZOOM,
     VIEWER_MINIMUM_REGION_PIXELS,
     VIEWER_PAGE_TEMPLATE,
     VIEWER_POLL_MILLISECONDS,
     VIEWER_REGION_KEY,
     VIEWER_SCRIPT,
+    VIEWER_ZOOM_STEP,
     render_viewer_page,
 )
 
@@ -200,6 +205,7 @@ __all__ = [
     "build_ramp_palette",
     "build_tint_palette",
     "camera_settings_from_form",
+    "camera_settings_from_json",
     "CameraNotFoundError",
     "CameraSettings",
     "CameraStalledError",
@@ -207,6 +213,7 @@ __all__ = [
     "CELSIUS",
     "CENTIDEGREES_PER_DEGREE",
     "clamp_label",
+    "clamped_emissivity",
     "COLDSPOT_RGB",
     "COLORBAR_HEIGHT_FRACTION",
     "COLORBAR_MIN_WIDTH_PIXELS",
@@ -313,6 +320,7 @@ __all__ = [
     "run_capture_session",
     "SETTING_SPLITS",
     "settings_from_form",
+    "settings_from_json",
     "SETTINGS_REDIRECT",
     "SettingsStore",
     "SHUTDOWN_GRACE_SECONDS",
@@ -337,10 +345,12 @@ __all__ = [
     "VALID_ROTATIONS",
     "VALID_UNITS",
     "VIEWER_LINGER_MILLISECONDS",
+    "VIEWER_MAXIMUM_ZOOM",
     "VIEWER_MINIMUM_REGION_PIXELS",
     "VIEWER_PAGE_TEMPLATE",
     "VIEWER_POLL_MILLISECONDS",
     "VIEWER_REGION_KEY",
     "VIEWER_SCRIPT",
+    "VIEWER_ZOOM_STEP",
     "WIDEST_TEMPERATURE_LABEL",
 ]

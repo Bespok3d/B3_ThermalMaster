@@ -30,6 +30,8 @@ VIEWER_MINIMUM_REGION_PIXELS = 3
 # Where a region is remembered. A tile in Fluidd reloads whenever the page around it navigates, and
 # losing the box you just drew every time is the difference between a tool and a toy.
 VIEWER_REGION_KEY = "thermal-master.region"
+VIEWER_MAXIMUM_ZOOM = 8.0
+VIEWER_ZOOM_STEP = 1.4
 
 VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -44,12 +46,22 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
          font: 14px/1.45 system-ui, sans-serif; }}
   main {{ display: flex; flex-direction: column; height: 100vh; }}
   .stage {{ position: relative; flex: 1; min-height: 0; background: #000; }}
-  .stage img {{ position: absolute; inset: 0; width: 100%; height: 100%;
-                object-fit: contain; display: block; }}
+  .stage {{ overflow: hidden; }}
+  /* Positioned and sized from the script on every paint, so the picture, the overlay and the
+     pointer mapping all come from one rectangle and cannot disagree about where anything is. */
+  .stage img {{ position: absolute; display: block; image-rendering: pixelated; }}
   .stage canvas {{ position: absolute; inset: 0; width: 100%; height: 100%;
                    touch-action: none; cursor: crosshair; }}
   .bar {{ display: flex; gap: 1rem; align-items: baseline; flex-wrap: wrap;
           padding: 0.5rem 0.75rem; background: #14161a; border-top: 1px solid #23262c; }}
+  .tools {{ display: flex; gap: 0.35rem; align-items: center; padding: 0.4rem 0.75rem;
+            background: #14161a; border-top: 1px solid #23262c; flex-wrap: wrap; }}
+  .tools button {{ padding: 0.3rem 0.6rem; border: 1px solid #33373f; border-radius: 4px;
+                   background: #1d2026; color: #e8e8ea; font: inherit; cursor: pointer; }}
+  .tools button[aria-pressed="true"] {{ background: #d8752a; border-color: #d8752a;
+                                        color: #14161a; font-weight: 600; }}
+  .tools .zoom {{ min-width: 3.2rem; text-align: center; color: #9aa0aa;
+                  font-variant-numeric: tabular-nums; }}
   .bar b {{ font-weight: 600; font-variant-numeric: tabular-nums; }}
   .bar span {{ color: #9aa0aa; font-size: 0.8rem; text-transform: uppercase;
                letter-spacing: 0.04em; }}
@@ -66,6 +78,16 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   <div class="stage">
     <img id="feed" src="stream.mjpg" alt="Live thermal view">
     <canvas id="surface"></canvas>
+  </div>
+  <div class="tools">
+    <button type="button" id="zoom-out" title="Zoom out">-</button>
+    <span class="zoom" id="zoom-level">100%</span>
+    <button type="button" id="zoom-in" title="Zoom in">+</button>
+    <button type="button" id="fit">Fit</button>
+    <button type="button" id="mode-measure" aria-pressed="true">Measure</button>
+    <button type="button" id="mode-pan" aria-pressed="false">Pan</button>
+    <button type="button" id="units">C</button>
+    <button type="button" id="shot">Save image</button>
   </div>
   <div class="bar">
     <div class="group">
@@ -98,6 +120,14 @@ VIEWER_SCRIPT = """
   var POLL = POLL_MS;
   var LINGER = LINGER_MS;
 
+  var zoomOut = document.getElementById("zoom-out");
+  var zoomIn = document.getElementById("zoom-in");
+  var zoomLevel = document.getElementById("zoom-level");
+  var fitButton = document.getElementById("fit");
+  var measureButton = document.getElementById("mode-measure");
+  var panButton = document.getElementById("mode-pan");
+  var unitsButton = document.getElementById("units");
+  var shotButton = document.getElementById("shot");
   var regionGroup = document.getElementById("region-group");
   var regionOut = {
     max: document.getElementById("region-max"),
@@ -107,6 +137,14 @@ VIEWER_SCRIPT = """
   };
   var MINIMUM_REGION = MIN_REGION_PX;
   var REGION_KEY = "REGION_KEY_NAME";
+  var MAX_ZOOM = MAX_ZOOM_VALUE;
+  var ZOOM_STEP = ZOOM_STEP_VALUE;
+
+  var zoom = 1;
+  var pan = { x: 0, y: 0 };   // CSS pixels, applied after the zoom, clamped so the picture stays
+  var panning = false;
+  var panFrom = null;
+  var units = "celsius";
 
   var frame = null;          // {width, height, scale, values}
   var region = null;         // {left, top, right, bottom} in frame pixels, inclusive
@@ -134,10 +172,36 @@ VIEWER_SCRIPT = """
       ? feed.naturalWidth / feed.naturalHeight
       : (frame ? frame.width / frame.height : box.width / box.height);
     var wide = box.width / box.height > natural;
-    var width = wide ? box.height * natural : box.width;
-    var height = wide ? box.height : box.width / natural;
-    return { left: (box.width - width) / 2, top: (box.height - height) / 2,
+    var width = (wide ? box.height * natural : box.width) * zoom;
+    var height = (wide ? box.height : box.width / natural) * zoom;
+    // Clamped so the picture can never be dragged entirely out of the frame: at any zoom there is
+    // always something to look at, and letting it go would need a Fit button to be discoverable.
+    var slackX = Math.max(0, (width - box.width) / 2);
+    var slackY = Math.max(0, (height - box.height) / 2);
+    pan.x = Math.max(-slackX, Math.min(slackX, pan.x));
+    pan.y = Math.max(-slackY, Math.min(slackY, pan.y));
+    return { left: (box.width - width) / 2 + pan.x, top: (box.height - height) / 2 + pan.y,
              width: width, height: height, box: box };
+  }
+
+  function applyZoom(next, about) {
+    var before = imageBox();
+    var anchor = about || { clientX: before.box.left + before.box.width / 2,
+                            clientY: before.box.top + before.box.height / 2 };
+    // Where the pointer is, as a fraction of the picture, before and after. Holding that fraction
+    // still is what makes the wheel zoom towards what you are looking at rather than the middle.
+    var atX = (anchor.clientX - before.box.left - before.left) / before.width;
+    var atY = (anchor.clientY - before.box.top - before.top) / before.height;
+    zoom = Math.max(1, Math.min(MAX_ZOOM, next));
+    var after = imageBox();
+    if (before.width > 0 && zoom > 1) {
+      pan.x += (before.left + atX * before.width) - (after.left + atX * after.width);
+      pan.y += (before.top + atY * before.height) - (after.top + atY * after.height);
+    }
+    if (zoom === 1) { pan = { x: 0, y: 0 }; }
+    zoomOut.textContent = "-";
+    zoomLevel.textContent = Math.round(zoom * 100) + "%";
+    paint();
   }
 
   function toFramePixel(at, clamp) {
@@ -161,7 +225,10 @@ VIEWER_SCRIPT = """
   }
 
   function shown(celsius) {
-    return celsius === null ? "-" : celsius.toFixed(1) + "C";
+    if (celsius === null) { return "-"; }
+    return units === "fahrenheit"
+      ? (celsius * 9 / 5 + 32).toFixed(1) + "F"
+      : celsius.toFixed(1) + "C";
   }
 
   function decode(buffer) {
@@ -285,6 +352,12 @@ VIEWER_SCRIPT = """
 
   function paint() {
     var fit = imageBox();
+    // The picture element is placed from the same rectangle the overlay and the pointer mapping
+    // use, rather than being left to object-fit, so zooming cannot drift them apart.
+    feed.style.left = fit.left + "px";
+    feed.style.top = fit.top + "px";
+    feed.style.width = fit.width + "px";
+    feed.style.height = fit.height + "px";
     surface.width = fit.box.width;
     surface.height = fit.box.height;
     var pen = surface.getContext("2d");
@@ -365,20 +438,31 @@ VIEWER_SCRIPT = """
     lastSeen = { clientX: event.clientX, clientY: event.clientY };
     pointer = toFramePixel(lastSeen);
     pointerOut.textContent = frame ? shown(temperatureAt(pointer)) : "reading...";
+    if (panFrom) {
+      pan.x = panFrom.x + (event.clientX - panFrom.clientX);
+      pan.y = panFrom.y + (event.clientY - panFrom.clientY);
+      paint();
+      return;
+    }
     if (dragFrom) { resolveDrag(dragFrom, lastSeen); }
     paint();
     start();
   });
 
   surface.addEventListener("pointerdown", function (event) {
-    dragFrom = { clientX: event.clientX, clientY: event.clientY };
     surface.setPointerCapture(event.pointerId);
+    if (panning) {
+      panFrom = { clientX: event.clientX, clientY: event.clientY, x: pan.x, y: pan.y };
+      return;
+    }
+    dragFrom = { clientX: event.clientX, clientY: event.clientY };
     // Frames have to start arriving now rather than on the first move, or a drag begun the moment
     // the tile opens has nothing to resolve against.
     start();
   });
 
   surface.addEventListener("pointerup", function (event) {
+    if (panFrom) { panFrom = null; return; }
     if (!dragFrom) { return; }
     var to = { clientX: event.clientX, clientY: event.clientY };
     var from = dragFrom;
@@ -404,8 +488,110 @@ VIEWER_SCRIPT = """
 
   // Nothing is fetched until the pointer arrives or a remembered region asks for it, so a tile
   // nobody is using costs the printer the stream and not one byte more.
+  surface.addEventListener("wheel", function (event) {
+    event.preventDefault();
+    applyZoom(zoom * (event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP),
+              { clientX: event.clientX, clientY: event.clientY });
+  }, { passive: false });
+
+  zoomIn.addEventListener("click", function () { applyZoom(zoom * ZOOM_STEP, null); });
+  zoomOut.addEventListener("click", function () { applyZoom(zoom / ZOOM_STEP, null); });
+  fitButton.addEventListener("click", function () {
+    pan = { x: 0, y: 0 };
+    applyZoom(1, null);
+  });
+
+  function setMode(toPan) {
+    panning = toPan;
+    panFrom = null;
+    dragFrom = null;
+    measureButton.setAttribute("aria-pressed", String(!toPan));
+    panButton.setAttribute("aria-pressed", String(toPan));
+    surface.style.cursor = toPan ? "grab" : "crosshair";
+  }
+
+  // A mode rather than a modifier key, because the same page has to work on a phone, where there
+  // is no key to hold and both gestures are a finger dragging across the picture.
+  measureButton.addEventListener("click", function () { setMode(false); });
+  panButton.addEventListener("click", function () { setMode(true); });
+
+  function showUnits() {
+    unitsButton.textContent = units === "fahrenheit" ? "F" : "C";
+    summarise();
+    pointerOut.textContent = frame && pointer ? shown(temperatureAt(pointer))
+                                              : pointerOut.textContent;
+  }
+
+  // The unit is the plugin's, not this page's. Changing it here changes what the burned-in readout
+  // on the plain tile says too, which is the point: two tiles disagreeing about degrees would be
+  // worse than having to open the settings form.
+  //
+  // Sent as JSON rather than as a form, because a form cannot say "only this": an unticked box is
+  // indistinguishable from an absent one, so posting a form with just the unit in it would switch
+  // every part of the readout off.
+  function pushUnits(next) {
+    fetch("settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ units: next })
+    }).then(function (reply) {
+      return reply.ok ? reply.json() : Promise.reject(reply.status);
+    }).then(function (state) {
+      units = state.units;
+      showUnits();
+    }).catch(function () {
+      // The plugin refused or is not there; leave the button saying what is actually in force.
+    });
+  }
+
+  unitsButton.addEventListener("click", function () {
+    pushUnits(units === "fahrenheit" ? "celsius" : "fahrenheit");
+  });
+
+  function stamp() {
+    var now = new Date();
+    function two(value) { return String(value).padStart(2, "0"); }
+    return now.getFullYear() + two(now.getMonth() + 1) + two(now.getDate())
+      + "-" + two(now.getHours()) + two(now.getMinutes()) + two(now.getSeconds());
+  }
+
+  // Saved at the sensor's own resolution rather than at whatever size the window happens to be,
+  // and with the region drawn on, because a picture of a measurement that does not show what was
+  // measured is not evidence of anything.
+  shotButton.addEventListener("click", function () {
+    if (!feed.naturalWidth) { return; }
+    var shot = document.createElement("canvas");
+    shot.width = feed.naturalWidth;
+    shot.height = feed.naturalHeight;
+    var pen = shot.getContext("2d");
+    pen.drawImage(feed, 0, 0, shot.width, shot.height);
+    if (region && frame) {
+      var scaleX = shot.width / frame.width;
+      var scaleY = shot.height / frame.height;
+      pen.strokeStyle = "rgba(120,220,160,0.95)";
+      pen.lineWidth = Math.max(1, Math.round(shot.width / 160));
+      pen.strokeRect(region.left * scaleX, region.top * scaleY,
+                     (region.right - region.left + 1) * scaleX,
+                     (region.bottom - region.top + 1) * scaleY);
+    }
+    shot.toBlob(function (blob) {
+      var link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "thermal-" + stamp() + ".png";
+      link.click();
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 10000);
+    }, "image/png");
+  });
+
+  // The unit in force belongs to the plugin, so it is asked for rather than assumed.
+  fetch("settings", { headers: { "Accept": "application/json" } })
+    .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
+    .then(function (state) { units = state.units; showUnits(); })
+    .catch(function () { showUnits(); });
+
   window.addEventListener("resize", paint);
   recallRegion();
+  setMode(false);
   if (region) { start(); }
 })();
 """
@@ -419,5 +605,7 @@ def render_viewer_page() -> str:
         .replace("LINGER_MS", str(VIEWER_LINGER_MILLISECONDS))
         .replace("MIN_REGION_PX", str(VIEWER_MINIMUM_REGION_PIXELS))
         .replace("REGION_KEY_NAME", VIEWER_REGION_KEY)
+        .replace("MAX_ZOOM_VALUE", str(VIEWER_MAXIMUM_ZOOM))
+        .replace("ZOOM_STEP_VALUE", str(VIEWER_ZOOM_STEP))
     )
     return VIEWER_PAGE_TEMPLATE.format(viewer_script=script)

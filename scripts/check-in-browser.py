@@ -224,7 +224,96 @@ def run_viewer_checks(page, requests: list) -> list:
     page.wait_for_timeout(2000)
     checks.append(("it stops fetching once nobody is pointing", len(requests), quiet))
     checks.append(("it was fetching while someone was", quiet > before, True))
-    return checks + run_region_checks(page, requests)
+    return checks + run_region_checks(page, requests) + run_tool_checks(page)
+
+
+def canvas_rect(page) -> dict:
+    return page.evaluate(
+        """() => {
+            const r = document.getElementById("surface").getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+        }"""
+    )
+
+
+def picture_rect(page) -> dict:
+    """Where the picture element actually is, which the script positions itself."""
+
+    return page.evaluate(
+        """() => {
+            const r = document.getElementById("feed").getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+        }"""
+    )
+
+
+def run_tool_checks(page) -> list:
+    """Zoom, pan, units and the screenshot.
+
+    Zoom is checked against the picture element rather than an internal number, because the failure
+    that matters is the picture and the overlay disagreeing about where things are, and only the
+    rendered geometry can show that.
+    """
+
+    checks = []
+    fitted = picture_rect(page)
+    page.click("#zoom-in")
+    page.wait_for_timeout(200)
+    zoomed = picture_rect(page)
+    checks.append(("zooming in makes the picture bigger", zoomed["width"] > fitted["width"], True))
+    checks.append(("and says so", page.inner_text("#zoom-level") != "100%", True))
+
+    # The overlay is sized to the canvas and drawn from the same rectangle as the picture, so a
+    # reading taken at the middle of the picture must still be the middle of the picture zoomed in.
+    page.mouse.move(zoomed["left"] + zoomed["width"] / 2, zoomed["top"] + zoomed["height"] / 2)
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    middle_zoomed = reading(page)
+
+    page.click("#fit")
+    page.wait_for_timeout(200)
+    back = picture_rect(page)
+    checks.append(("fit puts it back", round(back["width"]), round(fitted["width"])))
+    checks.append(("fit says one hundred percent", page.inner_text("#zoom-level"), "100%"))
+    page.mouse.move(back["left"] + back["width"] / 2, back["top"] + back["height"] / 2)
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("the same spot reads the same zoomed or not",
+                   abs((middle_zoomed or 0) - (reading(page) or 99)) < 3, True))
+
+    page.click("#mode-pan")
+    page.click("#zoom-in")
+    page.wait_for_timeout(200)
+    before_pan = picture_rect(page)
+    rect = canvas_rect(page)
+    page.mouse.move(rect["left"] + rect["width"] / 2, rect["top"] + rect["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(rect["left"] + rect["width"] / 2 - 60, rect["top"] + rect["height"] / 2,
+                    steps=6)
+    page.mouse.up()
+    page.wait_for_timeout(200)
+    checks.append(("pan mode moves the picture",
+                   picture_rect(page)["left"] < before_pan["left"], True))
+    checks.append(("pan mode does not draw a box", page.inner_text("#region-max"), "-"))
+    page.click("#fit")
+    page.click("#mode-measure")
+
+    unit = page.inner_text("#units").strip()
+    page.click("#units")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("the units button changes the unit", page.inner_text("#units") != unit, True))
+    checks.append(("and the readings follow it",
+                   page.inner_text("#max").strip().endswith(page.inner_text("#units").strip()),
+                   True))
+    page.click("#units")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+
+    with page.expect_download() as caught:
+        page.click("#shot")
+    download = caught.value
+    checks.append(("saving an image offers a png",
+                   download.suggested_filename.endswith(".png"), True))
+    checks.append(("named for when it was taken",
+                   download.suggested_filename.startswith("thermal-"), True))
+    return checks
 
 
 def drag_across(page, start: float, end: float) -> None:

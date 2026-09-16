@@ -17,7 +17,12 @@ from urllib.parse import parse_qs, urlparse
 from .camera import SHUTTER_ACTION, SHUTTER_FIELD, SHUTTER_PENDING
 from .page import describe_device, render_control_page
 from .palettes import build_palettes
-from .settings import camera_settings_from_form, settings_from_form
+from .settings import (
+    camera_settings_from_form,
+    camera_settings_from_json,
+    settings_from_form,
+    settings_from_json,
+)
 from .temperature import DEFAULT_UNITS, encode_thermal_frame
 from .viewer import render_viewer_page
 
@@ -246,23 +251,53 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             return
         self.send_json(self.settings_payload(self.settings_store))
 
+    def requested_settings(self, settings_store: SettingsStore) -> tuple:
+        """What a posted body asks for: a palette, render settings, camera settings, a shutter.
+
+        Two dialects with one meaning. The control page posts a form, where a checkbox that is off
+        is simply absent, so absent has to mean off. Anything changing a single setting posts JSON,
+        where absent means absent and everything else is left alone. Reading them apart here keeps
+        that difference in one place rather than spread through the handler.
+        """
+
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8", "replace")
+        _, _, current = settings_store.snapshot()
+        _, camera = settings_store.camera_snapshot()
+        if "application/json" in self.headers.get("Content-Type", ""):
+            payload = json.loads(body or "{}")
+            palette_name, settings = settings_from_json(payload, self.palettes, current)
+            return (
+                palette_name,
+                settings,
+                camera_settings_from_json(payload, camera),
+                payload.get(SHUTTER_FIELD) == SHUTTER_ACTION,
+            )
+        form = parse_qs(body)
+        palette_name, settings = settings_from_form(form, self.palettes, current)
+        return (
+            palette_name,
+            settings,
+            camera_settings_from_form(form, camera),
+            SHUTTER_ACTION in form.get(SHUTTER_FIELD, []),
+        )
+
     def apply_settings(self) -> None:
         """Accept a posted form, then send the browser back to the page it came from."""
 
         if self.settings_store is None:
             self.send_error(503, "settings are not available")
             return
-        length = int(self.headers.get("Content-Length", "0"))
-        form = parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
-        _, current_palette, current = self.settings_store.snapshot()
-        palette_name, settings = settings_from_form(form, self.palettes, current)
-        self.settings_store.update(palette_name or current_palette, settings)
+        _, current_palette, _ = self.settings_store.snapshot()
         _, current_camera = self.settings_store.camera_snapshot()
-        camera = camera_settings_from_form(form, current_camera)
+        palette_name, settings, camera, asked_for_shutter = self.requested_settings(
+            self.settings_store
+        )
+        self.settings_store.update(palette_name or current_palette, settings)
         if camera != current_camera:
             self.settings_store.update_camera(camera)
         # A button, not a setting: the capture thread picks this up between two frames.
-        if self.device is not None and SHUTTER_ACTION in form.get(SHUTTER_FIELD, []):
+        if self.device is not None and asked_for_shutter:
             self.device.request_shutter()
         # A page with JavaScript posts in the background and wants the new state back, so that the
         # video stream is not torn down and reopened every time a palette changes. A page without

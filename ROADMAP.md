@@ -1320,7 +1320,38 @@ hovered before dragging and would have passed forever.
 
 ### Phase 7c: zoom, pan, screenshot, units
 
-Comfort features on the viewer. Independent of each other and low risk.
+Shipped in 0.13.0. Three of the four were as low risk as predicted. The fourth was not, and the
+reason is worth keeping.
+
+**The units button needed a server change first.** The obvious build is to post the unit to
+`/settings` the way the control page posts everything else. That would have switched off every part
+of the readout, because a posted form cannot distinguish an unticked checkbox from an absent one, so
+`"colorbar" in form` reads a form that never mentioned the colorbar as a form saying it is off. That
+is the correct reading for the control page, which always sends every field, and catastrophic for
+anything sending one.
+
+The alternative considered was having the page read the current settings and post them all back
+with the unit replaced. Rejected: it puts knowledge of the form's shape into JavaScript, where it
+drifts silently the next time a setting is added.
+
+So `/settings` now also takes JSON, where absent means absent and only named keys are applied. Same
+validators either way, because what a setting may be does not depend on how it arrived. That is a
+better foundation than the units button needed, and 7d and anything after it inherit it.
+
+**Zoom is expressed as one rectangle, not two.** `imageBox` already answered "where is the picture",
+and the overlay and the pointer mapping both went through it. Zoom and pan fold into that rectangle,
+and the picture element is then positioned from it explicitly rather than being left to `object-fit`.
+One source of truth, so the image and the annotations cannot drift apart when zoomed. The browser
+check asserts this against rendered geometry rather than an internal number, because the only failure
+that matters is the picture and the overlay disagreeing, and only the rendering shows that.
+
+**Pan is a mode, not a modifier.** Measure mode already uses drag for the region box, and the same
+page has to work on a phone where there is no key to hold and both gestures are a finger moving
+across the picture.
+
+The screenshot saves at the sensor's own resolution with the region drawn on it, rather than at
+whatever size the window happens to be, because a picture of a measurement that does not show what
+was measured is not evidence of anything.
 
 ### Phase 7d: MP4 recording
 

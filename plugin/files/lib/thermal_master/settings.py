@@ -177,6 +177,52 @@ def settings_from_form(
     )
 
 
+def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -> tuple:
+    """Apply only the settings a JSON body actually names.
+
+    A posted HTML form cannot express "change this one thing": an unticked checkbox is simply
+    absent, so a form that omits a field is saying that field is off. That is right for the
+    control page, which always sends every field, and wrong for anything that wants to change one
+    setting, which would silently switch off every box it did not think to mention.
+
+    So changing one setting goes through JSON instead, where absent means absent. Same validators
+    either way, because the rule about what a setting may be does not depend on how it arrived.
+    """
+
+    changes = {}
+    if "rotation" in payload and payload["rotation"] in VALID_ROTATIONS:
+        changes["rotation"] = payload["rotation"]
+    if "units" in payload and payload["units"] in VALID_UNITS:
+        changes["units"] = payload["units"]
+    if "emissivity" in payload:
+        changes["emissivity"] = clamped_emissivity(payload["emissivity"], current.emissivity)
+    flags = ("flip_horizontal", "flip_vertical", "colorbar", "reticle", "hotspot", "coldspot")
+    for flag in flags:
+        if flag in payload:
+            changes[flag] = bool(payload[flag])
+    palette_name = payload.get("palette")
+    return (
+        palette_name if palette_name in palettes else None,
+        dataclasses.replace(current, **changes),
+    )
+
+
+def camera_settings_from_json(payload: dict, current: CameraSettings) -> CameraSettings:
+    if payload.get("gain") in VALID_GAINS:
+        return dataclasses.replace(current, gain=payload["gain"])
+    return current
+
+
+def clamped_emissivity(value: object, current: float) -> float:
+    """Pulled into range rather than refused, wherever it came from."""
+
+    try:
+        posted = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return current
+    return min(max(posted, MIN_EMISSIVITY), MAX_EMISSIVITY)
+
+
 def posted_emissivity(form: dict, current: float) -> float:
     """Read an emissivity, clamped rather than refused.
 
@@ -185,11 +231,7 @@ def posted_emissivity(form: dict, current: float) -> float:
     is why the floor is not zero.
     """
 
-    try:
-        posted = float(form.get("emissivity", [""])[0])
-    except ValueError:
-        return current
-    return min(max(posted, MIN_EMISSIVITY), MAX_EMISSIVITY)
+    return clamped_emissivity(form.get("emissivity", [""])[0], current)
 
 
 def camera_settings_from_form(form: dict, current: CameraSettings) -> CameraSettings:
