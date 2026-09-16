@@ -308,7 +308,7 @@ def stream_frames(
         if thermal_raw is not None:
             consecutive_failures = 0
             rendered = renderer_source.current().render_frame(thermal_raw)
-            frame_store.publish(rendered.jpeg, rendered.stats)
+            frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
             continue
         consecutive_failures += 1
         if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:

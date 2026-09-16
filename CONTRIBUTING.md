@@ -87,15 +87,20 @@ The gate covers the plugin's Python. It cannot cover the control page's behaviou
 that gap has produced two shipped bugs: a button whose name shadowed a form property, and a fallback
 path that dropped the button that was pressed. Both passed every server-side test.
 
-`scripts/check-control-page.py` serves the real page against a stand-in camera and drives it in
-headless Chromium: it checks that calibrate reaches the device, that the page does not reload doing
-it, and that a later Apply does not re-fire the last button. Run it after touching the page or its
-script.
+`scripts/check-in-browser.py` serves the real pages against a stand-in camera and drives them in
+headless Chromium. For the control page: calibrate reaches the device, the page does not reload
+doing it, and a later Apply does not re-fire the last button. For the viewer: it fetches nothing
+until pointed at, the temperature it reports matches the pixel under the pointer, and it stops
+fetching once nobody is looking.
 
 ```sh
 pip install playwright && playwright install chromium
-python3 scripts/check-control-page.py
+python3 scripts/check-in-browser.py
 ```
+
+Run it after touching either page. Nothing runs it for you, which has already cost something: it
+loaded the entry script by path, and when the code moved into a package that stopped being the
+plugin, so it sat broken through two releases until the next person to run it found out.
 
 It is not in the gate, because a browser download is a lot to ask of someone working on a printer
 plugin. The rules it taught are in the suite instead, as cheap assertions on the rendered HTML: no

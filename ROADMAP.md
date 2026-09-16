@@ -1248,6 +1248,85 @@ tile so it lands in Fluidd next to the plain feed.
 
 Exit: usable on a phone-sized viewport, and closing it drops the temperature channel back to zero cost.
 
+### Phase 7a: the viewer, and reading temperatures off the picture
+
+Shipped in 0.11.0. The first slice of Phase 7: the frame endpoint, the interactive page, and the
+tile that carries it.
+
+**The transport decision.** Mouse-over and ROI both need per-pixel temperatures, which `/stats`
+cannot give. Three ways were available: ask the server per point, send a downsampled grid, or send
+the whole frame. The whole frame won because it is the only one that makes ROI free later, and
+because the cost is bandwidth rather than the thing that is actually scarce here. `/frame.bin` is 38
+KB for a P1, and producing it is a memory shuffle and four float passes, paid per request rather
+than per frame. That last part is the point: the capture path stores raw counts and nothing converts
+them until somebody asks, so a tile nobody is looking at costs nothing (F-56 discipline).
+
+Hundredths of a degree in a signed 16 bit integer, little endian, behind a self describing header.
+Corrected for emissivity on the way out, so the browser never carries a second copy of the physics,
+which was the mistake waiting to happen.
+
+**Geometry moved to its own module.** `orient` was in the pipeline and `orient_point` in
+temperature, and the frame encoder needed the first from the second, which would have been a cycle.
+They belong together anyway: they are the pair that must not drift, and now they are in one file
+with the cross-check test pointing at both.
+
+**What the browser found that Python could not.** Two things, and both are the reason this slice
+insisted on the harness first.
+
+The harness itself had rotted. It loaded the entry script by path, and when the code moved into a
+package (F-47) that file stopped being the plugin. It had been broken for two releases, silently,
+because nothing runs it. It now imports the package the same way the test suite does.
+
+Then the first real run found a defect in the viewer: the first hover after loading never resolved.
+The pointer handler turns a position into a pixel, and it cannot while no frame has arrived, so it
+discarded the position and nothing recomputed it when the frame came. The page said "reading..."
+until the mouse happened to move again. Invisible to every server-side test, obvious within a second
+of a real pointer. The page now keeps where the pointer is separately from which pixel that was, and
+recomputes on each frame.
+
+**One harness mistake worth recording.** The first version worked out where the letterboxed picture
+sits inside the canvas so it could point at a fraction of it. That was wrong twice: it divided by an
+image that had not decoded, and even correct it would have been the page's own arithmetic copied, so
+a mistake in the mapping would have been made identically on both sides and passed. It now sizes the
+window so the picture fills the canvas exactly, asserts that it does, and needs no geometry at all.
+
+### Phase 7b: the ROI box
+
+Drag a rectangle, get live max, min and average inside it. Computed in the browser from the frame it
+already has, so it costs the printer nothing and updates as the box is dragged.
+
+### Phase 7c: zoom, pan, screenshot, units
+
+Comfort features on the viewer. Independent of each other and low risk.
+
+### Phase 7d: MP4 recording
+
+MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome
+disagree about codecs.
+
+**F-61. A camera plugged in after boot is not picked up until a reboot.** Reported from hardware,
+not yet diagnosed, and taken last by agreement.
+
+Worth stating plainly that this should already work. `capture_loop` catches every exception from a
+session, waits with backoff to a sixty second ceiling, and retries forever; `detect_camera_model`
+returning nothing raises `CameraNotFoundError`, which is just another exception on that path. So a
+camera appearing later should be found within a minute without anybody doing anything.
+
+It is not, so one of those assumptions is false, and the log says which. Three things to collect,
+all read-only, with the camera unplugged and the printer up:
+
+1. Is the service even running, and what is it saying? `ps | grep thermal-master` and the plugin's
+   log. If the log is silent rather than repeating a capture error every minute, the loop is not
+   running and the question is why it exited.
+2. Does the bus see the camera once it is plugged in? `lsusb` before and after.
+3. If the loop is retrying and `lsusb` sees it but the plugin does not, the suspicion is
+   `usb.core.find` inside a long-lived process not seeing a device enumerated after libusb
+   initialised, which is a known shape of problem and would be fixed by re-initialising the context
+   per attempt rather than by anything in the retry logic.
+
+No fix until the evidence picks one of those, because the retry loop looks correct and changing
+correct-looking code on a hunch is how the last three misdiagnoses started.
+
 ### Phase 8: release readiness
 
 Signing (F-6) and the `publisher` fingerprint check (F-5), channel promotion from `experiment` toward

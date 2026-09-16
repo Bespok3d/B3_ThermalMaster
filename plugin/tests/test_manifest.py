@@ -60,10 +60,13 @@ def test_the_registered_camera_urls_are_the_ones_the_proxy_serves():
         for line in webcam_fragment.splitlines()
         if line.startswith(("stream_url:", "snapshot_url:"))
     ]
+    exact = set(re.findall(r"location = (\S+) \{", nginx_location))
+    prefixes = set(re.findall(r"location (/\S*/) \{", nginx_location))
 
-    assert len(registered_urls) == 2
+    assert registered_urls, "nothing is registered, so this test is not looking anywhere useful"
     for url in registered_urls:
-        assert f"location = {url}" in nginx_location, url
+        served = url in exact or any(url.startswith(prefix) for prefix in prefixes)
+        assert served, f"{url} is registered as a camera and nothing proxies it"
 
 
 def test_the_declared_ports_are_the_ones_the_service_is_told_to_bind():
@@ -138,3 +141,37 @@ def test_the_facade_declares_everything_it_imports():
 
     for name in thermal_master.__all__:
         assert hasattr(thermal_master, name), name
+
+
+def test_the_viewer_is_registered_as_its_own_tile():
+    """A second [webcam] entry, so the interactive page appears in Fluidd beside the picture."""
+
+    fragment = (
+        Path(__file__).resolve().parent.parent / "files" / "webcam.conf.tmpl"
+    ).read_text()
+
+    assert "service: iframe" in fragment
+    assert "stream_url: /thermal/view" in fragment
+    assert fragment.count("[webcam ") == 2
+
+
+def test_the_plain_tile_is_still_a_picture():
+    """The interactive tile is an addition. If its script breaks, there is still a camera."""
+
+    fragment = (
+        Path(__file__).resolve().parent.parent / "files" / "webcam.conf.tmpl"
+    ).read_text()
+
+    assert "service: mjpegstreamer-adaptive" in fragment
+
+
+def test_the_frame_endpoint_is_proxied_and_uncacheable():
+    """A cached frame of temperatures is a wrong frame of temperatures."""
+
+    conf = (
+        Path(__file__).resolve().parent.parent
+        / "files" / "etc" / "nginx" / "locations" / "thermal-master.conf"
+    ).read_text()
+
+    assert "/thermal/frame.bin" in conf
+    assert conf.count('add_header Cache-Control "no-store" always;') == 2

@@ -18,12 +18,13 @@ from .camera import SHUTTER_ACTION, SHUTTER_FIELD, SHUTTER_PENDING
 from .page import describe_device, render_control_page
 from .palettes import build_palettes
 from .settings import camera_settings_from_form, settings_from_form
-from .temperature import DEFAULT_UNITS
+from .temperature import DEFAULT_UNITS, encode_thermal_frame
+from .viewer import render_viewer_page
 
 if TYPE_CHECKING:
     from .camera import DeviceController
     from .settings import SettingsStore
-    from .temperature import FrameStats
+    from .temperature import FrameStats, ThermalFrame
 
 
 DEFAULT_BIND = "127.0.0.1"
@@ -56,6 +57,8 @@ ROUTES = {
     "/stream.mjpg": "serve_stream",
     "/settings": "serve_settings",
     "/stats": "serve_stats",
+    "/frame.bin": "serve_thermal_frame",
+    "/view": "serve_viewer_page",
     "/": "serve_control_page",
 }
 
@@ -67,6 +70,7 @@ class LatestFrame:
     def __init__(self) -> None:
         self._jpeg: bytes | None = None
         self._stats: FrameStats | None = None
+        self._thermal: ThermalFrame | None = None
         self._published_count = 0
         self._updated = threading.Condition()
 
@@ -77,10 +81,16 @@ class LatestFrame:
         with self._updated:
             return self._published_count
 
-    def publish(self, jpeg: bytes, stats: FrameStats | None = None) -> None:
+    def publish(
+        self,
+        jpeg: bytes,
+        stats: FrameStats | None = None,
+        thermal: ThermalFrame | None = None,
+    ) -> None:
         with self._updated:
             self._jpeg = jpeg
             self._stats = stats
+            self._thermal = thermal
             self._published_count += 1
             self._updated.notify_all()
 
@@ -89,6 +99,12 @@ class LatestFrame:
 
         with self._updated:
             return self._stats
+
+    def latest_thermal(self) -> ThermalFrame | None:
+        """The last frame's measurements, for a client that wants to read its own temperatures."""
+
+        with self._updated:
+            return self._thermal
 
     def snapshot(self) -> bytes | None:
         with self._updated:
@@ -162,6 +178,32 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             return
         getattr(self, route)()
 
+    def serve_viewer_page(self) -> None:
+        """The interactive page. Needs no settings store, so it is served whatever else is wired."""
+
+        self.send_html(render_viewer_page())
+
+    def serve_thermal_frame(self) -> None:
+        """Every pixel's temperature, as bytes, for a viewer that reads its own values.
+
+        Converted here rather than in the browser so the emissivity correction has one
+        implementation. Converted per request rather than per frame so it costs nothing at all
+        unless somebody is actually looking at it, which is the whole reason the capture path stores
+        raw counts.
+        """
+
+        thermal = self.frames.latest_thermal()
+        if thermal is None:
+            self.send_error(503, "no frame yet")
+            return
+        body = encode_thermal_frame(thermal)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def serve_stats(self) -> None:
         """The numbers behind the picture, for anything that would rather draw its own overlay."""
 
@@ -233,20 +275,23 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def serve_control_page(self) -> None:
-        if self.settings_store is None:
-            self.serve_stream()
-            return
-        status = self.device.status() if self.device is not None else None
-        page = render_control_page(
-            self.settings_store.as_dict(), sorted(self.palettes), status
-        ).encode()
+    def send_html(self, markup: str) -> None:
+        page = markup.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(page)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(page)
+
+    def serve_control_page(self) -> None:
+        if self.settings_store is None:
+            self.serve_stream()
+            return
+        status = self.device.status() if self.device is not None else None
+        self.send_html(
+            render_control_page(self.settings_store.as_dict(), sorted(self.palettes), status)
+        )
 
     def send_json(self, payload: dict) -> None:
         body = json.dumps(payload, indent=2).encode()

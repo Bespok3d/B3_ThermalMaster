@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.0
+
+An interactive viewer, as a second camera tile.
+
+- Point anywhere on the picture and read the temperature of that pixel.
+- The tile appears in Fluidd and Mainsail next to the plain one, named after your camera with
+  "live" on the end. The plain tile stays exactly as it was: if the viewer ever breaks, you still
+  have a camera.
+- Nothing is fetched until you point at something, and it stops a few seconds after you stop, so a
+  tile nobody is using costs the printer the stream and not one byte more.
+
+The page reads temperatures itself rather than asking the printer one question at a time. A new
+endpoint hands it every pixel at once, with the emissivity correction already applied, which is why
+hovering is instant and why the browser never has to carry a second copy of the physics.
+
 ## 0.10.0
 
 - The coldest pixel is now marked too, in blue, with its own tick on the ruler. A cold corner of a

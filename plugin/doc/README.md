@@ -15,6 +15,8 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Stream: `/thermal/stream.mjpg`
 - Snapshot: `/thermal/snapshot.jpg`
 - Temperatures: `/thermal/stats`
+- Interactive viewer: `/thermal/view`
+- Every pixel's temperature: `/thermal/frame.bin`
 - Settings and camera state: `/thermal/settings`
 
 ## Setting it up
@@ -69,6 +71,21 @@ plugin to what it cost without a readout.
 
 `/thermal/stats` serves the same numbers as JSON, along with the frame average and the coldest
 pixel, and the pixel coordinates of both extremes in the orientation you are looking at.
+
+## The interactive viewer
+
+`/thermal/view`, and it registers itself as a second tile in Fluidd and Mainsail, named after your
+camera with "live" on the end. Point at the picture and it tells you the temperature of the pixel
+under the pointer, along with the hottest and coldest in view.
+
+It is a second tile rather than a replacement because the two fail differently. The plain tile is an
+image and will render in anything; this one is a script, and if it breaks you still have a camera.
+
+It reads temperatures itself. `/thermal/frame.bin` hands it every pixel as hundredths of a degree
+with emissivity already applied, so pointing is a lookup in data the page already holds rather than
+a question to the printer, and the physics has one implementation rather than two. Nothing is
+fetched until you point at something and it stops a few seconds after you stop, so a tile nobody is
+using costs nothing beyond the stream itself.
 
 ## Camera controls
 

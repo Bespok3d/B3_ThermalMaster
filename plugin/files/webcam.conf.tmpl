@@ -17,3 +17,17 @@ aspect_ratio: $THERMAL_CAMERA_ASPECT
 rotation: 0
 flip_horizontal: false
 flip_vertical: false
+
+# A second tile for the interactive viewer, as an iframe rather than a picture. `u1-remote-screen`
+# ships the same mechanism, which is what settles that Moonraker's `iframe` service type reaches
+# Fluidd and Mainsail as a real tile.
+#
+# It is a second tile rather than a replacement because the two fail differently. The picture above
+# is a plain image and will render in anything, including a browser with JavaScript off; this one is
+# a script that turns a pointer into a temperature, and if it breaks you still have a camera.
+#
+# No snapshot_url: there is no still of an interactive page, and Moonraker does not ask for one.
+[webcam $THERMAL_CAMERA_NAME live]
+service: iframe
+stream_url: /thermal/view
+aspect_ratio: $THERMAL_CAMERA_ASPECT

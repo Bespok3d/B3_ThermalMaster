@@ -18,12 +18,14 @@ import io
 import numpy as np
 from PIL import Image
 
+from .geometry import orient
 from .overlay import Overlay, draw_overlay, encode_upscale
 from .palettes import PALETTE_STEPS
 from .temperature import (
     DEFAULT_EMISSIVITY,
     DEFAULT_UNITS,
     FrameStats,
+    ThermalFrame,
     frame_statistics,
 )
 
@@ -141,6 +143,7 @@ class RenderedFrame:
 
     jpeg: bytes
     stats: FrameStats
+    thermal: ThermalFrame
 
 
 @dataclasses.dataclass(frozen=True)
@@ -212,7 +215,9 @@ class ThermalRenderer:
     def render(self, thermal_raw: np.ndarray) -> np.ndarray:
         return self.render_image(thermal_raw)[0]
 
-    def render_image(self, thermal_raw: np.ndarray) -> tuple[np.ndarray, FrameStats]:
+    def render_image(
+        self, thermal_raw: np.ndarray
+    ) -> tuple[np.ndarray, FrameStats, np.ndarray]:
         denoised = reduce_temporal_noise(
             thermal_raw, self._previous_frame, self._settings.noise_reduction_weight
         )
@@ -239,10 +244,10 @@ class ThermalRenderer:
             self._settings.flip_horizontal,
             self._settings.flip_vertical,
         )
-        return oriented, stats
+        return oriented, stats, denoised
 
     def render_frame(self, thermal_raw: np.ndarray) -> RenderedFrame:
-        image, stats = self.render_image(thermal_raw)
+        image, stats, denoised = self.render_image(thermal_raw)
         settings = self._settings
         overlay = (
             Overlay(
@@ -260,31 +265,16 @@ class ThermalRenderer:
         upscale = encode_upscale(
             (image.shape[1], image.shape[0]), settings.upscale, settings.readout
         )
+        # The denoised counts rather than the picture: this is what a viewer reads temperatures
+        # out of, and it is stored unconverted because converting is four float passes over the
+        # whole frame and nothing is asking for them yet.
+        measured = ThermalFrame(denoised, settings.rotation, settings.mirrors, settings.emissivity)
         return RenderedFrame(
-            encode_jpeg(image, upscale, settings.jpeg_quality, overlay), stats
+            encode_jpeg(image, upscale, settings.jpeg_quality, overlay), stats, measured
         )
 
     def render_jpeg(self, thermal_raw: np.ndarray) -> bytes:
         return self.render_frame(thermal_raw).jpeg
-
-
-def orient(
-    image: np.ndarray, rotation: int, flip_horizontal: bool, flip_vertical: bool
-) -> np.ndarray:
-    """Rotate clockwise by whole quarter turns, then mirror.
-
-    numpy rotates anticlockwise, so the sign is flipped: `rotation` is degrees clockwise, which is
-    what a person means when they say the picture is on its side. The result is made contiguous
-    because a rotation returns a view with negative strides and Pillow will not read that.
-    """
-
-    if rotation:
-        image = np.rot90(image, k=-(rotation // 90))
-    if flip_horizontal:
-        image = np.fliplr(image)
-    if flip_vertical:
-        image = np.flipud(image)
-    return np.ascontiguousarray(image)
 
 
 def encode_jpeg(

@@ -20,6 +20,8 @@ from p3_camera import (  # type: ignore[import-not-found]
     raw_to_celsius_corrected,
 )
 
+from .geometry import orient, orient_point
+
 CELSIUS = "celsius"
 
 
@@ -75,41 +77,6 @@ def format_temperature(celsius: float, units: str) -> str:
     return f"{to_display_temperature(celsius, units):.1f}{'F' if units == FAHRENHEIT else 'C'}"
 
 
-def rotate_point_clockwise(
-    point: tuple[int, int], size: tuple[int, int]
-) -> tuple[tuple[int, int], tuple[int, int]]:
-    """One quarter turn clockwise. The frame's width and height trade places with it."""
-
-    x, y = point
-    width, height = size
-    return (height - 1 - y, x), (height, width)
-
-
-def orient_point(
-    point: tuple[int, int],
-    size: tuple[int, int],
-    rotation: int,
-    mirrors: tuple[bool, bool],
-) -> tuple[tuple[int, int], tuple[int, int]]:
-    """Where a sensor pixel ends up once the frame has been rotated and mirrored.
-
-    Written to follow `orient` step for step rather than as one derived transform, so the two
-    cannot drift apart. A marker that lands somewhere other than the pixel it names is worse than
-    no marker at all, because it looks authoritative.
-    """
-
-    flip_horizontal, flip_vertical = mirrors
-    for _ in range(rotation // 90):
-        point, size = rotate_point_clockwise(point, size)
-    x, y = point
-    width, height = size
-    if flip_horizontal:
-        x = width - 1 - x
-    if flip_vertical:
-        y = height - 1 - y
-    return (x, y), (width, height)
-
-
 @dataclasses.dataclass(frozen=True)
 class FrameStats:
     """What one frame says about temperature, in the orientation it is displayed in.
@@ -146,6 +113,59 @@ class FrameStats:
             "width": self.width,
             "height": self.height,
         }
+
+
+# The wire format for a frame of temperatures. Hundredths of a degree in a signed 16 bit integer
+# covers -327 C to +327 C, which is well past what either sensor can report, and it is exact to the
+# tenth of a degree the readout shows. Floats would double the bytes to carry precision the camera
+# does not have.
+THERMAL_FRAME_MAGIC = b"TMF1"
+THERMAL_FRAME_HEADER = 16
+CENTIDEGREES_PER_DEGREE = 100
+MIN_CENTIDEGREES = -32000
+MAX_CENTIDEGREES = 32000
+
+
+@dataclasses.dataclass(frozen=True)
+class ThermalFrame:
+    """One frame of raw sensor counts, with everything needed to make sense of it later.
+
+    Raw rather than converted, and unoriented, because converting a whole frame is four float
+    passes and this processor cannot afford them at frame rate (F-56). The settings that were in
+    force are carried along so a request arriving later converts the frame the way it was measured
+    rather than the way the settings happen to read by then.
+    """
+
+    counts: np.ndarray
+    rotation: int
+    mirrors: tuple[bool, bool]
+    emissivity: float
+
+
+def encode_thermal_frame(frame: ThermalFrame) -> bytes:
+    """A frame of temperatures as bytes a browser can index into.
+
+    Self describing rather than relying on HTTP headers, so the body can be saved, replayed and
+    tested on its own, and so a proxy that strips headers cannot silently break the reader.
+
+    Oriented here rather than when it was captured, for the same reason it is stored as counts: the
+    work happens once per request, and requests only happen while someone is looking.
+    """
+
+    oriented = orient(frame.counts, frame.rotation, *frame.mirrors)
+    environment = EnvParams(emissivity=frame.emissivity)
+    celsius = np.asarray(raw_to_celsius_corrected(oriented, environment), dtype=np.float32)
+    centidegrees = np.clip(
+        celsius * CENTIDEGREES_PER_DEGREE, MIN_CENTIDEGREES, MAX_CENTIDEGREES
+    ).astype("<i2")
+    height, width = centidegrees.shape
+    header = (
+        THERMAL_FRAME_MAGIC
+        + np.array(
+            [width, height, CENTIDEGREES_PER_DEGREE, 0, 0, 0], dtype="<u2"
+        ).tobytes()
+    )
+    return header + centidegrees.tobytes()
 
 
 def frame_statistics(

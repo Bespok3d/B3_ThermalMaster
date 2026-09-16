@@ -18,6 +18,7 @@ import functools
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from .geometry import orient_point  # noqa: F401 - re-exported for the package facade
 from .palettes import PALETTE_STEPS
 from .temperature import FrameStats, format_temperature
 

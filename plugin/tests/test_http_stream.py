@@ -358,3 +358,52 @@ def test_the_settings_mirror_carries_the_same_device_sentence(thermal_streamer):
         connection.close()
         server.shutdown()
         server.server_close()
+
+
+def test_the_frame_endpoint_waits_for_a_frame(serving):
+    server, _ = serving
+    connection = connect_to(server)
+
+    connection.request("GET", "/frame.bin")
+    response = connection.getresponse()
+    response.read()
+
+    assert response.status == 503
+    connection.close()
+
+
+def test_the_frame_endpoint_serves_the_measurements(thermal_streamer, serving):
+    import numpy as np
+
+    server, frame_store = serving
+    counts = np.full((120, 160), 20000, dtype=np.uint16)
+    frame_store.publish(
+        FAKE_JPEG, None, thermal_streamer.ThermalFrame(counts, 0, (False, False), 1.0)
+    )
+    connection = connect_to(server)
+
+    connection.request("GET", "/frame.bin")
+    response = connection.getresponse()
+    body = response.read()
+
+    assert response.status == 200
+    assert response.getheader("Content-Type") == "application/octet-stream"
+    assert body[:4] == b"TMF1"
+    assert len(body) == 16 + 160 * 120 * 2
+    connection.close()
+
+
+def test_the_viewer_page_is_served_without_a_settings_store(serving):
+    """It needs no settings, so a half-wired server still serves something usable."""
+
+    server, _ = serving
+    connection = connect_to(server)
+
+    connection.request("GET", "/view")
+    response = connection.getresponse()
+    body = response.read().decode()
+
+    assert response.status == 200
+    assert 'id="surface"' in body
+    assert "frame.bin" in body
+    connection.close()

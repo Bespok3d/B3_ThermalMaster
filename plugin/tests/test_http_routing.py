@@ -58,3 +58,15 @@ def test_the_statistics_are_read_only(thermal_streamer):
     """The numbers come out of the camera; nothing on the network may post them back."""
 
     assert "/stats" not in thermal_streamer.POST_ROUTES
+
+
+def test_the_thermal_frame_has_its_own_path(thermal_streamer):
+    assert thermal_streamer.resolve_route("/frame.bin") == "serve_thermal_frame"
+
+
+def test_the_viewer_has_its_own_path(thermal_streamer):
+    assert thermal_streamer.resolve_route("/view") == "serve_viewer_page"
+
+
+def test_neither_accepts_a_post(thermal_streamer):
+    assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
