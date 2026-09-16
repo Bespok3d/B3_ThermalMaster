@@ -43,6 +43,16 @@ def rotate_point_clockwise(
     return (height - 1 - y, x), (height, width)
 
 
+def rotate_point_anticlockwise(
+    point: tuple[int, int], size: tuple[int, int]
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """One quarter turn back, undoing `rotate_point_clockwise` exactly."""
+
+    x, y = point
+    width, height = size
+    return (y, width - 1 - x), (height, width)
+
+
 def orient_point(
     point: tuple[int, int],
     size: tuple[int, int],
@@ -66,3 +76,30 @@ def orient_point(
     if flip_vertical:
         y = height - 1 - y
     return (x, y), (width, height)
+
+
+def unorient_point(
+    point: tuple[int, int],
+    size: tuple[int, int],
+    rotation: int,
+    mirrors: tuple[bool, bool],
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Which sensor pixel a point on the displayed picture came from.
+
+    The other direction from `orient_point`, and needed because the two ends of the plugin speak
+    different spaces: a viewer clicks on the picture as displayed, and the temperature it wants
+    lives in a frame that has not been turned. Undone in the reverse order it was done, flips
+    first, and cross-checked against `orient_point` for all eight combinations.
+    """
+
+    flip_horizontal, flip_vertical = mirrors
+    x, y = point
+    width, height = size
+    if flip_horizontal:
+        x = width - 1 - x
+    if flip_vertical:
+        y = height - 1 - y
+    point, size = (x, y), (width, height)
+    for _ in range(rotation // 90):
+        point, size = rotate_point_anticlockwise(point, size)
+    return point, size

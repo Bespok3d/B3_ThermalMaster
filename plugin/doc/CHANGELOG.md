@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.19.0
+
+- **Spots.** Click the picture in Spot mode and it marks that place and reads its temperature, up to
+  four at once, for watching several parts of a print at the same time. Click a spot to remove it,
+  or Clear to remove them all.
+- They belong to the printer rather than to the browser, so they are burned into the picture like
+  the rest of the readout: the dashboard tile shows them, a recorded clip shows them, and a second
+  browser shows the same ones.
+- Each spot reads a 3 by 3 patch averaged rather than a single pixel, which is steadier and easier
+  to land on.
+- Rotating or mirroring the picture clears the spots, because they name places on a picture that
+  just moved. Better to place them again than to have them point confidently at the wrong thing.
+- **A saved image and a recorded clip now carry the region box's numbers**, not just the box.
+- Changing a setting no longer makes the picture re-settle for a second, which matters when placing
+  four spots one after another.
+
 ## 0.18.0
 
 - **Record a clip.** A Rec button in the viewer writes what the camera is showing to a video file,

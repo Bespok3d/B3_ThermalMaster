@@ -95,7 +95,9 @@ because Box mode uses the same gesture for the region and a phone has no key to 
 The units button changes the unit for the whole plugin rather than just this page, so the readout
 burned into the picture agrees with it. Save writes a PNG at the sensor's own resolution with the
 region drawn on it, because a picture of a measurement that does not show what was measured is not
-evidence of anything.
+evidence of anything: the box's own numbers are written beside it in both a saved image and a
+recording, since the readout burned into the stream is about the whole frame rather than about
+your box.
 
 Rec records a clip of what the camera is showing, with the readout and the region box on it, at the
 sensor's own resolution rather than at the size of your window. Press it again to stop and the file
@@ -103,6 +105,17 @@ is saved. It is an MP4 where your browser will produce one and a WebM where it w
 file is named for what it actually is. A recording is held in memory until you stop it, so it stops
 itself after ten minutes, and leaving the page saves what it has rather than losing it. The button
 appears when the page has room for it, which means not in a dashboard tile.
+
+Spot mode marks places to watch. Click the picture and it puts a spot there with its temperature,
+up to four at once; click a spot to remove it, or Clear to remove them all. Each one reads a small
+3 by 3 patch averaged rather than a single pixel, which is steadier and easier to hit.
+
+Spots belong to the printer rather than to this page, so they are drawn into the picture like the
+rest of the readout: the dashboard tile shows them, a recorded clip shows them, and a second browser
+shows the same ones. That costs the printer a little work per spot, which is why there are four of
+them and not forty. Rotating or mirroring the picture clears them, because they name places on a
+picture that just moved, and a marker pointing confidently at the wrong thing is worse than no
+marker.
 
 Drag a box on the picture and it reports the hottest, coldest and average temperature inside it,
 updating as fast as you drag. Click anywhere to clear it, or press Escape. The box is remembered

@@ -27,6 +27,7 @@ from .temperature import (
     FrameStats,
     ThermalFrame,
     frame_statistics,
+    spot_readings,
 )
 
 # Encode at the sensor's own size and let the browser scale it. Upscaling here cost four fifths of
@@ -172,6 +173,11 @@ class RenderSettings:
     coldspot: bool = True
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
+    # Places somebody asked to watch, in the orientation the picture is displayed in, capped at
+    # MAX_SPOTS. They live here rather than in the browser so that they are burned into the
+    # picture: a spot that existed only in one viewer would be missing from the tile, from a
+    # recorded clip and from every other browser, which is most of the reasons to place one.
+    spots: tuple[tuple[int, int], ...] = ()
 
     @property
     def readout(self) -> bool:
@@ -182,7 +188,9 @@ class RenderSettings:
         was a readout.
         """
 
-        return self.colorbar or self.reticle or self.hotspot or self.coldspot
+        return bool(
+            self.colorbar or self.reticle or self.hotspot or self.coldspot or self.spots
+        )
 
     @property
     def mirrors(self) -> tuple[bool, bool]:
@@ -212,6 +220,20 @@ class ThermalRenderer:
 
         return self._bounds
 
+    def carry_over(self, previous: ThermalRenderer) -> None:
+        """Take the smoothed bounds and the last frame from the renderer being replaced.
+
+        A settings change builds a new renderer rather than mutating one the capture thread may be
+        inside. Started empty, that costs about a second of visible re-settling, which is a fair
+        price once and an unreasonable one when somebody is placing four spots in a row: every
+        placement is a settings change, so the picture would breathe on each of them. Nothing
+        carried here depends on any setting: the bounds are raw counts and the previous frame is in
+        the sensor's own orientation, so both stay valid across a palette, rotation or spot change.
+        """
+
+        self._bounds = previous.bounds
+        self._previous_frame = previous._previous_frame
+
     def render(self, thermal_raw: np.ndarray) -> np.ndarray:
         return self.render_image(thermal_raw)[0]
 
@@ -234,6 +256,20 @@ class ThermalRenderer:
             self._settings.mirrors,
             self._settings.emissivity,
         )
+        # Attached rather than computed in there: what the frame says is one question, and what
+        # somebody asked to watch inside it is another. Skipped entirely when nothing was placed,
+        # which is the usual case and the one that must stay free.
+        if self._settings.spots:
+            stats = dataclasses.replace(
+                stats,
+                spots=spot_readings(
+                    denoised,
+                    self._settings.spots,
+                    self._settings.rotation,
+                    self._settings.mirrors,
+                    self._settings.emissivity,
+                ),
+            )
         normalized = normalize_to_bytes(denoised, *self._bounds)
         coloured = self._palette[enhance_detail(normalized, self._settings.detail_strength)]
         # Last, so everything before it works in the sensor's own orientation and the frame kept for

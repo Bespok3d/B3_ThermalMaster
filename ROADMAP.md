@@ -1517,30 +1517,57 @@ fires on every load, because the canvas lands under a stationary cursor at (0, 0
 does not move, would therefore have been a fix to something that was not happening. Left alone,
 with the check as it is: it encodes a real promise, and widening it would bury the next occurrence.
 
-### Phase 7e: arbitrary spot markers
+### Phase 7e: arbitrary spot markers. Shipped in 0.19.0.
 
 Requested from hardware use: place points on the picture and keep reading all of them at once, for
-watching several areas of a print at the same time. Not necessarily single pixels; a small patch,
-averaged, is steadier and easier to hit than one pixel.
+watching several areas of a print at the same time.
 
-Decisions to take when it is built, none of them settled yet:
+**The decision that shaped it, taken by the maintainer.** A spot could live in the browser, like the
+region box does, costing the printer nothing per viewer; or in the plugin, drawn into the picture,
+costing CPU per spot for everybody. The browser version cannot appear in the dashboard tile, in a
+recorded clip, or in a second browser, which is most of the reasons to place one. Asked, and told to
+spend the cycles, capped at four. So spots are a render setting: they persist, they are burned into
+the stream, and every surface shows the same ones.
 
-- **A spot is a small square, not a pixel.** A 3 by 3 patch reported as its average, with its own
-  maximum available, because one pixel of a 160 by 120 sensor is noisy and hard to land on. The
-  patch size is a candidate for a control rather than a constant.
-- **Several at once, each labelled.** The readout already places labels that avoid each other
-  (`place_label` in `overlay.py`), which is the mechanism to reuse rather than reinvent.
-- **They belong to the browser, not to the plugin.** The region box is remembered in
-  `localStorage` and measured from the frame the page already holds, which costs the printer
-  nothing per viewer. Spots should work the same way: the alternative, holding them in the settings
-  file and burning them into the stream, spends printer CPU per spot and makes one viewer's
-  measurements everybody's.
-- **Which means the burned-in readout does not show them.** Worth confirming with the maintainer
-  before building, because it is the one real argument for the other design: a spot that only
-  exists in the viewer cannot appear in a recorded clip made from the stream picture, and cannot
-  be seen from a second browser.
-- **Placing, moving and removing.** Click to place, drag to move, click again or a modifier to
-  remove, and a limit (four? six?) so the picture does not disappear under its own labels.
+How it went together:
+
+- **A spot is a 3 by 3 patch, averaged**, not a pixel. One pixel of a 160 by 120 sensor is noisy and
+  hard to land on with a finger. The patch mean carries the same fourth-power approximation the
+  frame average does, which over nine adjacent pixels is far below what the sensor can resolve.
+- **Two coordinate spaces, and a new inverse.** A spot is placed on the picture as displayed and
+  measured in a frame that has not been turned, so `geometry.unorient_point` is the other direction
+  from `orient_point`, cross-checked against it for all eight orientations rather than derived
+  independently. Mapping the point rather than turning the frame: turning it per request would cost
+  a copy for four numbers.
+- **Turning the picture drops the spots.** They name places on a picture that just moved, and
+  carrying the coordinates across would leave each marker pointing confidently at something it was
+  never put on. Dropped visibly beats moved silently. The comparison is between two whole settings
+  objects, so the control page posting every field on every apply is not read as a rotation.
+- **One request shape.** The viewer posts the whole list it wants, so placing, moving and clearing
+  are the same request. An empty list is a clear, which is why the JSON dialect reads the key rather
+  than the value.
+- **Placed spots get first refusal on a label position**, ahead of the hotspot, coldspot and centre,
+  because somebody asked for them by name.
+
+**F-69. Placing a spot before the first frame did nothing, and the harness caught it.** The third
+time this family has appeared: a screen position only becomes a pixel once there is a frame to turn
+it against, and the first thing anyone does on opening the tile is go straight for the thing they
+wanted to measure. F-64 was the same shape for the picture, and the pending drag was the same shape
+for the region box. A held click, resolved when the frame lands, alongside the pending drag that was
+already there. Worth stating as a rule: anything this page turns into a pixel needs an answer for
+"and if there is no frame yet", and the browser harness is the only thing that asks.
+
+**A settings change no longer makes the picture re-settle.** Every placement is a settings change,
+and a settings change rebuilt the renderer from nothing, which discarded the smoothed bounds and the
+previous frame and cost about a second of visible re-ranging. Placing four spots would have made the
+picture breathe four times. The replacement now inherits both from the renderer it replaces, which
+is safe because only the capture thread ever asks for one. Nothing carried depends on a setting: the
+bounds are raw counts and the kept frame is in the sensor's own orientation.
+
+**The region box now carries its numbers into a saved still and a recorded clip.** Reported from
+use: the box was drawn and the numbers were not, so a clip showed where a measurement was taken and
+not what it came to. The burned-in readout is about the whole frame, so nothing else in the picture
+could supply them.
 
 **F-61. A camera plugged in after boot is not picked up until a reboot.** Reported from hardware,
 not yet diagnosed, and taken last by agreement.

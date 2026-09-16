@@ -510,6 +510,53 @@ NO_SCRIPT_VIEWPORT = {"width": 320, "height": 700}
 PICTURE_ASPECT = 160 / 120
 
 
+def click_fraction(page, across: float, down: float) -> None:
+    """Click a point on the picture, given as a fraction of it."""
+
+    rect = picture_rect(page)
+    page.mouse.click(rect["left"] + rect["width"] * across, rect["top"] + rect["height"] * down)
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+
+
+def run_spot_checks(browser, port: int, store) -> list:
+    """Placing, removing and clearing spots, checked against what the plugin actually holds.
+
+    Spots live in the plugin rather than in the page, so the assertion is on the settings store and
+    not on anything the browser drew: the page's job is to post the list it wants, and the picture
+    that comes back is what shows them.
+    """
+
+    page = browser.new_page(viewport={"width": 900, "height": 700})
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    page.click("#mode-spot")
+    click_fraction(page, 0.3, 0.4)
+    placed = len(store.as_dict()["spots"])
+    click_fraction(page, 0.7, 0.6)
+    both = len(store.as_dict()["spots"])
+    label = page.inner_text("#spots-clear")
+    # The same point again, which is a click on the spot that is already there.
+    click_fraction(page, 0.3, 0.4)
+    after_removing = len(store.as_dict()["spots"])
+    for step in range(6):
+        click_fraction(page, 0.2 + step * 0.1, 0.2)
+    capped = len(store.as_dict()["spots"])
+    page.click("#spots-clear")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    cleared = len(store.as_dict()["spots"])
+    disabled = page.get_attribute("#spots-clear", "disabled")
+    page.close()
+    return [
+        ("clicking the picture places a spot", placed, 1),
+        ("and another click places another", both, 2),
+        ("the clear button counts them", label, "Clear 2"),
+        ("clicking a spot removes that one", after_removing, 1),
+        ("no more than four are accepted", capped, 4),
+        ("clear removes all of them", cleared, 0),
+        ("and then has nothing to do", disabled is not None, True),
+    ]
+
+
 def run_recording_checks(browser, port: int) -> list:
     """Record a short clip and check a real file comes out of it.
 
@@ -681,6 +728,9 @@ def main() -> None:
         print("")
         print("viewer in a wide tile")
         report(run_tile_checks(browser, PORT, WIDE_TILE_VIEWPORT), problems)
+        print("")
+        print("spots")
+        report(run_spot_checks(browser, PORT, store), problems)
         print("")
         print("recording")
         report(run_recording_checks(browser, PORT), problems)

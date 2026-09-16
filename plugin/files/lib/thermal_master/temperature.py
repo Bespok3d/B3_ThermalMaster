@@ -20,7 +20,7 @@ from p3_camera import (  # type: ignore[import-not-found]
     raw_to_celsius_corrected,
 )
 
-from .geometry import orient, orient_point
+from .geometry import orient, orient_point, unorient_point
 
 CELSIUS = "celsius"
 
@@ -77,6 +77,30 @@ def format_temperature(celsius: float, units: str) -> str:
     return f"{to_display_temperature(celsius, units):.1f}{'F' if units == FAHRENHEIT else 'C'}"
 
 
+# How many spots a viewer may place. Each one is a patch mean and a label drawn at frame rate, so
+# the ceiling is a real cost ceiling rather than a tidiness rule, and four is what fits on a
+# 160 by 120 picture without the labels burying the thing being measured.
+MAX_SPOTS = 4
+
+
+# A spot is a small square rather than one pixel. One pixel of this sensor is noisy and hard to
+# land on with a finger; a 3 by 3 mean is steadier and still small enough to mean "there".
+SPOT_PATCH_PIXELS = 3
+
+
+@dataclasses.dataclass(frozen=True)
+class SpotReading:
+    """A place somebody asked to watch, and what it reads.
+
+    The position is in the orientation the picture is displayed in, which is the space the request
+    to place it arrived in and the space the marker is drawn in. The sensor space it is measured in
+    is an implementation detail of getting there.
+    """
+
+    spot: tuple[int, int]
+    celsius: float
+
+
 @dataclasses.dataclass(frozen=True)
 class FrameStats:
     """What one frame says about temperature, in the orientation it is displayed in.
@@ -95,6 +119,7 @@ class FrameStats:
     coldspot: tuple[int, int]
     width: int
     height: int
+    spots: tuple[SpotReading, ...] = ()
 
     def as_dict(self, units: str) -> dict:
         def shown(celsius: float) -> float:
@@ -112,6 +137,10 @@ class FrameStats:
             "coldspot": {"x": self.coldspot[0], "y": self.coldspot[1]},
             "width": self.width,
             "height": self.height,
+            "spots": [
+                {"x": reading.spot[0], "y": reading.spot[1], "celsius": shown(reading.celsius)}
+                for reading in self.spots
+            ],
         }
 
 
@@ -166,6 +195,54 @@ def encode_thermal_frame(frame: ThermalFrame) -> bytes:
         ).tobytes()
     )
     return header + centidegrees.tobytes()
+
+
+def oriented_size(frame: np.ndarray, rotation: int) -> tuple[int, int]:
+    """The picture's width and height once the frame has been turned, without turning it."""
+
+    height, width = frame.shape
+    return (height, width) if rotation % 180 else (width, height)
+
+
+def spot_readings(
+    frame: np.ndarray,
+    spots: tuple[tuple[int, int], ...],
+    rotation: int,
+    mirrors: tuple[bool, bool],
+    emissivity: float = DEFAULT_EMISSIVITY,
+) -> tuple[SpotReading, ...]:
+    """Read the small patch under each placed spot.
+
+    The spots arrive in the orientation they were placed in, so each one is mapped back to the
+    sensor pixel it names before the patch around it is averaged. Mapped rather than the frame
+    turned: turning the frame per request would cost a copy for four numbers.
+
+    The emissivity correction is applied to the patch mean, the same approximation the frame
+    average carries: the correction is a fourth-power curve, so this is not exactly the mean of the
+    corrected pixels. Over nine adjacent pixels the difference is far below what the sensor can
+    tell apart.
+    """
+
+    if not spots:
+        return ()
+    height, width = frame.shape
+    picture = oriented_size(frame, rotation)
+    environment = EnvParams(emissivity=emissivity)
+    half = SPOT_PATCH_PIXELS // 2
+    readings = []
+    for spot in spots:
+        placed = (
+            min(max(int(spot[0]), 0), picture[0] - 1),
+            min(max(int(spot[1]), 0), picture[1] - 1),
+        )
+        (sensor_x, sensor_y), _ = unorient_point(placed, picture, rotation, mirrors)
+        patch = frame[
+            max(sensor_y - half, 0):min(sensor_y + half + 1, height),
+            max(sensor_x - half, 0):min(sensor_x + half + 1, width),
+        ]
+        celsius = float(raw_to_celsius_corrected(float(patch.mean()), environment))
+        readings.append(SpotReading(spot=placed, celsius=celsius))
+    return tuple(readings)
 
 
 def frame_statistics(

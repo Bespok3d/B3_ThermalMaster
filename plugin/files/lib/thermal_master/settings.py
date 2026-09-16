@@ -18,7 +18,7 @@ from typing import TypeVar
 
 from .camera import VALID_GAINS, CameraSettings
 from .pipeline import VALID_ROTATIONS, RenderSettings, ThermalRenderer
-from .temperature import MAX_EMISSIVITY, MIN_EMISSIVITY, VALID_UNITS
+from .temperature import MAX_EMISSIVITY, MAX_SPOTS, MIN_EMISSIVITY, VALID_UNITS
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
 # was given rather than a common base, or every caller loses its type.
@@ -49,6 +49,59 @@ def migrated(saved: dict) -> dict:
         if old in updated and not any(new in updated for new in replacements):
             updated.update(dict.fromkeys(replacements, updated[old]))
     return updated
+
+
+# The settings that decide where a pixel ends up on screen. A spot names a place on the picture,
+# so a change to any of these is a change to what the spot is pointing at.
+ORIENTING_SETTINGS = ("rotation", "flip_horizontal", "flip_vertical")
+
+
+# A spot is an x and a y. Anything else in the list is not a spot.
+SPOT_COORDINATES = 2
+
+
+def clean_spots(value: object) -> tuple[tuple[int, int], ...]:
+    """Whatever arrived, as at most MAX_SPOTS pairs of whole numbers.
+
+    This is one of the two things a stranger on the network can put a list into, and it is also
+    read back out of a file a person is invited to hand-edit, so it is validated in one place for
+    both. Anything that is not a pair of numbers is dropped rather than refused: the rest of the
+    list is still a perfectly good answer.
+    """
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    spots = []
+    for entry in value:
+        if not isinstance(entry, (list, tuple)) or len(entry) != SPOT_COORDINATES:
+            continue
+        try:
+            x, y = int(entry[0]), int(entry[1])
+        except (TypeError, ValueError):
+            continue
+        if x < 0 or y < 0:
+            continue
+        spots.append((x, y))
+    return tuple(spots[:MAX_SPOTS])
+
+
+def kept_spots(before: RenderSettings, after: RenderSettings) -> tuple[tuple[int, int], ...]:
+    """The spots that survive a change, which is none of them if the picture is being turned.
+
+    A spot is a place on the displayed picture, and rotating or mirroring moves every place on it.
+    Carrying the coordinates across would leave each marker pointing confidently at something it
+    was never put on, which is the failure this plugin least wants to ship. Dropped, visibly,
+    rather than moved silently.
+
+    Compared between two whole settings objects rather than against a bag of changes, so a form
+    that posts every field on every apply, which is what the control page does, is not read as a
+    rotation every time.
+    """
+
+    turning = any(
+        getattr(before, setting) != getattr(after, setting) for setting in ORIENTING_SETTINGS
+    )
+    return () if turning else before.spots
 
 
 def restored(current: _Settings, saved: dict) -> _Settings:
@@ -134,6 +187,12 @@ class SettingsStore:
             return
         self._palette_name = saved.pop("palette", self._palette_name)
         self._settings = restored(self._settings, migrated(saved))
+        # A JSON file hands back lists where the dataclass declares pairs, and it is a file people
+        # are invited to edit, so what comes out of it goes through the same validator a posted
+        # change does.
+        self._settings = dataclasses.replace(
+            self._settings, spots=clean_spots(self._settings.spots)
+        )
         self._camera = restored(self._camera, saved)
 
     def _save(self) -> None:
@@ -160,20 +219,21 @@ def settings_from_form(
     posted_rotation = form.get("rotation", [""])[0]
     rotation = int(posted_rotation) if posted_rotation.isdigit() else -1
     posted_units = form.get("units", [""])[0]
+    updated = dataclasses.replace(
+        current,
+        rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
+        flip_horizontal="flip_horizontal" in form,
+        flip_vertical="flip_vertical" in form,
+        colorbar="colorbar" in form,
+        reticle="reticle" in form,
+        hotspot="hotspot" in form,
+        coldspot="coldspot" in form,
+        units=posted_units if posted_units in VALID_UNITS else current.units,
+        emissivity=posted_emissivity(form, current.emissivity),
+    )
     return (
         palette_name if palette_name in palettes else None,
-        dataclasses.replace(
-            current,
-            rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
-            flip_horizontal="flip_horizontal" in form,
-            flip_vertical="flip_vertical" in form,
-            colorbar="colorbar" in form,
-            reticle="reticle" in form,
-            hotspot="hotspot" in form,
-            coldspot="coldspot" in form,
-            units=posted_units if posted_units in VALID_UNITS else current.units,
-            emissivity=posted_emissivity(form, current.emissivity),
-        ),
+        dataclasses.replace(updated, spots=kept_spots(current, updated)),
     )
 
 
@@ -201,9 +261,14 @@ def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -
         if flag in payload:
             changes[flag] = bool(payload[flag])
     palette_name = payload.get("palette")
+    updated = dataclasses.replace(current, **changes)
+    # The whole list every time, which makes placing, moving and clearing one kind of request
+    # rather than three. An empty list is a clear, and it has to be distinguishable from not
+    # mentioning spots at all, which is why this reads the key rather than the value.
+    spots = clean_spots(payload["spots"]) if "spots" in payload else kept_spots(current, updated)
     return (
         palette_name if palette_name in palettes else None,
-        dataclasses.replace(current, **changes),
+        dataclasses.replace(updated, spots=spots),
     )
 
 
@@ -244,9 +309,10 @@ def camera_settings_from_form(form: dict, current: CameraSettings) -> CameraSett
 class RendererSource:
     """Hands out a renderer that matches the current settings, rebuilding it when they change.
 
-    Rebuilding discards the smoothed bounds and the previous frame, so a settings change costs about
-    a second of re-settling. That is the right trade: the alternative is mutating a renderer while
-    the capture thread is inside it.
+    Rebuilt rather than mutated, because the alternative is changing a renderer while the capture
+    thread is inside it. The new one inherits the smoothed bounds and the last frame from the one
+    it replaces, so a change costs a rebuild and not a second of the picture re-settling in front
+    of whoever made it.
     """
 
     def __init__(self, settings_store: SettingsStore, palettes: dict) -> None:
@@ -259,5 +325,11 @@ class RendererSource:
         revision, palette_name, settings = self._settings_store.snapshot()
         if revision != self._revision or self._renderer is None:
             self._revision = revision
-            self._renderer = ThermalRenderer(self._palettes[palette_name], settings)
+            replacement = ThermalRenderer(self._palettes[palette_name], settings)
+            # Only this thread, the capture loop, ever asks for a renderer, so the one being
+            # replaced is not in use and its state can be handed across. That is what keeps the
+            # picture from re-settling on every change; see ThermalRenderer.carry_over.
+            if self._renderer is not None:
+                replacement.carry_over(self._renderer)
+            self._renderer = replacement
         return self._renderer

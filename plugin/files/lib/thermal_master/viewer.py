@@ -18,6 +18,8 @@ prefix the plugin is never told about.
 
 from __future__ import annotations
 
+from .temperature import MAX_SPOTS
+
 VIEWER_POLL_MILLISECONDS = 200
 # How long the page keeps asking for frames after the pointer leaves. Without it, moving the mouse
 # off and back on again shows a stale reading until the next poll; with it, a glance away costs one
@@ -124,7 +126,9 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
      reach for while glancing at a print. */
   @media (max-width: 380px) {{
     .tools .record {{ display: none; }}
+    .tools .spots {{ display: none; }}
   }}
+  .tools button[disabled] {{ opacity: 0.4; cursor: default; }}
   /* Not the toolbar's orange. A recording is running until you stop it, and it should not look
      like one more thing that is merely switched on. */
   .tools .record[aria-pressed="true"] {{ background: #c0392b; border-color: #c0392b;
@@ -155,6 +159,10 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
       <button type="button" id="mode-measure" aria-pressed="true"
               title="Measure: drag a box on the picture">Box</button>
       <button type="button" id="mode-pan" aria-pressed="false">Pan</button>
+      <button type="button" id="mode-spot" class="spots" aria-pressed="false"
+              title="Place a spot: click the picture, click a spot to remove it">Spot</button>
+      <button type="button" id="spots-clear" class="spots" disabled
+              title="Remove every spot">Clear</button>
       <button type="button" id="units">C</button>
       <button type="button" id="shot" title="Save image">Save</button>
       <button type="button" id="record" class="record" aria-pressed="false"
@@ -203,6 +211,8 @@ VIEWER_SCRIPT = """
   var unitsButton = document.getElementById("units");
   var shotButton = document.getElementById("shot");
   var recordButton = document.getElementById("record");
+  var spotButton = document.getElementById("mode-spot");
+  var clearSpotsButton = document.getElementById("spots-clear");
   var regionGroup = document.getElementById("region-group");
   var regionOut = {
     max: document.getElementById("region-max"),
@@ -211,6 +221,13 @@ VIEWER_SCRIPT = """
     hint: document.getElementById("region-hint")
   };
   var MINIMUM_REGION = MIN_REGION_PX;
+  // The green a region box and a placed spot are both drawn in, here and in the burned-in readout,
+  // because both are places a person chose rather than places the scene chose.
+  var REGION_INK = "rgba(120,220,160,0.95)";
+  var MAX_SPOTS = MAX_SPOTS_VALUE;
+  // How near a click has to land to be read as "that one", in frame pixels. Generous, because the
+  // picture is 160 pixels across and a finger is not.
+  var SPOT_REACH = 6;
   var REGION_KEY = "REGION_KEY_NAME";
   var MAX_ZOOM = MAX_ZOOM_VALUE;
   var ZOOM_STEP = ZOOM_STEP_VALUE;
@@ -220,6 +237,11 @@ VIEWER_SCRIPT = """
   var zoom = 1;
   var pan = { x: 0, y: 0 };   // CSS pixels, applied after the zoom, clamped so the picture stays
   var panning = false;
+  var spotting = false;
+  // The plugin's list, mirrored here so a click knows what it is near. Read from the settings on
+  // load rather than kept locally, because these live on the printer: another browser, the
+  // dashboard tile and a recorded clip all show the same spots.
+  var spots = [];
   var panFrom = null;
   var units = "celsius";
 
@@ -231,6 +253,7 @@ VIEWER_SCRIPT = """
   // resolved later instead of being silently dropped.
   var dragFrom = null;       // {clientX, clientY} while the button is down
   var pendingDrag = null;    // {from, to} waiting for a frame to make sense of it
+  var pendingSpot = null;    // a click waiting for the same thing
   var pointer = null;        // {x, y} in frame pixels
   // Where the pointer physically is, kept separately from which pixel that turned out to be.
   // Without it the first hover after loading never resolves: no frame has arrived yet, so there is
@@ -491,6 +514,52 @@ VIEWER_SCRIPT = """
     pen.stroke();
   }
 
+  // Placing and removing. The spots themselves belong to the plugin, which draws them into the
+  // picture, so this page never renders one: it posts the list it wants and the next frame shows
+  // it. That is the whole reason they live server side, and the cost is that a placement takes a
+  // frame to appear.
+  function nearestSpot(at) {
+    var nearest = -1;
+    var best = SPOT_REACH;
+    for (var index = 0; index < spots.length; index += 1) {
+      var distance = Math.hypot(spots[index][0] - at.x, spots[index][1] - at.y);
+      if (distance <= best) { best = distance; nearest = index; }
+    }
+    return nearest;
+  }
+
+  function showSpots() {
+    clearSpotsButton.textContent = spots.length ? "Clear " + spots.length : "Clear";
+    clearSpotsButton.disabled = spots.length === 0;
+    spotButton.title = spots.length >= MAX_SPOTS
+      ? "All " + MAX_SPOTS + " spots placed: click one to remove it"
+      : "Place a spot: click the picture, click a spot to remove it";
+  }
+
+  function pushSpots(wanted) {
+    spots = wanted;
+    showSpots();
+    fetch("settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spots: spots })
+    }).catch(function () {
+      pointerOut.classList.add("offline");
+      pointerOut.textContent = "no reply";
+    });
+  }
+
+  function touchSpot(at) {
+    if (!at) { return; }
+    var existing = nearestSpot(at);
+    if (existing >= 0) {
+      pushSpots(spots.filter(function (unused, index) { return index !== existing; }));
+      return;
+    }
+    if (spots.length >= MAX_SPOTS) { return; }
+    pushSpots(spots.concat([[at.x, at.y]]));
+  }
+
   function paintRegion(pen, fit) {
     if (!region || !frame) { return; }
     var x = fit.left + region.left / frame.width * fit.width;
@@ -516,8 +585,16 @@ VIEWER_SCRIPT = """
         // Recomputed from where the pointer is, not from the pixel worked out when it arrived:
         // that pixel may have been unknowable then, and the picture may have been reoriented since.
         pointer = toFramePixel(lastSeen);
-        // A box drawn before any frame had arrived resolves now that one has.
+        // A box drawn before any frame had arrived resolves now that one has, and so does a spot
+        // placed before one had. Both are the same trap: a screen position only becomes a pixel
+        // once there is a frame to turn it against, and the first thing anyone does on opening the
+        // tile is go straight for the thing they wanted to measure.
         if (pendingDrag && resolveDrag(pendingDrag.from, pendingDrag.to)) { pendingDrag = null; }
+        if (pendingSpot) {
+          var waiting = pendingSpot;
+          pendingSpot = null;
+          touchSpot(toFramePixel(waiting));
+        }
         pointerOut.classList.remove("offline");
         pointerOut.textContent = shown(temperatureAt(pointer));
         paint();
@@ -568,6 +645,9 @@ VIEWER_SCRIPT = """
 
   surface.addEventListener("pointerdown", function (event) {
     surface.setPointerCapture(event.pointerId);
+    // Nothing begins on the way down in spot mode: a spot is a click, and starting a drag here
+    // would leave a box behind every time one was placed.
+    if (spotting) { return; }
     if (panning) {
       panFrom = { clientX: event.clientX, clientY: event.clientY, x: pan.x, y: pan.y };
       return;
@@ -579,6 +659,18 @@ VIEWER_SCRIPT = """
   });
 
   surface.addEventListener("pointerup", function (event) {
+    if (spotting) {
+      var at = { clientX: event.clientX, clientY: event.clientY };
+      var spot = toFramePixel(at);
+      if (spot) {
+        touchSpot(spot);
+      } else {
+        // No frame yet, so this click cannot be turned into a pixel. Held rather than dropped.
+        pendingSpot = at;
+        start();
+      }
+      return;
+    }
     if (panFrom) { panFrom = null; return; }
     if (!dragFrom) { return; }
     var to = { clientX: event.clientX, clientY: event.clientY };
@@ -618,19 +710,24 @@ VIEWER_SCRIPT = """
     applyZoom(1, null);
   });
 
-  function setMode(toPan) {
-    panning = toPan;
+  // Three modes, all driven by the same gesture on the picture: drag a box, drag the picture, or
+  // put a spot down. A mode rather than a modifier key, because the same page has to work on a
+  // phone, where there is no key to hold.
+  function setMode(mode) {
+    panning = mode === "pan";
+    spotting = mode === "spot";
     panFrom = null;
     dragFrom = null;
-    measureButton.setAttribute("aria-pressed", String(!toPan));
-    panButton.setAttribute("aria-pressed", String(toPan));
-    surface.style.cursor = toPan ? "grab" : "crosshair";
+    measureButton.setAttribute("aria-pressed", String(mode === "measure"));
+    panButton.setAttribute("aria-pressed", String(panning));
+    spotButton.setAttribute("aria-pressed", String(spotting));
+    surface.style.cursor = panning ? "grab" : "crosshair";
   }
 
-  // A mode rather than a modifier key, because the same page has to work on a phone, where there
-  // is no key to hold and both gestures are a finger dragging across the picture.
-  measureButton.addEventListener("click", function () { setMode(false); });
-  panButton.addEventListener("click", function () { setMode(true); });
+  measureButton.addEventListener("click", function () { setMode("measure"); });
+  panButton.addEventListener("click", function () { setMode("pan"); });
+  spotButton.addEventListener("click", function () { setMode("spot"); });
+  clearSpotsButton.addEventListener("click", function () { pushSpots([]); });
 
   function showUnits() {
     unitsButton.textContent = units === "fahrenheit" ? "F" : "C";
@@ -681,11 +778,33 @@ VIEWER_SCRIPT = """
     if (!region || !frame) { return; }
     var scaleX = width / frame.width;
     var scaleY = height / frame.height;
-    pen.strokeStyle = "rgba(120,220,160,0.95)";
+    var left = region.left * scaleX;
+    var top = region.top * scaleY;
+    var boxWidth = (region.right - region.left + 1) * scaleX;
+    var boxHeight = (region.bottom - region.top + 1) * scaleY;
+    pen.strokeStyle = REGION_INK;
     pen.lineWidth = Math.max(1, Math.round(width / 160));
-    pen.strokeRect(region.left * scaleX, region.top * scaleY,
-                   (region.right - region.left + 1) * scaleX,
-                   (region.bottom - region.top + 1) * scaleY);
+    pen.strokeRect(left, top, boxWidth, boxHeight);
+    // And what it said. A box on its own says where the measurement was taken and not what it
+    // came to, which in a saved picture or a recorded clip is the half that cannot be recovered
+    // later: the readout burned into the stream is about the whole frame, not about this box.
+    var inside = measure(region);
+    var text = "max " + shown(inside.max) + "   min " + shown(inside.min)
+      + "   avg " + shown(inside.avg);
+    var size = Math.max(10, Math.round(height / 16));
+    pen.font = "600 " + size + "px system-ui, sans-serif";
+    pen.textBaseline = "bottom";
+    // Above the box, unless the box is against the top edge, in which case underneath it. Kept
+    // inside the picture either way, because a number half off the frame is worse than no number.
+    var above = top - size * 0.3;
+    var baseline = above > size ? above : Math.min(height - size * 0.2, top + boxHeight + size);
+    var room = Math.max(2, width - pen.measureText(text).width - 2);
+    var textX = Math.min(Math.max(left, 2), room);
+    pen.lineWidth = Math.max(2, Math.round(size / 5));
+    pen.strokeStyle = "rgba(0,0,0,0.85)";
+    pen.strokeText(text, textX, baseline);
+    pen.fillStyle = REGION_INK;
+    pen.fillText(text, textX, baseline);
   }
 
   function offer(blob, extension) {
@@ -815,13 +934,19 @@ VIEWER_SCRIPT = """
   // The unit in force belongs to the plugin, so it is asked for rather than assumed.
   fetch("settings", { headers: { "Accept": "application/json" } })
     .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
-    .then(function (state) { units = state.units; showUnits(); })
+    .then(function (state) {
+      units = state.units;
+      spots = Array.isArray(state.spots) ? state.spots : [];
+      showUnits();
+      showSpots();
+    })
     .catch(function () { showUnits(); });
 
   window.addEventListener("resize", paint);
   feed.addEventListener("load", paint);
   recallRegion();
-  setMode(false);
+  setMode("measure");
+  showSpots();
   // Painted once at startup, and this is not a nicety. The picture element is positioned by paint
   // rather than by the stylesheet, so until something calls it the image is nought by nought and
   // the page is blank. Before this, a viewer opened with no region showed nothing at all until the
@@ -863,6 +988,7 @@ def render_viewer_page(shape: tuple[int, int] | None = None) -> str:
         .replace("ZOOM_STEP_VALUE", str(VIEWER_ZOOM_STEP))
         .replace("RECORD_FPS_VALUE", str(VIEWER_RECORD_FPS))
         .replace("RECORD_LIMIT_MS", str(VIEWER_RECORD_LIMIT_MILLISECONDS))
+        .replace("MAX_SPOTS_VALUE", str(MAX_SPOTS))
     )
     picture_shape = (
         f' data-width="{shape[0]}" data-height="{shape[1]}"' if shape else ""

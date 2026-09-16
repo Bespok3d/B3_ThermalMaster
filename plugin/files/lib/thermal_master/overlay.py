@@ -74,6 +74,9 @@ OVERLAY_SHADOW_RGB = (0, 0, 0)
 
 HOTSPOT_RGB = (255, 90, 90)
 COLDSPOT_RGB = (120, 185, 255)
+# The same green the viewer draws a region box in, because both are places a person chose rather
+# than places the scene chose, and they should read as the same kind of thing.
+SPOT_RGB = (120, 220, 160)
 
 
 RETICLE_RGB = (235, 235, 235)
@@ -450,12 +453,18 @@ def draw_marker(
 def markers_for(overlay: Overlay) -> list[Marker]:
     """The markers this overlay wants, in the order they get first refusal on a label position.
 
-    The extremes come before the centre because they are the ones being looked for. The centre is a
-    fixed point of reference and the one that can most afford to be nudged.
+    Placed spots come first because somebody asked for them. Then the extremes, which are what the
+    picture is being searched for, and last the centre, which is a fixed point of reference and the
+    one that can most afford to be nudged.
     """
 
     stats = overlay.stats
+    # Placed spots first. They are the only markers somebody asked for by name, so they get first
+    # refusal on a label position and the automatic ones move around them.
     wanted = [
+        (True, Marker(reading.spot, reading.celsius, SPOT_RGB)) for reading in stats.spots
+    ]
+    wanted += [
         (overlay.hotspot, Marker(stats.hotspot, stats.maximum_celsius, HOTSPOT_RGB)),
         (overlay.coldspot, Marker(stats.coldspot, stats.minimum_celsius, COLDSPOT_RGB)),
         (
