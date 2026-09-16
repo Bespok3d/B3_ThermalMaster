@@ -1292,8 +1292,31 @@ window so the picture fills the canvas exactly, asserts that it does, and needs 
 
 ### Phase 7b: the ROI box
 
-Drag a rectangle, get live max, min and average inside it. Computed in the browser from the frame it
-already has, so it costs the printer nothing and updates as the box is dragged.
+Shipped in 0.12.0. Drag a rectangle, get live max, min and average inside it, measured in the
+browser from the frame it already holds. The printer does no more work for a box than for a hover,
+which is what 7a's transport decision bought.
+
+Two behaviours worth stating because they were choices rather than consequences. A region keeps the
+frames coming with the pointer away, because a box is a standing question and freezing it the moment
+the mouse leaves would defeat the one use that matters: set it on the bed, walk off, come back to a
+number. And the region survives a reload, in local storage, because a tile in Fluidd reloads whenever
+the page around it navigates and losing the box every time is the difference between a tool and a
+toy.
+
+**A second cold-start bug, of exactly the same family as 7a's.** Drawing a box in the first moment
+after opening the tile did nothing at all. The press turned a screen position into a frame pixel
+immediately, and no frame had arrived to turn it against, so the drag was dropped. The fix is the
+same shape as the one before it: hold the screen positions, resolve them to pixels when a frame
+exists, and retry a drag that could not be resolved when one arrives.
+
+That is twice now that "this operation needs a frame" has been handled by silently doing nothing.
+Worth remembering as a shape rather than two incidents: the viewer's whole job is answering questions
+about a frame, and the interesting moment is always the one before the first frame has landed.
+
+The harness now opens a fresh page and drags immediately, which is the case a warmed up page cannot
+test and the realistic one for a person who opens the tile to measure something. Found by a
+screenshot rather than by a check, which is its own lesson: the first version of the region checks
+hovered before dragging and would have passed forever.
 
 ### Phase 7c: zoom, pan, screenshot, units
 

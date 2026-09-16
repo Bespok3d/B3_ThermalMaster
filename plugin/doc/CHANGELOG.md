@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.0
+
+- Drag a box on the viewer and it reports the hottest, coldest and average temperature inside it,
+  live. Click to clear it, or press Escape.
+- The box is remembered, so a tile that reloads comes back measuring the same thing.
+- While a box exists the viewer keeps reading frames even with the pointer away, which is the point
+  of drawing one: you set it and then go and do something else.
+
+The box is measured in the browser from the frame it already has, so dragging it costs the printer
+nothing and the numbers change as fast as you move it.
+
 ## 0.11.0
 
 An interactive viewer, as a second camera tile.

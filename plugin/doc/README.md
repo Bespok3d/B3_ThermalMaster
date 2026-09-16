@@ -81,6 +81,11 @@ under the pointer, along with the hottest and coldest in view.
 It is a second tile rather than a replacement because the two fail differently. The plain tile is an
 image and will render in anything; this one is a script, and if it breaks you still have a camera.
 
+Drag a box on the picture and it reports the hottest, coldest and average temperature inside it,
+updating as fast as you drag. Click anywhere to clear it, or press Escape. The box is remembered
+across reloads, and while one exists the viewer keeps reading frames even with the pointer away,
+which is the reason to draw one: box the bed, walk away, come back to a number that means something.
+
 It reads temperatures itself. `/thermal/frame.bin` hands it every pixel as hundredths of a degree
 with emissivity already applied, so pointing is a lookup in data the page already holds rather than
 a question to the printer, and the physics has one implementation rather than two. Nothing is

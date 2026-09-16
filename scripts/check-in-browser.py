@@ -224,7 +224,103 @@ def run_viewer_checks(page, requests: list) -> list:
     page.wait_for_timeout(2000)
     checks.append(("it stops fetching once nobody is pointing", len(requests), quiet))
     checks.append(("it was fetching while someone was", quiet > before, True))
+    return checks + run_region_checks(page, requests)
+
+
+def drag_across(page, start: float, end: float) -> None:
+    """Drag a box over the middle band of the picture, from one fraction across to another."""
+
+    rect = page.evaluate(
+        """() => {
+            const r = document.getElementById("surface").getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+        }"""
+    )
+    page.mouse.move(rect["left"] + rect["width"] * start, rect["top"] + rect["height"] * 0.3)
+    page.mouse.down()
+    page.mouse.move(rect["left"] + rect["width"] * end, rect["top"] + rect["height"] * 0.7,
+                    steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+
+
+def region_numbers(page) -> dict:
+    return {
+        name: page.inner_text("#region-" + name).strip()
+        for name in ("max", "min", "avg")
+    }
+
+
+def as_celsius(text: str):
+    return float(text[:-1]) if text.endswith("C") else None
+
+
+def run_region_checks(page, requests: list) -> list:
+    """Dragging a box: does it measure what is inside it, and does it keep measuring.
+
+    The frame is a 20 C to 80 C ramp left to right, so a box over the left third should read roughly
+    20 to 40 and one over the right third roughly 60 to 80. A box that reported the whole frame, or
+    the wrong axis, or a stale frame, all fail that.
+    """
+
+    checks = []
+    drag_across(page, 0.05, 0.33)
+    left = region_numbers(page)
+    checks.append(("a box reports its own max", 30 < (as_celsius(left["max"]) or 0) < 45, True))
+    checks.append(("a box reports its own min", 18 < (as_celsius(left["min"]) or 0) < 30, True))
+    checks.append(("a box reports its own average",
+                   (as_celsius(left["min"]) or 0) < (as_celsius(left["avg"]) or 0)
+                   < (as_celsius(left["max"]) or 99), True))
+
+    drag_across(page, 0.67, 0.95)
+    right = region_numbers(page)
+    checks.append(("moving the box moves the numbers",
+                   (as_celsius(right["avg"]) or 0) > (as_celsius(left["avg"]) or 0), True))
+
+    # The whole point of a region: it keeps answering while nobody is pointing at anything.
+    page.mouse.move(2, 2)
+    page.wait_for_timeout(5000)
+    watching = len(requests)
+    page.wait_for_timeout(1500)
+    checks.append(("a box keeps the frames coming with the pointer away",
+                   len(requests) > watching, True))
+
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("escape clears the box", region_numbers(page)["max"], "-"))
+
+    page.wait_for_timeout(5000)
+    cleared = len(requests)
+    page.wait_for_timeout(1500)
+    checks.append(("and the frames stop again", len(requests), cleared))
     return checks
+
+
+def run_cold_start_checks(browser, port: int) -> list:
+    """Open the tile and draw a box immediately, before any frame has arrived.
+
+    This is the case a warmed up page cannot test, and it is the realistic one: someone opens the
+    tile and goes straight for the thing they wanted to measure. The first version dropped that drag
+    on the floor, because it turned screen positions into pixels at the moment of the press and
+    there was no frame yet to turn them against.
+    """
+
+    page = browser.new_page(viewport={"width": 640, "height": 600})
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    rect = page.evaluate(
+        """() => {
+            const r = document.getElementById("surface").getBoundingClientRect();
+            return { left: r.left, top: r.top, width: r.width, height: r.height };
+        }"""
+    )
+    page.mouse.move(rect["left"] + rect["width"] * 0.1, rect["top"] + rect["height"] * 0.3)
+    page.mouse.down()
+    page.mouse.move(rect["left"] + rect["width"] * 0.4, rect["top"] + rect["height"] * 0.7, steps=4)
+    page.mouse.up()
+    page.wait_for_timeout(SETTLE_MILLISECONDS * 2)
+    reported = page.inner_text("#region-max").strip()
+    page.close()
+    return [("a box drawn before the first frame still lands", reported.endswith("C"), True)]
 
 
 def main() -> None:
@@ -264,6 +360,7 @@ def main() -> None:
         print("")
         print("viewer")
         report(run_viewer_checks(viewer, requests), problems)
+        report(run_cold_start_checks(browser, PORT), problems)
         browser.close()
     print("")
     for problem in problems:

@@ -23,6 +23,13 @@ VIEWER_POLL_MILLISECONDS = 200
 # off and back on again shows a stale reading until the next poll; with it, a glance away costs one
 # or two more frames and coming back is instant.
 VIEWER_LINGER_MILLISECONDS = 3000
+# A drag shorter than this many pixels on the picture is a click, and a click clears the box. Small
+# enough that deliberately boxing a nozzle works, large enough that a click does not leave a one
+# pixel region behind reporting the same number three times.
+VIEWER_MINIMUM_REGION_PIXELS = 3
+# Where a region is remembered. A tile in Fluidd reloads whenever the page around it navigates, and
+# losing the box you just drew every time is the difference between a tool and a toy.
+VIEWER_REGION_KEY = "thermal-master.region"
 
 VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -48,6 +55,9 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
                letter-spacing: 0.04em; }}
   .reading {{ font-size: 1.15rem; }}
   .offline {{ color: #d8752a; }}
+  .group {{ display: flex; gap: 0.6rem; align-items: baseline; }}
+  .group.idle {{ opacity: 0.45; }}
+  .hint {{ color: #6c727c; font-size: 0.75rem; }}
   a {{ color: #9aa0aa; margin-left: auto; font-size: 0.8rem; }}
 </style>
 </head>
@@ -58,9 +68,16 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     <canvas id="surface"></canvas>
   </div>
   <div class="bar">
-    <span>Pointer</span><b class="reading" id="pointer">move over the image</b>
-    <span>Max</span><b id="max">-</b>
-    <span>Min</span><b id="min">-</b>
+    <div class="group">
+      <span>Pointer</span><b class="reading" id="pointer">move over the image</b>
+    </div>
+    <div class="group">
+      <span>Frame</span><b id="max">-</b><b id="min">-</b>
+    </div>
+    <div class="group idle" id="region-group">
+      <span>Region</span><b id="region-max">-</b><b id="region-min">-</b><b id="region-avg">-</b>
+      <span class="hint" id="region-hint">drag a box</span>
+    </div>
     <a href="./">settings</a>
   </div>
 </main>
@@ -81,7 +98,24 @@ VIEWER_SCRIPT = """
   var POLL = POLL_MS;
   var LINGER = LINGER_MS;
 
+  var regionGroup = document.getElementById("region-group");
+  var regionOut = {
+    max: document.getElementById("region-max"),
+    min: document.getElementById("region-min"),
+    avg: document.getElementById("region-avg"),
+    hint: document.getElementById("region-hint")
+  };
+  var MINIMUM_REGION = MIN_REGION_PX;
+  var REGION_KEY = "REGION_KEY_NAME";
+
   var frame = null;          // {width, height, scale, values}
+  var region = null;         // {left, top, right, bottom} in frame pixels, inclusive
+  // A drag is held as the two screen positions, not as the pixels they landed on. Pixels cannot be
+  // worked out until a frame has arrived, and a box drawn in the first moment after opening the
+  // tile is exactly when that has not happened yet: holding screen positions means the drag can be
+  // resolved later instead of being silently dropped.
+  var dragFrom = null;       // {clientX, clientY} while the button is down
+  var pendingDrag = null;    // {from, to} waiting for a frame to make sense of it
   var pointer = null;        // {x, y} in frame pixels
   // Where the pointer physically is, kept separately from which pixel that turned out to be.
   // Without it the first hover after loading never resolves: no frame has arrived yet, so there is
@@ -106,15 +140,18 @@ VIEWER_SCRIPT = """
              width: width, height: height, box: box };
   }
 
-  function toFramePixel(at) {
-    if (!at) { return null; }
+  function toFramePixel(at, clamp) {
+    if (!at || !frame) { return null; }
     var fit = imageBox();
     var x = at.clientX - fit.box.left - fit.left;
     var y = at.clientY - fit.box.top - fit.top;
-    if (!frame || x < 0 || y < 0 || x >= fit.width || y >= fit.height) { return null; }
+    var outside = x < 0 || y < 0 || x >= fit.width || y >= fit.height;
+    // Outside the picture is no reading at all when hovering, and the nearest edge when dragging:
+    // a box pulled slightly past the edge is a box, not a mistake.
+    if (outside && !clamp) { return null; }
     return {
-      x: Math.min(frame.width - 1, Math.floor(x / fit.width * frame.width)),
-      y: Math.min(frame.height - 1, Math.floor(y / fit.height * frame.height))
+      x: Math.max(0, Math.min(frame.width - 1, Math.floor(x / fit.width * frame.width))),
+      y: Math.max(0, Math.min(frame.height - 1, Math.floor(y / fit.height * frame.height)))
     };
   }
 
@@ -143,14 +180,107 @@ VIEWER_SCRIPT = """
 
   function summarise() {
     if (!frame) { return; }
-    var values = frame.values;
-    var hottest = values[0], coldest = values[0];
-    for (var i = 1; i < values.length; i += 1) {
-      if (values[i] > hottest) { hottest = values[i]; }
-      if (values[i] < coldest) { coldest = values[i]; }
+    var whole = measure({ left: 0, top: 0, right: frame.width - 1, bottom: frame.height - 1 });
+    maxOut.textContent = shown(whole.max);
+    minOut.textContent = shown(whole.min);
+    showRegion();
+  }
+
+  // Measured here rather than asked of the printer. The page already holds every pixel, so a box is
+  // a loop over a few thousand numbers and the answer changes as fast as the box is dragged. Asking
+  // the server would mean a round trip per drag event and a second implementation of the same sum.
+  function measure(box) {
+    var hottest = null, coldest = null, total = 0, counted = 0;
+    for (var y = box.top; y <= box.bottom; y += 1) {
+      var row = y * frame.width;
+      for (var x = box.left; x <= box.right; x += 1) {
+        var value = frame.values[row + x];
+        if (hottest === null || value > hottest) { hottest = value; }
+        if (coldest === null || value < coldest) { coldest = value; }
+        total += value;
+        counted += 1;
+      }
     }
-    maxOut.textContent = shown(hottest / frame.scale);
-    minOut.textContent = shown(coldest / frame.scale);
+    return {
+      max: hottest === null ? null : hottest / frame.scale,
+      min: coldest === null ? null : coldest / frame.scale,
+      avg: counted ? total / counted / frame.scale : null,
+      count: counted
+    };
+  }
+
+  function showRegion() {
+    if (!region || !frame) {
+      regionGroup.classList.add("idle");
+      regionOut.max.textContent = "-";
+      regionOut.min.textContent = "-";
+      regionOut.avg.textContent = "-";
+      regionOut.hint.textContent = "drag a box";
+      return;
+    }
+    var inside = measure(region);
+    regionGroup.classList.remove("idle");
+    regionOut.max.textContent = shown(inside.max);
+    regionOut.min.textContent = shown(inside.min);
+    regionOut.avg.textContent = shown(inside.avg);
+    regionOut.hint.textContent = inside.count + " px, click to clear";
+  }
+
+  function rememberRegion() {
+    try {
+      if (region) {
+        window.localStorage.setItem(REGION_KEY, JSON.stringify(region));
+      } else {
+        window.localStorage.removeItem(REGION_KEY);
+      }
+    } catch (ignored) {
+      // Private browsing and iframe storage rules both refuse this, and neither is a reason to
+      // stop working: the box simply does not survive a reload.
+    }
+  }
+
+  function recallRegion() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(REGION_KEY));
+      if (saved && typeof saved.left === "number") { region = saved; }
+    } catch (ignored) {
+      region = null;
+    }
+  }
+
+  // Turn two screen positions into the region they describe, once a frame exists to measure
+  // against. Returns whether it could, so a drag made too early can be held and retried.
+  function resolveDrag(from, to) {
+    var start = toFramePixel(from, true);
+    var end = toFramePixel(to, true);
+    if (!start || !end) { return false; }
+    var box = clampRegion(boxBetween(start, end));
+    // A click is a drag that went nowhere, and it clears the box rather than leaving a speck
+    // behind. Judged on the picture's own pixels, so it means the same at any window size.
+    var tiny = (box.right - box.left) < MINIMUM_REGION
+      || (box.bottom - box.top) < MINIMUM_REGION;
+    region = tiny ? null : box;
+    rememberRegion();
+    showRegion();
+    paint();
+    return true;
+  }
+
+  function boxBetween(one, other) {
+    return {
+      left: Math.min(one.x, other.x), top: Math.min(one.y, other.y),
+      right: Math.max(one.x, other.x), bottom: Math.max(one.y, other.y)
+    };
+  }
+
+  function clampRegion(box) {
+    if (!frame) { return box; }
+    return {
+      left: Math.max(0, Math.min(frame.width - 1, box.left)),
+      top: Math.max(0, Math.min(frame.height - 1, box.top)),
+      right: Math.max(0, Math.min(frame.width - 1, box.right)),
+      bottom: Math.max(0, Math.min(frame.height - 1, box.bottom))
+    };
   }
 
   function paint() {
@@ -159,6 +289,7 @@ VIEWER_SCRIPT = """
     surface.height = fit.box.height;
     var pen = surface.getContext("2d");
     pen.clearRect(0, 0, surface.width, surface.height);
+    paintRegion(pen, fit);
     if (!pointer || !frame) { return; }
     var x = fit.left + (pointer.x + 0.5) / frame.width * fit.width;
     var y = fit.top + (pointer.y + 0.5) / frame.height * fit.height;
@@ -168,6 +299,17 @@ VIEWER_SCRIPT = """
     pen.moveTo(x - 9, y); pen.lineTo(x + 9, y);
     pen.moveTo(x, y - 9); pen.lineTo(x, y + 9);
     pen.stroke();
+  }
+
+  function paintRegion(pen, fit) {
+    if (!region || !frame) { return; }
+    var x = fit.left + region.left / frame.width * fit.width;
+    var y = fit.top + region.top / frame.height * fit.height;
+    var width = (region.right - region.left + 1) / frame.width * fit.width;
+    var height = (region.bottom - region.top + 1) / frame.height * fit.height;
+    pen.strokeStyle = "rgba(120,220,160,0.95)";
+    pen.lineWidth = 2;
+    pen.strokeRect(x, y, width, height);
   }
 
   function refresh() {
@@ -184,6 +326,8 @@ VIEWER_SCRIPT = """
         // Recomputed from where the pointer is, not from the pixel worked out when it arrived:
         // that pixel may have been unknowable then, and the picture may have been reoriented since.
         pointer = toFramePixel(lastSeen);
+        // A box drawn before any frame had arrived resolves now that one has.
+        if (pendingDrag && resolveDrag(pendingDrag.from, pendingDrag.to)) { pendingDrag = null; }
         pointerOut.classList.remove("offline");
         pointerOut.textContent = shown(temperatureAt(pointer));
         paint();
@@ -194,7 +338,7 @@ VIEWER_SCRIPT = """
       })
       .then(function () {
         inFlight = false;
-        if (Date.now() > wantUntil) { stop(); }
+        if (!wanted()) { stop(); }
       });
   }
 
@@ -206,6 +350,13 @@ VIEWER_SCRIPT = """
     }
   }
 
+  // A region is a standing question, so it keeps the frames coming whether or not anyone is
+  // pointing. Without this the numbers in a box would freeze the moment the mouse left the tile,
+  // which is exactly when someone walks away to let the print run.
+  function wanted() {
+    return region !== null || Date.now() <= wantUntil;
+  }
+
   function stop() {
     if (timer !== null) { clearInterval(timer); timer = null; }
   }
@@ -214,7 +365,25 @@ VIEWER_SCRIPT = """
     lastSeen = { clientX: event.clientX, clientY: event.clientY };
     pointer = toFramePixel(lastSeen);
     pointerOut.textContent = frame ? shown(temperatureAt(pointer)) : "reading...";
+    if (dragFrom) { resolveDrag(dragFrom, lastSeen); }
     paint();
+    start();
+  });
+
+  surface.addEventListener("pointerdown", function (event) {
+    dragFrom = { clientX: event.clientX, clientY: event.clientY };
+    surface.setPointerCapture(event.pointerId);
+    // Frames have to start arriving now rather than on the first move, or a drag begun the moment
+    // the tile opens has nothing to resolve against.
+    start();
+  });
+
+  surface.addEventListener("pointerup", function (event) {
+    if (!dragFrom) { return; }
+    var to = { clientX: event.clientX, clientY: event.clientY };
+    var from = dragFrom;
+    dragFrom = null;
+    if (!resolveDrag(from, to)) { pendingDrag = { from: from, to: to }; }
     start();
   });
 
@@ -225,9 +394,19 @@ VIEWER_SCRIPT = """
     paint();
   });
 
-  // Nothing is fetched until the pointer arrives, so a tile nobody is using costs the printer the
-  // stream and not one byte more.
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !region) { return; }
+    region = null;
+    rememberRegion();
+    showRegion();
+    paint();
+  });
+
+  // Nothing is fetched until the pointer arrives or a remembered region asks for it, so a tile
+  // nobody is using costs the printer the stream and not one byte more.
   window.addEventListener("resize", paint);
+  recallRegion();
+  if (region) { start(); }
 })();
 """
 
@@ -235,7 +414,10 @@ VIEWER_SCRIPT = """
 def render_viewer_page() -> str:
     """The viewer, with its timings substituted so they are stated once, in Python."""
 
-    script = VIEWER_SCRIPT.replace("POLL_MS", str(VIEWER_POLL_MILLISECONDS)).replace(
-        "LINGER_MS", str(VIEWER_LINGER_MILLISECONDS)
+    script = (
+        VIEWER_SCRIPT.replace("POLL_MS", str(VIEWER_POLL_MILLISECONDS))
+        .replace("LINGER_MS", str(VIEWER_LINGER_MILLISECONDS))
+        .replace("MIN_REGION_PX", str(VIEWER_MINIMUM_REGION_PIXELS))
+        .replace("REGION_KEY_NAME", VIEWER_REGION_KEY)
     )
     return VIEWER_PAGE_TEMPLATE.format(viewer_script=script)
