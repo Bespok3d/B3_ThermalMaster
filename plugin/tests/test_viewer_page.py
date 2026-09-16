@@ -132,3 +132,24 @@ def test_the_script_has_no_placeholders_left_in_it(thermal_streamer):
                         "MAX_ZOOM_VALUE", "ZOOM_STEP_VALUE", "RECORD_FPS_VALUE",
                         "RECORD_LIMIT_MS"):
         assert placeholder not in page, placeholder
+
+
+def keepsake(page: str) -> str:
+    """The painter both the saved image and the recording draw through."""
+
+    return page.split("function paintKeepsake(", 1)[1].split("\n  }", 1)[0]
+
+
+def test_a_saved_box_carries_its_average_and_nothing_else(thermal_streamer):
+    """One number on the picture, three beside it.
+
+    The box needs to say what it came to, or a clip shows where a measurement was taken and not
+    what it said. It does not need to say all of it: a picture that already carries a hot marker,
+    a cold marker and a ruler does not want a box's extremes written on it too.
+    """
+
+    body = keepsake(thermal_streamer.render_viewer_page(None))
+
+    assert "inside.avg" in body
+    assert "inside.max" not in body
+    assert "inside.min" not in body

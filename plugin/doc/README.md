@@ -95,9 +95,9 @@ because Box mode uses the same gesture for the region and a phone has no key to 
 The units button changes the unit for the whole plugin rather than just this page, so the readout
 burned into the picture agrees with it. Save writes a PNG at the sensor's own resolution with the
 region drawn on it, because a picture of a measurement that does not show what was measured is not
-evidence of anything: the box's own numbers are written beside it in both a saved image and a
-recording, since the readout burned into the stream is about the whole frame rather than about
-your box.
+evidence of anything: the box's average is written beside it in both a saved image and a recording,
+since the readout burned into the stream is about the whole frame rather than about your box. Just
+the average, because the picture already carries a hot marker, a cold marker and a ruler.
 
 Rec records a clip of what the camera is showing, with the readout and the region box on it, at the
 sensor's own resolution rather than at the size of your window. Press it again to stop and the file

@@ -1569,33 +1569,11 @@ use: the box was drawn and the numbers were not, so a clip showed where a measur
 not what it came to. The burned-in readout is about the whole frame, so nothing else in the picture
 could supply them.
 
-**F-61. A camera plugged in after boot is not picked up until a reboot.** Reported from hardware,
-not yet diagnosed, and taken last by agreement.
-
-Worth stating plainly that this should already work. `capture_loop` catches every exception from a
-session, waits with backoff to a sixty second ceiling, and retries forever; `detect_camera_model`
-returning nothing raises `CameraNotFoundError`, which is just another exception on that path. So a
-camera appearing later should be found within a minute without anybody doing anything.
-
-It is not, so one of those assumptions is false, and the log says which. Three things to collect,
-all read-only, with the camera unplugged and the printer up:
-
-1. Is the service even running, and what is it saying? `ps | grep thermal-master` and the plugin's
-   log. If the log is silent rather than repeating a capture error every minute, the loop is not
-   running and the question is why it exited.
-2. Does the bus see the camera once it is plugged in? `lsusb` before and after.
-3. If the loop is retrying and `lsusb` sees it but the plugin does not, the suspicion is
-   `usb.core.find` inside a long-lived process not seeing a device enumerated after libusb
-   initialised, which is a known shape of problem and would be fixed by re-initialising the context
-   per attempt rather than by anything in the retry logic.
-
-No fix until the evidence picks one of those, because the retry loop looks correct and changing
-correct-looking code on a hunch is how the last three misdiagnoses started.
-
-### Phase 8: release readiness
-
-Signing (F-6) and the `publisher` fingerprint check (F-5), channel promotion from `experiment` toward
-`testing` and `stable` as evidence accumulates, a full doc pass, and a device trial across both models.
+**F-61. A camera plugged in after boot. Closed, and it was never broken.** Reported as needing a
+reboot before a camera attached after start-up would appear. Confirmed from use: it does come up on
+its own, it just takes a while, which is the retry loop doing exactly what it was written to do.
+Nothing to fix, and nothing was: the diagnosis plan below is kept only because the reasoning about
+`usb.core.find` after a libusb init is worth having if the symptom ever comes back for real.
 
 ## 8. Alternatives considered and rejected
 

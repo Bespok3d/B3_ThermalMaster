@@ -12,7 +12,8 @@
   to land on.
 - Rotating or mirroring the picture clears the spots, because they name places on a picture that
   just moved. Better to place them again than to have them point confidently at the wrong thing.
-- **A saved image and a recorded clip now carry the region box's numbers**, not just the box.
+- **A saved image and a recorded clip now carry the region box's average**, not just the box. The
+  page still lists the hottest, coldest and average beside the picture, where there is room.
 - Changing a setting no longer makes the picture re-settle for a second, which matters when placing
   four spots one after another.
 

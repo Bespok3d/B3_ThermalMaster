@@ -788,9 +788,13 @@ VIEWER_SCRIPT = """
     // And what it said. A box on its own says where the measurement was taken and not what it
     // came to, which in a saved picture or a recorded clip is the half that cannot be recovered
     // later: the readout burned into the stream is about the whole frame, not about this box.
+    //
+    // The average alone. All three numbers fitted, and read as clutter on a picture that already
+    // carries a hot marker, a cold marker and a ruler: the extremes of a box are usually the
+    // extremes of the frame, which the picture is already showing. The page still lists all three
+    // beside the picture, where there is room for them.
     var inside = measure(region);
-    var text = "max " + shown(inside.max) + "   min " + shown(inside.min)
-      + "   avg " + shown(inside.avg);
+    var text = "avg " + shown(inside.avg);
     var size = Math.max(10, Math.round(height / 16));
     pen.font = "600 " + size + "px system-ui, sans-serif";
     pen.textBaseline = "bottom";
