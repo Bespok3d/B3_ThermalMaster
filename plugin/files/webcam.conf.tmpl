@@ -1,33 +1,20 @@
-# Registers the thermal stream as a camera in Fluidd and Mainsail, so the user never has to add it by
-# hand under Settings. The name is theirs to choose at install time.
+# Registers the thermal camera in Fluidd and Mainsail, so the user never has to add it by hand under
+# Settings. The name is theirs to choose at install time.
 #
-# Adaptive, not plain mjpegstreamer. Fluidd renders a plain mjpegstreamer camera by fetching the
-# stream inside a Web Worker and parsing the multipart itself, and in Safari that fetch fails outright
-# with "Load failed" while the very same URL renders when opened as a page. Adaptive polls the
-# snapshot on a timer instead, so there is no long-lived streaming connection to fail. It costs some
-# smoothness, and it works in every browser rather than most of them.
+# One entry, not two. Until 0.16.0 this file registered a plain picture and the interactive viewer
+# as separate tiles, on the argument that the viewer is a script and a picture is not, so a broken
+# script still left a camera on the dashboard. That argument cost more than it bought: a camera
+# defined in a config file is read-only in Fluidd, so the dashboard showed two cameras of the same
+# thing and no way inside the UI to hide either. The fallback now lives in the page instead. The
+# viewer's stylesheet lays the picture out on its own, and the script only ever overrides that, so
+# with no JavaScript at all this URL is still the camera, correctly fitted.
+#
+# `iframe` reaches Fluidd and Mainsail as a real tile; `u1-remote-screen` ships the same mechanism,
+# which is what settles it.
 [webcam $THERMAL_CAMERA_NAME]
-service: mjpegstreamer-adaptive
-stream_url: /thermal/stream.mjpg
-snapshot_url: /thermal/snapshot.jpg
-aspect_ratio: $THERMAL_CAMERA_ASPECT
-# Left at zero on purpose. Orientation is applied by the plugin itself and changed live from the
-# control page at /thermal/, because a webcam defined by config is read-only in the UI and changing
-# it here needs a reinstall. Setting it in both places would rotate the picture twice.
-rotation: 0
-flip_horizontal: false
-flip_vertical: false
-
-# A second tile for the interactive viewer, as an iframe rather than a picture. `u1-remote-screen`
-# ships the same mechanism, which is what settles that Moonraker's `iframe` service type reaches
-# Fluidd and Mainsail as a real tile.
-#
-# It is a second tile rather than a replacement because the two fail differently. The picture above
-# is a plain image and will render in anything, including a browser with JavaScript off; this one is
-# a script that turns a pointer into a temperature, and if it breaks you still have a camera.
-#
-# No snapshot_url: there is no still of an interactive page, and Moonraker does not ask for one.
-[webcam $THERMAL_CAMERA_NAME live]
 service: iframe
 stream_url: /thermal/view
+# Not used by the iframe tile, which has no still. It is here for everything else that asks a
+# Moonraker webcam for one picture, and it costs nothing when nothing asks.
+snapshot_url: /thermal/snapshot.jpg
 aspect_ratio: $THERMAL_CAMERA_ASPECT

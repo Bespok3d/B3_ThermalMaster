@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.16.0
+
+- **One camera instead of two.** The dashboard listed `Thermal` and `Thermal live`, two views of the
+  same camera, and a camera that comes from a config file is read-only in Fluidd, so there was no way
+  in the UI to hide either of them. The interactive viewer is now the camera, under the name you
+  chose, with no word added to it.
+- The plain picture was registered beside it as a fallback: a script can break and an image cannot.
+  That is now the page's own job. With JavaScript switched off, the viewer's stylesheet fits the
+  picture into the tile by itself, and the script only ever overrides that layout. The stream and
+  the still are still served at `/thermal/stream.mjpg` and `/thermal/snapshot.jpg` for anything that
+  wants a plain picture.
+- The viewer no longer hides the picture while it is working out the camera's shape. It shows it
+  letterboxed until it knows, then takes over.
+
+After updating, the old `<name> live` entry disappears on its own. If you had picked one of the two
+in Fluidd's dashboard settings, check that the remaining one is shown.
+
 ## 0.15.0
 
 - **The viewer showed nothing until you moved the pointer over it.** The picture is positioned by

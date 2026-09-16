@@ -485,6 +485,75 @@ def run_tile_checks(browser, port: int) -> list:
     ]
 
 
+# Deliberately the wrong shape for the picture. A stage that happens to be 4:3 cannot tell a
+# correctly fitted picture from one stretched to fill the box, which is the failure being watched
+# for here.
+NO_SCRIPT_VIEWPORT = {"width": 320, "height": 700}
+PICTURE_ASPECT = 160 / 120
+
+
+def run_no_script_checks(browser, port: int) -> list:
+    """The page with JavaScript switched off.
+
+    This is the fallback that a second camera tile used to be. Until 0.16.0 a plain picture was
+    registered beside this page on the argument that a script can break and an image cannot, which
+    also put two cameras of the same thing on a dashboard where neither can be hidden, because a
+    webcam defined in a config file is read-only in Fluidd. Dropping the second tile only costs
+    nothing if this page is still a camera without its script, so that is checked rather than
+    claimed: the stylesheet lays the picture out, and the script only ever overrides it.
+    """
+
+    context = browser.new_context(viewport=NO_SCRIPT_VIEWPORT, java_script_enabled=False)
+    page = context.new_page()
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    # `evaluate` still runs with page scripts disabled, because it goes in over the protocol rather
+    # than through the page. That is what makes this measurable at all, and it is also why the
+    # first check below is there: it proves the page's own script really did not run, rather than
+    # this whole section quietly testing the scripted layout.
+    measured = page.evaluate(
+        """() => {
+            const feed = document.getElementById("feed");
+            const box = feed.getBoundingClientRect();
+            const stage = document.querySelector(".stage").getBoundingClientRect();
+            // What object-fit: contain actually paints inside the element box. The element itself
+            // covers the whole stage, so its rectangle says nothing about where the picture is.
+            const scale = Math.min(box.width / feed.naturalWidth,
+                                   box.height / feed.naturalHeight);
+            const width = feed.naturalWidth * scale;
+            const height = feed.naturalHeight * scale;
+            return {
+                scripted: feed.style.width !== "",
+                natural: feed.naturalWidth > 0 && feed.naturalHeight > 0,
+                fit: getComputedStyle(feed).objectFit,
+                width: width, height: height,
+                left: box.left + (box.width - width) / 2,
+                top: box.top + (box.height - height) / 2,
+                stage: { left: stage.left, top: stage.top,
+                         width: stage.width, height: stage.height }
+            };
+        }"""
+    )
+    context.close()
+    stage = measured["stage"]
+    shape = measured["height"] and measured["width"] / measured["height"]
+    inside = (
+        measured["left"] >= stage["left"] - 1
+        and measured["top"] >= stage["top"] - 1
+        and measured["left"] + measured["width"] <= stage["left"] + stage["width"] + 1
+        and measured["top"] + measured["height"] <= stage["top"] + stage["height"] + 1
+    )
+    filled = max(measured["width"] / stage["width"], measured["height"] / stage["height"])
+    return [
+        ("the page's own script really is off", measured["scripted"], False),
+        ("without a script there is still a picture", measured["natural"], True),
+        ("the stylesheet letterboxes it", measured["fit"], "contain"),
+        ("and it keeps the camera's shape", abs(shape - PICTURE_ASPECT) < 0.02, True),
+        ("and it stays inside the stage", inside, True),
+        ("and it takes all the room it can", filled > 0.98, True),
+    ]
+
+
 def main() -> None:
     try:
         from playwright.sync_api import sync_playwright
@@ -526,6 +595,9 @@ def main() -> None:
         print("")
         print("viewer in a tile")
         report(run_tile_checks(browser, PORT), problems)
+        print("")
+        print("viewer with no script")
+        report(run_no_script_checks(browser, PORT), problems)
         browser.close()
     print("")
     for problem in problems:

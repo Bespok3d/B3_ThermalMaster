@@ -143,8 +143,12 @@ def test_the_facade_declares_everything_it_imports():
         assert hasattr(thermal_master, name), name
 
 
-def test_the_viewer_is_registered_as_its_own_tile():
-    """A second [webcam] entry, so the interactive page appears in Fluidd beside the picture."""
+def test_the_viewer_is_the_registered_camera():
+    """One [webcam] entry, and it is the interactive page.
+
+    Two entries put two cameras of the same thing on the dashboard, and a camera defined in a
+    config file is read-only in Fluidd, so there was no way inside the UI to hide either of them.
+    """
 
     fragment = (
         Path(__file__).resolve().parent.parent / "files" / "webcam.conf.tmpl"
@@ -152,17 +156,37 @@ def test_the_viewer_is_registered_as_its_own_tile():
 
     assert "service: iframe" in fragment
     assert "stream_url: /thermal/view" in fragment
-    assert fragment.count("[webcam ") == 2
+    assert fragment.count("[webcam ") == 1
 
 
-def test_the_plain_tile_is_still_a_picture():
-    """The interactive tile is an addition. If its script breaks, there is still a camera."""
+def test_the_registered_camera_is_not_a_second_name():
+    """The tile carries the name the user chose, with nothing appended.
+
+    It used to be `<name> live`, because it sat beside a plain tile called `<name>`. Now that it is
+    the only tile, a suffix would leave the camera called something the user never typed.
+    """
 
     fragment = (
         Path(__file__).resolve().parent.parent / "files" / "webcam.conf.tmpl"
     ).read_text()
 
-    assert "service: mjpegstreamer-adaptive" in fragment
+    assert "[webcam $THERMAL_CAMERA_NAME]" in fragment
+
+
+def test_the_viewer_lays_the_picture_out_without_a_script():
+    """The fallback the second tile used to be.
+
+    With no JavaScript the page still has to be a camera, which means the stylesheet, not the
+    script, is what fits the picture into the stage.
+    """
+
+    page = (
+        Path(__file__).resolve().parent.parent / "files" / "lib" / "thermal_master" / "viewer.py"
+    ).read_text()
+
+    rule = page.split(".stage img {{", 1)[1].split("}}", 1)[0]
+    for declaration in ("inset: 0", "object-fit: contain", "width: 100%", "height: 100%"):
+        assert declaration in rule, declaration
 
 
 def test_the_frame_endpoint_is_proxied_and_uncacheable():

@@ -64,9 +64,14 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
      whatever is left after the chrome. */
   .stage {{ position: relative; flex: 1 1 auto; min-height: 55%; background: #000; }}
   .stage {{ overflow: hidden; }}
-  /* Positioned and sized from the script on every paint, so the picture, the overlay and the
-     pointer mapping all come from one rectangle and cannot disagree about where anything is. */
-  .stage img {{ position: absolute; display: block; image-rendering: pixelated; }}
+  /* Two layouts in one rule. The inset and object-fit are what the picture gets with no script
+     at all: letterboxed inside the stage, right shape, whatever the tile is. The script overrides
+     left, top, width and height on every paint, so the picture, the overlay and the pointer
+     mapping all come from one rectangle and cannot disagree about where anything is.
+     This is the whole fallback now that the plain camera tile is gone: with JavaScript off, this
+     page is still the camera. */
+  .stage img {{ position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+                display: block; image-rendering: pixelated; }}
   .stage canvas {{ position: absolute; inset: 0; width: 100%; height: 100%;
                    touch-action: none; cursor: crosshair; }}
   .bar {{ display: flex; gap: 0.5rem 0.9rem; align-items: baseline; flex-wrap: wrap;
@@ -427,11 +432,21 @@ VIEWER_SCRIPT = """
     var fit = imageBox();
     // The picture element is placed from the same rectangle the overlay and the pointer mapping
     // use, rather than being left to object-fit, so zooming cannot drift them apart.
-    feed.style.left = fit.left + "px";
-    feed.style.top = fit.top + "px";
-    feed.style.width = fit.width + "px";
-    feed.style.height = fit.height + "px";
-    feed.style.visibility = pictureAspect() === null ? "hidden" : "visible";
+    // Until the shape is known there is no such rectangle, and the earlier answer was to hide the
+    // picture until there was one. That was affordable while a plain camera tile existed beside
+    // this page. It does not survive being the only tile, so the picture is handed back to the
+    // stylesheet instead: object-fit letterboxes it correctly, which is the same thing a browser
+    // with no script at all shows. Nothing is drawn over it, because the overlay needs a frame and
+    // there is no frame yet either.
+    var shaped = pictureAspect() !== null;
+    feed.style.left = shaped ? fit.left + "px" : "";
+    feed.style.top = shaped ? fit.top + "px" : "";
+    feed.style.width = shaped ? fit.width + "px" : "";
+    feed.style.height = shaped ? fit.height + "px" : "";
+    // The stylesheet pins all four edges. Left and top are overridden above, and these two have to
+    // be released or the picture is over-constrained and the width is quietly ignored.
+    feed.style.right = shaped ? "auto" : "";
+    feed.style.bottom = shaped ? "auto" : "";
     surface.width = fit.box.width;
     surface.height = fit.box.height;
     var pen = surface.getContext("2d");

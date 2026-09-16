@@ -1430,6 +1430,31 @@ an honest reason. Asserting what Fit means, that the picture is inside the stage
 one axis, is true whenever it is true and depends on no history. The first instinct was to widen the
 tolerance, which would have buried a real 52 pixel discrepancy under a rounding excuse.
 
+**F-66. Two cameras of the same thing, and no way to hide either.** The viewer shipped in 0.11.0 as
+a second `[webcam]` entry rather than a replacement, on the argument that the two fail differently:
+a plain image renders in anything, a script does not, so a broken viewer still left a camera on the
+dashboard. The cost was not priced. Fluidd marks a camera that comes from a config file as managed
+by Moonraker and will not let the user touch it, so the dashboard showed both tiles, permanently,
+with the plugin as the only place either could be turned off.
+
+My first answer to the report was that Fluidd's own camera selector is the right place to choose,
+which was wrong for the same reason the rotation controls are greyed out there, and I had already
+written that reason into this file. Reading it back would have been quicker than being told twice.
+
+The fallback was worth keeping, so it moved into the page. `.stage img` now carries `inset: 0` and
+`object-fit: contain`, which is a correctly letterboxed picture with no script at all; `paint`
+overrides those four properties and releases `right` and `bottom`, which the stylesheet pins and
+which would otherwise over-constrain the box and make the width it sets quietly ignored. `paint`
+also stopped hiding the picture while the shape was unknown, since hiding it was only affordable
+while a second tile existed.
+
+The browser harness grew a context with JavaScript disabled to check it, which first measured the
+wrong rectangle: `object-fit` letterboxes the painted content inside the element box, and the
+element still covers the whole stage, so the element's bounding box says nothing about where the
+picture is. The check now computes the painted rectangle from the natural size, and asserts first
+that the page's own script really did not run, because `page.evaluate` still works in that context
+and a check that quietly tested the scripted layout would have passed forever.
+
 ### Phase 7d: MP4 recording
 
 MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome

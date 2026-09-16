@@ -64,8 +64,8 @@ Where two markers land close together, the second one moves its number rather th
 first. The ruler ticks whichever extremes are switched on, so what the bar says and what the markers
 say never disagree.
 
-Into the picture rather than onto this page, because the camera tile in Fluidd and Mainsail is a
-plain image and there is nowhere else to put them. The cost is that switching the readout on doubles
+Burned into the picture rather than drawn over it, so the stream and the still carry their own
+readout wherever they are opened, including anything that fetches them outside this plugin. The cost is that switching the readout on doubles
 the encoded size, so the text survives being scaled by a browser. Switching it off returns the
 plugin to what it cost without a readout.
 
@@ -74,9 +74,9 @@ pixel, and the pixel coordinates of both extremes in the orientation you are loo
 
 ## The interactive viewer
 
-`/thermal/view`, and it registers itself as a second tile in Fluidd and Mainsail, named after your
-camera with "live" on the end. The two tiles are separate views of the same camera: the plain one is
-a picture, and pointing and measuring happen on this one.
+`/thermal/view`, and it is the camera this plugin registers in Fluidd and Mainsail, under the name
+you chose at install time. There is one tile, and this is it. Point at the picture and it tells you
+the temperature of the pixel under the pointer, along with the hottest and coldest in view.
 
 In a tile it shows the picture and the readout, and hovering works there. When the tile is wider
 than the picture needs, which it usually is with a rotated camera, the numbers sit beside the picture
@@ -84,19 +84,17 @@ rather than underneath it, so the picture gets the height. The zoom, units and s
 once you open it full size, because a tile has no room for them and a tile full of buttons with no
 camera in it is worse than no buttons.
 
-Both tiles are always registered. If you only want one of them on your dashboard, Fluidd's own camera
-selector chooses which are shown, and that is a better place to decide it than this plugin. Point at the picture and it tells you the temperature of the pixel
-under the pointer, along with the hottest and coldest in view.
-
-It is a second tile rather than a replacement because the two fail differently. The plain tile is an
-image and will render in anything; this one is a script, and if it breaks you still have a camera.
+The stream on its own is still there at `/thermal/stream.mjpg`, and the still at
+`/thermal/snapshot.jpg`, for anything that wants a plain picture rather than a page. The viewer does
+not need its script to show one either: with JavaScript off the stylesheet fits the picture into the
+tile by itself, so the worst a broken script costs you is the pointing.
 
 Zoom with the wheel or the buttons and it magnifies towards what you are pointing at; Fit puts it
 back. Pan mode drags the picture when you are zoomed in, which is a mode rather than a held key
 because Measure mode uses the same gesture for the box and a phone has no key to hold.
 
 The units button changes the unit for the whole plugin rather than just this page, so the readout
-burned into the plain tile agrees with it. Save image writes a PNG at the sensor's own resolution
+burned into the picture agrees with it. Save image writes a PNG at the sensor's own resolution
 with the region drawn on it, because a picture of a measurement that does not show what was measured
 is not evidence of anything.
 
