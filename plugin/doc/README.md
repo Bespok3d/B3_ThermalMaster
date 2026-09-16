@@ -78,9 +78,14 @@ pixel, and the pixel coordinates of both extremes in the orientation you are loo
 camera with "live" on the end. The two tiles are separate views of the same camera: the plain one is
 a picture, and pointing and measuring happen on this one.
 
-In a tile it shows the picture and the readout, and hovering works there. The zoom, units and save
-controls appear once you open it full size, because a tile has no room for them and a tile full of
-buttons with no camera in it is worse than no buttons. Point at the picture and it tells you the temperature of the pixel
+In a tile it shows the picture and the readout, and hovering works there. When the tile is wider
+than the picture needs, which it usually is with a rotated camera, the numbers sit beside the picture
+rather than underneath it, so the picture gets the height. The zoom, units and save controls appear
+once you open it full size, because a tile has no room for them and a tile full of buttons with no
+camera in it is worse than no buttons.
+
+Both tiles are always registered. If you only want one of them on your dashboard, Fluidd's own camera
+selector chooses which are shown, and that is a better place to decide it than this plugin. Point at the picture and it tells you the temperature of the pixel
 under the pointer, along with the hottest and coldest in view.
 
 It is a second tile rather than a replacement because the two fail differently. The plain tile is an

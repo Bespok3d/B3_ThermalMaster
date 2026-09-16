@@ -461,3 +461,46 @@ def test_a_form_post_still_means_absent_is_off(thermal_streamer):
         connection.close()
         server.shutdown()
         server.server_close()
+
+
+def test_the_viewer_page_is_told_the_picture_shape(thermal_streamer, serving):
+    """So it can lay itself out before the stream has decoded anything.
+
+    The stream is an img of a never-ending multipart response: it reports no size until a part has
+    decoded and fires no event when one does. The plugin is the thing producing the picture, so it
+    knows the answer and says so rather than leaving the page to discover it.
+    """
+
+    import numpy as np
+
+    server, frame_store = serving
+    counts = np.full((120, 160), 20000, dtype=np.uint16)
+    renderer = thermal_streamer.ThermalRenderer(
+        thermal_streamer.build_palettes()["ironbow"],
+        thermal_streamer.RenderSettings(rotation=90),
+    )
+    rendered = renderer.render_frame(counts)
+    frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+    connection = connect_to(server)
+
+    connection.request("GET", "/view")
+    body = connection.getresponse().read().decode()
+
+    # Rotated a quarter turn, so the picture is 120 across and 160 down.
+    assert 'data-width="120"' in body
+    assert 'data-height="160"' in body
+    connection.close()
+
+
+def test_the_viewer_page_is_served_before_any_frame_exists(serving):
+    """And without the hint, rather than with a made up one."""
+
+    server, _ = serving
+    connection = connect_to(server)
+
+    connection.request("GET", "/view")
+    body = connection.getresponse().read().decode()
+
+    assert "data-width" not in body
+    assert 'id="surface"' in body
+    connection.close()

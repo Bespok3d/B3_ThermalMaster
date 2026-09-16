@@ -1391,6 +1391,45 @@ unrelated functions that happened to live between them, which the suite caught i
 `git show HEAD:` restored exactly. Worth preferring anchored replacements over positional slices,
 which is how every other edit in this project has been made.
 
+### Phase 7 hardware round, 0.15.0
+
+**F-64. The viewer was blank until the pointer crossed it.** Shipped in 0.13.0 and survived two
+hardware rounds. The picture element is positioned by `paint`, which ran on pointermove, resize and
+frame arrival, and on none of those at load. A viewer opened with no saved region showed nothing at
+all.
+
+It hid because every way of looking at it moved a mouse first. Every screenshot I took moved the
+pointer to read a temperature; the maintainer's screenshots had a saved region, which starts the
+frame fetching, which paints. The check that catches it now measures the picture's width before
+anything touches the page, which is a rule worth generalising: a page that only paints on
+interaction looks perfect to any test that interacts.
+
+**F-65. A landscape tile spent its width on nothing.** The tile is wider than tall; a rotated camera
+is taller than wide. Stacking the readout underneath took height from the only dimension the picture
+could use, leaving it about 110 pixels tall in a 200 pixel tile. The readout now sits beside the
+picture when the viewport is wider than the picture needs, decided by the script rather than a media
+query, because the picture's shape changes when the camera is rotated and a media query cannot know
+that.
+
+Which exposed a third thing: the page could not lay out at all until it knew that shape, and the
+only sources were an `<img>` of a multipart stream, which reports no size until a part decodes and
+fires no event when one does, and the frame endpoint, which is not fetched until someone points at
+something. So the plugin now states the shape in the page it serves. It is the thing producing the
+picture; asking the browser to discover it was the wrong way round.
+
+**The ruler, again, and this time smaller.** The tick marking where the auto-ranging stops is gone:
+it was drawn on top of a boundary the gradient already draws, since above it the bar is flat and
+below it the colour varies. One moving line too many, reported as distracting and redundant on
+inspection. The triangles are back at the ends, in the marker colours, now meaning "this end is that
+marker" rather than "this extreme is off the scale", and drawn only for a marker that is on.
+
+**A note on a check that was wrong rather than flaky.** "Fit puts the picture back" compared the
+width after Fit against one captured before the zoom. Those are different layouts: the panel's height
+changes as its own text changes, which changes the stage, so the comparison failed by 52 pixels for
+an honest reason. Asserting what Fit means, that the picture is inside the stage and touching it on
+one axis, is true whenever it is true and depends on no history. The first instinct was to widen the
+tolerance, which would have buried a real 52 pixel discrepancy under a rounding excuse.
+
 ### Phase 7d: MP4 recording
 
 MediaRecorder on a canvas. The largest piece and the most browser-specific; Safari and Chrome

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 
@@ -97,6 +98,16 @@ def serve(streamer):
     renderer = streamer.ThermalRenderer(streamer.build_palettes()["ironbow"], store.snapshot()[2])
     rendered = renderer.render_frame(ramp_frame(streamer))
     frames.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+
+    # Republished on a timer, because a real camera does. A server that publishes once looks the
+    # same to most of these checks and is not the same at all to an <img> showing a multipart
+    # stream, which needs parts arriving before it will decode one and report a size.
+    def keep_streaming() -> None:
+        while True:
+            time.sleep(0.1)
+            frames.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+
+    threading.Thread(target=keep_streaming, daemon=True).start()
     server = streamer.ThermalServer(
         ("127.0.0.1", PORT), frames, store, streamer.build_palettes(), device
     )
@@ -270,9 +281,30 @@ def run_tool_checks(page) -> list:
     middle_zoomed = reading(page)
 
     page.click("#fit")
-    page.wait_for_timeout(200)
+    page.wait_for_timeout(400)
     back = picture_rect(page)
-    checks.append(("fit puts it back", round(back["width"]), round(fitted["width"])))
+    stage = page.evaluate(
+        """() => {
+            const r = document.querySelector(".stage").getBoundingClientRect();
+            return { width: r.width, height: r.height };
+        }"""
+    )
+    # What Fit means, rather than what the picture happened to measure earlier. Comparing against a
+    # width captured before the zoom looked obvious and was wrong: the panel's height changes as its
+    # own text changes, which changes the stage, so the two measurements were of different layouts
+    # and the check failed by 52 pixels for an honest reason. Fit means the picture is inside the
+    # stage and touching it on one axis, and that is true whenever it is true.
+    inside = back["width"] <= stage["width"] + 1 and back["height"] <= stage["height"] + 1
+    touching = (
+        abs(back["width"] - stage["width"]) <= 1 or abs(back["height"] - stage["height"]) <= 1
+    )
+    checks.append((
+        "fit fills the stage without overflowing it",
+        "yes" if inside and touching else
+        f"picture {back['width']:.0f}x{back['height']:.0f} in stage"
+        f" {stage['width']:.0f}x{stage['height']:.0f}",
+        "yes",
+    ))
     checks.append(("fit says one hundred percent", page.inner_text("#zoom-level"), "100%"))
     page.mouse.move(back["left"] + back["width"] / 2, back["top"] + back["height"] / 2)
     page.wait_for_timeout(SETTLE_MILLISECONDS)
@@ -428,10 +460,13 @@ def run_tile_checks(browser, port: int) -> list:
     page = browser.new_page(viewport=TILE_VIEWPORT)
     page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
+    # Measured before any pointer goes near it, because the picture is positioned by the script
+    # and a page that only paints on pointermove looks perfect to every test that moves one first.
     measured = page.evaluate(
         """() => {
             const stage = document.querySelector(".stage").getBoundingClientRect();
-            return { stage: stage.height,
+            const picture = document.getElementById("feed").getBoundingClientRect();
+            return { stage: stage.height, picture: picture.width,
                      tools: getComputedStyle(document.querySelector(".tools")).display };
         }"""
     )
@@ -441,6 +476,8 @@ def run_tile_checks(browser, port: int) -> list:
     reads = reading(page)
     page.close()
     return [
+        ("a tile shows the picture before anything is touched",
+         measured["picture"] > 0, True),
         ("a tile gives the picture most of its height",
          measured["stage"] > TILE_VIEWPORT["height"] * 0.4, True),
         ("a tile hides the toolbar rather than the camera", measured["tools"], "none"),

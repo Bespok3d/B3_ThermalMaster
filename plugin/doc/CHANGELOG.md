@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.0
+
+- **The viewer showed nothing until you moved the pointer over it.** The picture is positioned by
+  the page's own script, and nothing called that on load, so a viewer opened with no region saved
+  was simply blank. It only ever looked fine because a saved region, or a mouse passing over,
+  happened to trigger a redraw.
+- **The readout goes beside the picture when there is width going spare**, which in a Fluidd tile
+  there always is: the tile is landscape and a rotated camera is portrait, so putting the numbers
+  underneath spent the one dimension the picture needed. The picture is now about twice the size in
+  a tile.
+- The plugin tells the page the picture's shape when it serves it, so the layout is right from the
+  first moment rather than after the stream decodes.
+- The moving line inside the ruler is gone. It marked where the auto-ranging stops, which the
+  gradient's own edge already shows.
+- The triangles are back, at the ends of the ruler, in the colours of the markers they belong to.
+
 ## 0.14.0
 
 Three fixes, all found by looking at it on a real printer.

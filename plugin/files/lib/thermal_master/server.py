@@ -186,7 +186,9 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
     def serve_viewer_page(self) -> None:
         """The interactive page. Needs no settings store, so it is served whatever else is wired."""
 
-        self.send_html(render_viewer_page())
+        measured = self.frames.latest_stats()
+        shape = (measured.width, measured.height) if measured else None
+        self.send_html(render_viewer_page(shape))
 
     def serve_thermal_frame(self) -> None:
         """Every pixel's temperature, as bytes, for a viewer that reads its own values.

@@ -42,9 +42,21 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <style>
   :root {{ color-scheme: dark; }}
   * {{ box-sizing: border-box; }}
-  body {{ margin: 0; background: #0d0f12; color: #e8e8ea;
+  body {{ margin: 0; background: #0d0f12; color: #e8e8ea; overflow: hidden;
          font: 14px/1.45 system-ui, sans-serif; }}
   main {{ display: flex; flex-direction: column; height: 100vh; }}
+  .panel {{ display: flex; flex-direction: column; min-height: 0; overflow: auto; }}
+  /* The numbers go beside the picture when there is width going spare, which in a Fluidd tile
+     there always is: the tile is landscape and a rotated camera is portrait, so stacking the
+     readout underneath spends the one dimension the picture actually needed. The script decides,
+     because only it knows the picture's shape, and that changes when the camera is rotated. */
+  body.beside main {{ flex-direction: row; }}
+  body.beside .panel {{ flex: 0 1 auto; min-width: 7rem; max-width: 50%;
+                        border-left: 1px solid #23262c; }}
+  body.beside .group {{ flex-wrap: wrap; }}
+  body.beside .bar {{ flex-direction: column; align-items: flex-start; gap: 0.15rem;
+                      border-top: 0; }}
+  body.beside .tools {{ border-top: 0; }}
   /* The picture comes first and keeps most of the room. In a Fluidd tile this page is about 260
      by 340 CSS pixels, and the controls laid out for a window wrapped to three rows and took all
      of it: the stage was flexed down to 41 pixels and the tile showed a toolbar and no camera.
@@ -72,6 +84,11 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   @media (min-height: 460px) {{
     .tools {{ display: flex; }}
   }}
+  /* Beside the picture the panel is a narrow column, and a column of buttons is not worth the
+     width it costs. They come back when the page is opened properly, which is when it is wide. */
+  @media (max-width: 700px) {{
+    body.beside .tools {{ display: none; }}
+  }}
   .tools button {{ padding: 0.25rem 0.5rem; border: 1px solid #33373f; border-radius: 4px;
                    background: #1d2026; color: #e8e8ea; font: inherit; cursor: pointer; }}
   .tools button[aria-pressed="true"] {{ background: #d8752a; border-color: #d8752a;
@@ -97,10 +114,10 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <body>
 <main>
   <div class="stage">
-    <img id="feed" src="stream.mjpg" alt="Live thermal view">
+    <img id="feed" src="stream.mjpg" alt="Live thermal view"{picture_shape}>
     <canvas id="surface"></canvas>
   </div>
-  <div class="tools">
+  <div class="panel-tools tools">
     <button type="button" id="zoom-out" title="Zoom out">-</button>
     <span class="zoom" id="zoom-level">100%</span>
     <button type="button" id="zoom-in" title="Zoom in">+</button>
@@ -110,9 +127,10 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     <button type="button" id="units">C</button>
     <button type="button" id="shot">Save image</button>
   </div>
+  <div class="panel">
   <div class="bar">
     <div class="group">
-      <span>Pointer</span><b class="reading" id="pointer">move over the image</b>
+      <span>Pointer</span><b class="reading" id="pointer">-</b>
     </div>
     <div class="group">
       <span>Frame</span><b id="max">-</b><b id="min">-</b>
@@ -123,9 +141,10 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     </div>
     <div class="group hint" id="tile-note">
     </div>
-      open me to zoom, save or change units
+      open for tools
     </div>
     <a href="./">settings</a>
+  </div>
   </div>
 </main>
 <script>
@@ -191,11 +210,24 @@ VIEWER_SCRIPT = """
   // The picture is letterboxed inside the stage by object-fit: contain, so the canvas covers more
   // area than the image does. Everything positional has to go through this or the readings land on
   // the wrong pixel, which is the kind of wrong that still looks plausible.
+  // The picture's shape, or null while nothing has told us yet. Deliberately not guessed: the
+  // first version fell back to the shape of the box, which fills it exactly and so looks correct
+  // while stretching a portrait camera across a landscape tile. Nothing shows until this is known.
+  function pictureAspect() {
+    if (feed.naturalWidth && feed.naturalHeight) {
+      return feed.naturalWidth / feed.naturalHeight;
+    }
+    if (frame) { return frame.width / frame.height; }
+    // What the plugin said when it served the page, which it knows because it is the thing
+    // producing the picture. Last rather than first, because the other two are what is actually
+    // on screen and this is only what was true when the page was built.
+    var told = Number(feed.dataset.width) / Number(feed.dataset.height);
+    return told > 0 ? told : null;
+  }
+
   function imageBox() {
     var box = surface.getBoundingClientRect();
-    var natural = (feed.naturalWidth && feed.naturalHeight)
-      ? feed.naturalWidth / feed.naturalHeight
-      : (frame ? frame.width / frame.height : box.width / box.height);
+    var natural = pictureAspect() || box.width / box.height;
     var wide = box.width / box.height > natural;
     var width = (wide ? box.height * natural : box.width) * zoom;
     var height = (wide ? box.height : box.width / natural) * zoom;
@@ -375,7 +407,23 @@ VIEWER_SCRIPT = """
     };
   }
 
+  // Which way round the page is laid out. Decided from the picture's shape rather than from a
+  // media query, because a rotated camera changes that shape while the window stays the same.
+  function arrange() {
+    var picture = pictureAspect();
+    if (picture === null) { return false; }
+    var beside = (window.innerWidth / window.innerHeight) > picture * 1.3;
+    if (beside === document.body.classList.contains("beside")) { return false; }
+    document.body.classList.toggle("beside", beside);
+    return true;
+  }
+
   function paint() {
+    if (arrange()) {
+      // The layout just changed under us, so every rectangle measured below would be the old one.
+      requestAnimationFrame(paint);
+      return;
+    }
     var fit = imageBox();
     // The picture element is placed from the same rectangle the overlay and the pointer mapping
     // use, rather than being left to object-fit, so zooming cannot drift them apart.
@@ -383,6 +431,7 @@ VIEWER_SCRIPT = """
     feed.style.top = fit.top + "px";
     feed.style.width = fit.width + "px";
     feed.style.height = fit.height + "px";
+    feed.style.visibility = pictureAspect() === null ? "hidden" : "visible";
     surface.width = fit.box.width;
     surface.height = fit.box.height;
     var pen = surface.getContext("2d");
@@ -499,7 +548,7 @@ VIEWER_SCRIPT = """
   surface.addEventListener("pointerleave", function () {
     lastSeen = null;
     pointer = null;
-    pointerOut.textContent = "move over the image";
+    pointerOut.textContent = "-";
     paint();
   });
 
@@ -615,15 +664,40 @@ VIEWER_SCRIPT = """
     .catch(function () { showUnits(); });
 
   window.addEventListener("resize", paint);
+  feed.addEventListener("load", paint);
   recallRegion();
   setMode(false);
+  // Painted once at startup, and this is not a nicety. The picture element is positioned by paint
+  // rather than by the stylesheet, so until something calls it the image is nought by nought and
+  // the page is blank. Before this, a viewer opened with no region showed nothing at all until the
+  // pointer happened to cross it, and every screenshot taken of it hid the bug by moving a mouse
+  // first.
+  paint();
+
+  // The stream is an <img>, and an <img> showing a never-ending multipart response does not
+  // reliably fire load, so there is no event to wait for. This watches until the first part has
+  // decoded and the picture's shape is finally knowable, then paints properly and stops.
+  (function awaitPicture(attempts) {
+    if (pictureAspect() !== null) { paint(); return; }
+    if (attempts > 600) { return; }
+    requestAnimationFrame(function () { awaitPicture(attempts + 1); });
+  })(0);
+
   if (region) { start(); }
 })();
 """
 
 
-def render_viewer_page() -> str:
-    """The viewer, with its timings substituted so they are stated once, in Python."""
+def render_viewer_page(shape: tuple[int, int] | None = None) -> str:
+    """The viewer, with its timings substituted so they are stated once, in Python.
+
+    `shape` is the picture's width and height as it will be displayed, when the plugin knows it.
+    It nearly always does, and saying so here saves the page from having to find out: the stream is
+    an `<img>` of a never-ending multipart response, which does not reliably report its size until
+    a part has decoded and fires no event when one does. Without the hint the page cannot lay
+    anything out at all until the first frame arrives, which on a quiet stream is visible as a tile
+    that stays blank for a second.
+    """
 
     script = (
         VIEWER_SCRIPT.replace("POLL_MS", str(VIEWER_POLL_MILLISECONDS))
@@ -633,4 +707,7 @@ def render_viewer_page() -> str:
         .replace("MAX_ZOOM_VALUE", str(VIEWER_MAXIMUM_ZOOM))
         .replace("ZOOM_STEP_VALUE", str(VIEWER_ZOOM_STEP))
     )
-    return VIEWER_PAGE_TEMPLATE.format(viewer_script=script)
+    picture_shape = (
+        f' data-width="{shape[0]}" data-height="{shape[1]}"' if shape else ""
+    )
+    return VIEWER_PAGE_TEMPLATE.format(viewer_script=script, picture_shape=picture_shape)

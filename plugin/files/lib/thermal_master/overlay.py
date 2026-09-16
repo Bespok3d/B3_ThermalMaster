@@ -293,14 +293,24 @@ def bar_gradient(
 
 
 def mark_bar(
-    image: Image.Image, row: int, style: OverlayStyle, colour: tuple[int, int, int]
+    image: Image.Image, at_top: bool, style: OverlayStyle, colour: tuple[int, int, int]
 ) -> None:
-    """A thin tick across the bar, for showing where the auto-ranged part of it begins and ends."""
+    """A triangle at one end of the bar, tying that end to the marker of the same colour.
 
-    left, top, width, _ = style.bar_box
+    It used to mean "this extreme is past the end of the scale", which was needed while the bar was
+    labelled with the auto-ranged bounds. The bar spans the scene now, so an extreme is never past
+    the end: it is exactly at it. What is left is a visual tie between the red cross on the picture
+    and the number at the top of the ruler, which is worth keeping and is why it is drawn only for
+    a marker that is actually on.
+    """
+
+    left, top, width, height = style.bar_box
+    arrow = max(width // 2, 3)
+    apex = top + 1 if at_top else top + height - 2
+    base = apex + arrow if at_top else apex - arrow
+    middle = left + width // 2
     draw = ImageDraw.Draw(image)
-    y = top + row
-    draw.line((left, y, left + width - 1, y), fill=colour)
+    draw.polygon([(middle, apex), (left + 1, base), (left + width - 2, base)], fill=colour)
 
 
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
@@ -317,11 +327,15 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
     draw.rectangle(
         (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
     )
-    # Where the auto-ranging stops. Above the upper tick and below the lower one the bar is one
-    # flat colour, because so is the picture, and the ticks are what say that is deliberate.
-    for bound in (stats.range_high_celsius, stats.range_low_celsius):
-        if axis[0] < bound < axis[1]:
-            mark_bar(image, bar_row(bound, axis, bar_height), style, OVERLAY_SHADOW_RGB)
+    # No tick where the auto-ranging stops: the gradient already draws that boundary, since above
+    # it the bar is flat and below it the colour varies. A line on top of an edge that is already
+    # visible is one moving thing too many, and it read as noise on hardware.
+    for at_top, shown, colour in (
+        (True, overlay.hotspot, HOTSPOT_RGB),
+        (False, overlay.coldspot, COLDSPOT_RGB),
+    ):
+        if shown:
+            mark_bar(image, at_top, style, colour)
     hottest = format_temperature(axis[1], overlay.units)
     coldest = format_temperature(axis[0], overlay.units)
     right = width - style.margin
