@@ -640,15 +640,38 @@ About 1.9 ms of the 8.10, a quarter of the pipeline and a ninth of the whole fra
   of 255. Named as a prime suspect by the original finding and worth 0.22 ms in practice, which does
   not pay for a picture that is not quite the same picture.
 
+**Confirmed on the printer at 0.20.0, with nothing watching.** The pipeline is 5.91 ms against
+8.10, a saving of 2.19 ms, which is 27% of that stage and 14% of the whole frame: 14.76 ms with the
+readout on, against 17.20. The per-step numbers agree with where it was supposed to come from: the
+bounds are 0.89 ms against 1.85, the noise reduction 0.13 against 0.18, and `np.take` 0.45 against
+the 1.42 that fancy indexing still costs in the same run.
+
+Two things the confirmation run showed that the change itself did not:
+
+- **The profiler was measuring the step it had replaced.** Its palette line called `palette[detailed]`
+  by hand, so after 0.20.0 it reported 1.42 ms for a step the plugin no longer performs, and the
+  saving would have looked like nothing at all. It now times both and says which is which. A
+  profiler that does not go through the code under test is a second implementation, with the same
+  drift problem as any other.
+- **A watching browser costs almost nothing on this path.** The same run with the viewer open and
+  the pointer moving: 6.47 ms against 5.91 on the stage line, and every per-step line within
+  0.03 ms. Most of that 0.56 ms is ambient scheduling rather than a systematic cost, since the
+  steps that make up the stage did not move. Worth recording against F-55: a viewer polling frames
+  is not what turns 15 fps into 5, so the decay is in the transport, where the HTTP/1.0 connection
+  churn already pointed.
+
 **Where the next round is, and it is not the pipeline.** The encode at 2x is 5.29 ms and the readout
 drawing is 3.46 ms: 8.75 ms between them, more than the whole pipeline, and both exist only because
 the burned-in text needs pixels to land on. The suspicion is the same as it was, now with a number
 behind it: the drawing is 3.46 ms on the printer against 0.10 ms on a development machine, so what
-is expensive there is not the glyph rendering the cache already avoids but the pasting. Candidates
-to bench next, in the same one-run style: a cheaper resize filter for the 2x step, since the picture
-is resampled again by every browser that shows it; pasting glyph tiles without an alpha mask;
-compositing a whole label into one tile, cached by its string, so a label is one paste rather than
-seven.
+is expensive there is not the glyph rendering the cache already avoids but the pasting. Before
+any candidate, the two blocks are being split: the profiler now times the 2x resize and the JPEG
+save separately, and the readout's colorbar, markers and a single label separately, because the
+first guess about where the drawing goes was that pasting glyph tiles is expensive, and the
+colorbar builds a fresh gradient every frame. On a development machine the 2x resize is two thirds
+of the encode and the same resize with NEAREST is seven times cheaper, which is the first candidate
+measured in the same run: the picture is resampled again by every browser that shows it, and the
+viewer asks for it pixelated anyway.
 
 Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
 single stage" was right when the stages were four lines. With every step timed, the pipeline is

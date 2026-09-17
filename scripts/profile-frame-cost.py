@@ -26,6 +26,7 @@ where this plugin was running perfectly.
 from __future__ import annotations
 
 import argparse
+import io
 import statistics
 import sys
 import time
@@ -133,16 +134,31 @@ def steps(streamer, frame, rotation: int):
     bounds = streamer.frame_bounds(denoised)
     normalized = streamer.normalize_to_bytes(denoised, *bounds)
     detailed = streamer.enhance_detail(normalized, settings.detail_strength)
-    coloured = palette[detailed]
+    coloured = np.take(palette, detailed, axis=0)
     oriented = streamer.orient(coloured, rotation, False, False)
     stats = streamer.frame_statistics(
         denoised, bounds, rotation, settings.mirrors, settings.emissivity
     )
     overlay = streamer.Overlay(palette, stats, settings.units)
     upscale = streamer.encode_upscale((oriented.shape[1], oriented.shape[0]), 1, True)
-    drawn = Image.fromarray(oriented, mode="RGB").resize(
-        (oriented.shape[1] * upscale, oriented.shape[0] * upscale)
-    )
+    picture = Image.fromarray(oriented, mode="RGB")
+    enlarged = (oriented.shape[1] * upscale, oriented.shape[0] * upscale)
+    # One scratch image, drawn onto over and over. Copying it per call would put a memcpy of the
+    # whole picture inside every readout measurement, which is the kind of overhead that gets
+    # mistaken for the thing being measured.
+    scratch = picture.resize(enlarged, Image.Resampling.BILINEAR)
+    style = streamer.overlay_style(scratch.size, overlay.colorbar)
+    markers = streamer.markers_for(overlay)
+    label = streamer.format_temperature(stats.maximum_celsius, settings.units)
+
+    def draw_markers() -> None:
+        placed: list = []
+        for marker in markers:
+            streamer.draw_marker(scratch, marker, overlay, style, placed)
+
+    def save_jpeg() -> None:
+        scratch.save(io.BytesIO(), format="JPEG", quality=settings.jpeg_quality)
+
     return [
         ("noise reduction",
          lambda: streamer.reduce_temporal_noise(
@@ -155,12 +171,21 @@ def steps(streamer, frame, rotation: int):
         ("unsharp mask, whole step",
          lambda: streamer.enhance_detail(normalized, settings.detail_strength)),
         ("of which the 3x3 blur", lambda: streamer.blur_3x3(normalized)),
-        ("palette lookup", lambda: palette[detailed]),
+        ("palette lookup, take", lambda: np.take(palette, detailed, axis=0)),
+        ("palette lookup, indexing", lambda: palette[detailed]),
         ("orient", lambda: streamer.orient(coloured, rotation, False, False)),
         ("encode at 1x", lambda: streamer.encode_jpeg(oriented, 1, settings.jpeg_quality)),
         (f"encode at {upscale}x", lambda: streamer.encode_jpeg(
             oriented, upscale, settings.jpeg_quality)),
-        ("draw the readout", lambda: streamer.draw_overlay(drawn.copy(), overlay)),
+        (f"  of which the {upscale}x resize",
+         lambda: picture.resize(enlarged, Image.Resampling.BILINEAR)),
+        ("  the same resize, nearest",
+         lambda: picture.resize(enlarged, Image.Resampling.NEAREST)),
+        (f"  of which saving the {upscale}x jpeg", save_jpeg),
+        ("draw the readout", lambda: streamer.draw_overlay(scratch, overlay)),
+        ("  of which the colorbar", lambda: streamer.draw_colorbar(scratch, overlay, style)),
+        ("  of which the markers", draw_markers),
+        ("  of which one label", lambda: streamer.draw_label(scratch, (10.0, 10.0), label, style)),
     ]
 
 
