@@ -546,8 +546,8 @@ Healthy baseline for comparison, taken 2026-09-14 with 0.4.1, both Safari and Ch
 fifteen frames a second each: a snapshot in 15 ms, 768 sockets against port 8082, 6 threads. The
 decay was not reproducible at that moment, so the investigation waits for it to happen again.
 
-**F-56. The numpy pipeline, not the JPEG encode, is what this plugin spends its time on.** Open, and
-it invalidates the assumption the last three rounds of tuning were built on.
+**F-56. The numpy pipeline, not the JPEG encode, is what this plugin spends its time on.** Closed
+2026-09-17 at 0.21.0, having invalidated the assumption three rounds of tuning were built on.
 
 Profiled on the printer with `scripts/profile-frame-cost.py`, P1 frame rotated 270, four cumulative
 stages:
@@ -757,6 +757,44 @@ this one yet. It also breaks the colorbar into its gradient, its paste and its o
   of the bar's triangles, because every function in the readout builds its own drawing context and
   a frame builds six or seven of them. That is a suspicion with a cheap measurement attached, not a
   change; it goes in the next run.
+
+**Closed, 2026-09-17.** The colorbar's missing half millisecond turned out to be nothing in
+particular, which is an answer. Building a drawing context is 0.02 ms and a triangle 0.04, so six
+or seven contexts a frame were never the explanation: the bar is 0.18 ms of gradient, 0.19 to turn
+that into an image and paste it, 0.50 for its two labels, 0.12 for triangles and an outline, and
+about half a millisecond spread so thin across small operations that no single one of them is worth
+a change. The suspicion was wrong and cost one bench row to disprove, which is the right price.
+
+Where it ends. A frame was 17.20 ms with the readout on; it is 14.94 ms now, and 12.5 ms with
+Enlarging set to sharp. At the tile's real fifteen frames a second that is 22% of one core, or 19%
+sharp, against 26% when this started. The pipeline went from 8.10 ms to 5.89.
+
+What was taken: both percentiles in one call, the palette lookup through `np.take`, the half and
+half noise reduction in integers, and the upscale filter as a setting. Three of the four are
+byte-identical to what they replaced; the fourth is the user's choice and says so on the page.
+
+What was rejected, with its number, so nobody has to wonder:
+
+| candidate | worth | why not |
+| --- | --- | --- |
+| percentiles from a 2x2 subsample | 0.11 to 0.31 ms, and it moved between runs | changes the range ends by 0.047 C for a saving that will not stay still |
+| unsharp mask in integers | 0.22 ms | one pixel in 255 differs, for 1.5% of a frame |
+| `np.repeat` for the upscale | negative, 2.52 ms against 0.60 | Pillow's resize is not the slow part, the filter is |
+| a cached whole-label tile | 0.15 ms on a hit, minus 0.14 on a miss | five labels but three distinct strings a frame, and on a noisy sensor the tenth of a degree moves most frames |
+| Pillow's own `draw.text` | negative, 2.11 ms against 0.24 | the glyph cache is nine times cheaper, on this machine as on the one it was written for |
+| one drawing context per frame | 0.12 ms at the very most | measured before writing it, which is the only reason it was not written |
+
+What is left on the table, deliberately, for whoever comes back to this:
+
+- **The readout is the expensive half and always was**: 8.2 ms of a 14.94 ms frame between the
+  upscale and the drawing, against 5.89 for the whole pipeline. Everything cheap in it has been
+  taken. What remains needs a different design rather than a faster line, most obviously not
+  upscaling at all, which means finding another way to make nine pixel text survive a JPEG.
+- **Measuring the range every fourth frame** rather than every frame, worth about 0.69 ms, with the
+  smoothing weight re-expressed per update so the response time does not quietly quadruple. Not
+  taken because it belongs with the ruler question rather than with this finding.
+- **Locking the range** removes the percentile work altogether, 0.92 ms, and is the same lever from
+  the other end. That is a feature decision, in section 6.
 
 Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
 single stage" was right when the stages were four lines. With every step timed, the pipeline is
