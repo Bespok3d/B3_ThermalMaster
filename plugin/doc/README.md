@@ -157,6 +157,11 @@ mid-frame desynchronises the stream. Pressing the button repeatedly gets you one
 Temperatures remain the camera's own readings with an emissivity correction applied. Good for
 watching a nozzle warm up or finding a cold corner of a bed; not metrology.
 
+The P1 is the camera this has been developed and run against, on a printer, every step of the way.
+The P3 is implemented from the same driver and its own model configuration, and has never been run
+on a printer: the resolution, the model detection and the gain modes are all in place and none of
+them have met the hardware. If you have a P3, it should work, and a report either way is welcome.
+
 ## Notes
 
 - The image is auto-ranged: the coldest and hottest areas in view map to the ends of the palette, so

@@ -702,6 +702,19 @@ was justified on a development machine and no ratio from that machine has surviv
 this one yet. It also breaks the colorbar into its gradient, its paste and its outline, since
 1.59 ms for a strip 8 pixels wide is more than it looks like it should cost.
 
+**Answers from the maintainer, 2026-09-17.**
+
+- **The upscale filter becomes a setting rather than a decision.** Smooth or sharp, chosen live on
+  the control page beside the palette and the rotation, because it is a question about what looks
+  best on a given scene and the person looking at it is the one who can answer it. It only bites
+  when the readout is on, since that is the only time the picture is upscaled at all.
+- **F-56 stops when the easy wins run out**, rather than at a target number. What is left after
+  that gets written down here rather than chased.
+- **F-55 is parked** until the fps decay actually gets in the way.
+- **The P3 has never met this plugin**, and both the manifest and the README now say so in as many
+  words rather than implying it works. The driver's own model configuration is in place; nothing
+  has been run against the hardware.
+
 Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
 single stage" was right when the stages were four lines. With every step timed, the pipeline is
 8.10 ms across seven steps and the readout is 8.75 ms across two, so the next round goes to the
