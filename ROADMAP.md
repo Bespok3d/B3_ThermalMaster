@@ -1893,6 +1893,43 @@ Still open, and deliberately: the decimation and the dead band for auto mode. Th
 call is to live with the modes first, because somebody who ends up in fixed mode most of the time
 does not need them.
 
+### Phase 7g: stop working when nobody is watching
+
+Reported from `htop`: the plugin sits at about a third of a core forever, because `stream_frames`
+renders and publishes every frame the camera produces whether or not anything has asked for one.
+The viewer is careful about this on its own side, it stops fetching temperatures when nobody is
+pointing, and the printer was doing the work anyway.
+
+Two states, agreed with the maintainer, and they are not alternatives:
+
+**Idle, which needs no switch.** A minute with nobody asking for a picture and the capture loop
+stops rendering. Any request wakes it. The detail that makes it safe is to keep reading frames from
+the camera and skip only the pipeline: the USB read is mostly waiting rather than CPU, the device
+stays in sync, and waking costs one frame instead of a reconnect. A request marks interest and
+waits briefly for a fresh frame, because serving what was last published could hand somebody an
+hour old picture. The auto-ranging should start clean on waking, since its smoothed bounds are as
+old as the idle.
+
+**Off, which is a switch and a deeper state.** It releases the USB device, so nothing runs and the
+camera can be unplugged, and it publishes a rendered placeholder as the current frame: "Stream off"
+as a title, and a line naming the button that brings it back. Everything then shows that with no
+error states, because it arrives through the same path a real frame does. `/thermal/frame.bin`
+refuses instead, since there are no temperatures behind a picture of words, and the viewer should
+say "no frame" rather than read numbers off it. The switch belongs on the settings page and in the
+viewer toolbar, hidden in a narrow tile as Rec and Spot are, and it survives a restart: a reboot
+should not quietly start burning CPU somebody turned off, and the placeholder is what makes that
+discoverable.
+
+Measured with `scripts/measure-cpu-on-printer.sh`, before and after, with nothing watching. The
+protocol is part of the measurement: one open tile keeps the plugin fully awake by design, so a
+sample taken with a dashboard open is a different number and not a disappointing one.
+
+**And then, separately: the plugin should report its own cost.** It can read `/proc/self/stat` and
+put its share of a core into `/thermal/stats`, so the control page can say "using 12% of a core"
+and the question stops needing ssh at all. It is a small feature and an honest one for a plugin
+whose whole design tension is what it costs the printer, which is exactly why it is written here
+rather than smuggled into the change above.
+
 ## 8. Alternatives considered and rejected
 
 **A v4l2loopback virtual camera.** Upstream ships a UVC driver that presents the camera as
