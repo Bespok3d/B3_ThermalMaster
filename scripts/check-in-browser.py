@@ -612,6 +612,80 @@ def run_recording_checks(browser, port: int) -> list:
     ]
 
 
+def run_switch_checks(browser, port: int, store) -> list:
+    """Switching the camera off, from both of the two places that offer it.
+
+    The switch is a saved setting rather than a page state, so the thing to check is that a press
+    reaches the plugin and that the button then agrees with what the plugin says. Getting the
+    second half wrong is what made "hold what I see now" look broken: the plugin was right and the
+    page went on showing the old state, so the next press posted a stale answer.
+
+    Nothing here drives the capture loop, which is where the camera is actually released. That has
+    tests of its own; what cannot be tested from Python is whether two buttons and a saved setting
+    stay in step.
+    """
+
+    def switched() -> bool:
+        return store.camera_snapshot()[1].streaming
+
+    page = browser.new_page(viewport={"width": 900, "height": 700})
+    page.goto(f"http://127.0.0.1:{port}/view", wait_until="domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    offered = page.inner_text("#stream")
+    page.click("#stream")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    stopped = switched()
+    says_start = page.inner_text("#stream")
+
+    # The settings page, opened while the camera is off, has to come up saying Start.
+    settings = browser.new_page(viewport={"width": 900, "height": 700})
+    navigated = {"yes": False}
+    settings.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
+    settings.on("framenavigated", lambda _frame: navigated.update(yes=True))
+    settings.wait_for_timeout(SETTLE_MILLISECONDS)
+    settings_offers = settings.inner_text("#stream-switch")
+    told = settings.inner_text("#device-status")
+    settings.click("#stream-switch")
+    settings.wait_for_timeout(SETTLE_MILLISECONDS)
+    started = switched()
+    settings_then_offers = settings.inner_text("#stream-switch")
+
+    # The viewer has been showing a Start button for a camera the settings page turned back on.
+    # Coming to the front is what makes it ask again. The event is dispatched rather than waited
+    # for, because a headless browser never hides a page and so never fires it by itself: what is
+    # being checked is the handler and the fetch behind it, which are the parts that can be wrong.
+    page.bring_to_front()
+    page.evaluate('() => document.dispatchEvent(new Event("visibilitychange"))')
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    caught_up = page.inner_text("#stream")
+    page.click("#stream")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    stopped_again = switched()
+    page.close()
+    settings.close()
+    store.update_camera(streamer_camera_on(store))
+    return [
+        ("the viewer offers to stop a running camera", offered, "Stop"),
+        ("pressing it switches the plugin off", stopped, False),
+        ("and the button then offers to start it", says_start, "Start"),
+        ("the settings page agrees the camera is off", settings_offers, "Start the camera"),
+        ("and says so in words", "switched off" in told, True),
+        ("starting from the settings page works", started, True),
+        ("without reloading the page", navigated["yes"], False),
+        ("and relabels the button", settings_then_offers, "Stop the camera"),
+        ("coming back to the viewer catches it up", caught_up, "Stop"),
+        ("and it can stop the camera again", stopped_again, False),
+    ]
+
+
+def streamer_camera_on(store):
+    """The camera settings with streaming back on, so later sections start from a live camera."""
+
+    import dataclasses
+
+    return dataclasses.replace(store.camera_snapshot()[1], streaming=True)
+
+
 def run_navigation_checks(browser, port: int) -> list:
     """Getting to the settings and back, the way a tile does it.
 
@@ -753,6 +827,9 @@ def main() -> None:
         print("")
         print("recording")
         report(run_recording_checks(browser, PORT), problems)
+        print("")
+        print("the off switch")
+        report(run_switch_checks(browser, PORT, store), problems)
         print("")
         print("getting there and back")
         report(run_navigation_checks(browser, PORT), problems)

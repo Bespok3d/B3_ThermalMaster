@@ -32,6 +32,11 @@ from p3_camera import (  # type: ignore[import-not-found]
     get_model_config,
 )
 
+# The placeholder for the switched off state. Rendering is the other half of this module's job,
+# so importing it here is the direction the dependencies already run: pipeline knows nothing about
+# the camera, and this is the one picture the capture loop produces without one.
+from .pipeline import stream_off_jpeg
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -95,6 +100,16 @@ SHUTTER_ACTION = "shutter"
 LOCK_RANGE_ACTION = "lock-range"
 
 
+# And the switch, which arrives in the same field for the same reason. Buttons rather than a tick
+# box because a posted form cannot say "leave everything else alone": an unticked box and an absent
+# one are the same bytes, so any post that did not think to mention streaming would switch the
+# camera off. A button is only in the body when it is the thing that was pressed.
+STOP_STREAM_ACTION = "stop-stream"
+
+
+START_STREAM_ACTION = "start-stream"
+
+
 # How many reads in a row may come back empty before the camera counts as stalled rather than slow.
 # At the idle sleep below this is a fifth of a second of nothing, where a healthy camera delivers
 # twenty-five frames a second.
@@ -119,6 +134,13 @@ SUPPORTED_MODELS = (Model.P1, Model.P3)
 FRAME_IDLE_SLEEP_SECONDS = 0.01
 
 
+# How often the placeholder is republished while the switch is off. Nothing is rendered to produce
+# it, since the bytes were encoded once and kept, and what the repetition buys is that the frame a
+# request finds is always fresh: the MJPEG stream keeps ticking over rather than stalling on its
+# last part, and `wake` returns at once instead of waiting out its timeout on every request.
+OFF_REFRESH_SECONDS = 0.5
+
+
 @dataclasses.dataclass(frozen=True)
 class CameraSettings:
     """What gets sent to the hardware, as opposed to what is done with what comes back.
@@ -130,6 +152,12 @@ class CameraSettings:
     """
 
     gain: str = DEFAULT_GAIN
+
+    # Off is deeper than idle: the capture thread never opens the device at all, so the camera can
+    # be unplugged and the printer pays nothing whatsoever. It lives here rather than with the
+    # rendering because it is about the hardware, and it is saved like every other setting because
+    # a reboot should not quietly start burning CPU that somebody had turned off.
+    streaming: bool = True
 
 
 def fire_shutter(camera: P3Camera) -> None:
@@ -191,6 +219,17 @@ class DeviceController:
         self._applied_gain_revision: int | None = None
         self._gain_in_effect: str | None = None
 
+    @property
+    def streaming(self) -> bool:
+        """Whether the camera should be running at all. Read fresh every time, never cached.
+
+        The capture loop asks between sessions and again between frames, so pressing Stop is acted
+        on within a frame rather than at whatever the next reconnect would have been.
+        """
+
+        _, settings = self._settings_store.camera_snapshot()
+        return settings.streaming
+
     def request_shutter(self) -> None:
         """Ask for a calibration. Safe from any thread; nothing here touches the camera."""
 
@@ -243,10 +282,14 @@ class DeviceController:
         """What the device is actually doing, as opposed to what it has been asked to do."""
 
         with self._lock:
-            return {
+            said: dict = {
                 "gain": self._gain_in_effect,
                 "shutter": {"state": self._shutter_state, "detail": self._shutter_detail},
             }
+        # Outside the lock: it reads the settings store, which has a lock of its own, and holding
+        # two locks in an order only one call site knows about is how a service stops answering.
+        said["streaming"] = self.streaming
+        return said
 
 
 class CameraStalledError(Exception):
@@ -255,6 +298,12 @@ class CameraStalledError(Exception):
 
 class CameraNotFoundError(Exception):
     """No supported thermal camera is on the USB bus."""
+
+
+def streaming_wanted(device: DeviceController | None) -> bool:
+    """Whether the switch is on. No controller at all means nothing can have turned it off."""
+
+    return device is None or device.streaming
 
 
 def detect_camera_model() -> Model | None:
@@ -306,6 +355,12 @@ def stream_frames(
     consecutive_failures = 0
     idling = False
     while not shutdown.is_set():
+        # Checked here as well as between sessions, so Stop is acted on within one frame. Returning
+        # unwinds through `run_capture_session`, which releases the device on the way out: that is
+        # the whole point of the switch, and leaving it to the next reconnect would mean a camera
+        # that cannot be unplugged until something fails.
+        if not streaming_wanted(device):
+            return
         # Before the read rather than after it, so the first thing a fresh session does is put the
         # camera into the gain the user chose, ahead of any frame being published from the default.
         if device is not None:
@@ -388,14 +443,33 @@ def capture_loop(
     shutdown: threading.Event,
     device: DeviceController | None = None,
 ) -> None:
-    """Keep a capture session running: an unplug or a read error reconnects, it never exits."""
+    """Keep a capture session running: an unplug or a read error reconnects, it never exits.
+
+    Off is neither a failure nor a session. The device is never opened, so it can be unplugged, and
+    the placeholder is published in place of a frame, which is what lets every part of this plugin
+    show the switched off state without a single special case: it arrives by the path a real frame
+    arrives by, so the tile, the viewer and the snapshot all simply display it.
+    """
 
     reconnect_delay = INITIAL_RECONNECT_DELAY_SECONDS
+    was_off = False
     while not shutdown.is_set():
+        if not streaming_wanted(device):
+            frame_store.publish(stream_off_jpeg())
+            was_off = True
+            shutdown.wait(OFF_REFRESH_SECONDS)
+            continue
+        if was_off:
+            # Whatever the renderer is holding describes the scene before the camera was switched
+            # off, and the first frame back should not be averaged with a picture from yesterday.
+            renderer_source.restart()
+            was_off = False
         frames_before_session = frame_store.seen_count
         try:
             run_capture_session(frame_store, renderer_source, shutdown, device)
-            return
+            # Not a return: a session also ends cleanly when the switch goes off, and this loop is
+            # what then publishes the placeholder. The `while` is what ends it on shutdown.
+            continue
         except Exception as error:  # noqa: BLE001
             print(f"thermal-master: capture error: {error}", file=sys.stderr, flush=True)
         if frame_store.seen_count > frames_before_session:

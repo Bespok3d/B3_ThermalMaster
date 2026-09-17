@@ -13,13 +13,14 @@ tenth is the encode, which is the opposite of what every development machine rep
 from __future__ import annotations
 
 import dataclasses
+import functools
 import io
 
 import numpy as np
 from PIL import Image
 
 from .geometry import orient
-from .overlay import Overlay, draw_overlay, encode_upscale
+from .overlay import Overlay, draw_overlay, encode_upscale, stream_off_picture
 from .palettes import PALETTE_STEPS
 from .temperature import (
     DEFAULT_EMISSIVITY,
@@ -416,6 +417,20 @@ class ThermalRenderer:
 
     def render_jpeg(self, thermal_raw: np.ndarray) -> bytes:
         return self.render_frame(thermal_raw).jpeg
+
+
+@functools.lru_cache(maxsize=1)
+def stream_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
+    """The placeholder as a JPEG, ready to publish like any other frame.
+
+    Kept rather than re-encoded, because the capture loop republishes it twice a second for as long
+    as the camera is switched off, and a feature whose whole point is to stop the printer working
+    should not spend a JPEG encode a second saying so.
+    """
+
+    buffer = io.BytesIO()
+    stream_off_picture().save(buffer, format="JPEG", quality=quality)
+    return buffer.getvalue()
 
 
 def resampling(upscale_filter: str) -> Image.Resampling:

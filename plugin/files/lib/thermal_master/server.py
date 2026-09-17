@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, cast
 from urllib.parse import parse_qs, urlparse
 
 from .camera import LOCK_RANGE_ACTION, SHUTTER_ACTION, SHUTTER_FIELD, SHUTTER_PENDING
+from .cost import ProcessCost, describe_cost
 from .page import describe_device, render_control_page
 from .palettes import build_palettes
 from .settings import (
@@ -234,6 +235,9 @@ class ThermalServer(ThreadingHTTPServer):
         device: DeviceController | None = None,
     ) -> None:
         super().__init__(address, ThermalRequestHandler)
+        # Started here rather than at the first request, so "since the service started" means what
+        # it says rather than "since somebody first asked".
+        self.cost = ProcessCost()
         self.frame_store = frame_store
         self.settings_store = settings_store
         self.palettes = palettes if palettes is not None else build_palettes()
@@ -278,6 +282,10 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
     @property
     def device(self) -> DeviceController | None:
         return self.thermal_server.device
+
+    @property
+    def cost(self) -> ProcessCost:
+        return self.thermal_server.cost
 
     def do_GET(self) -> None:
         route = resolve_route(self.path)
@@ -351,6 +359,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             _, _, settings = self.settings_store.snapshot()
             units = settings.units
         payload = stats.as_dict(units)
+        payload["cost"] = self.cost.reading()
         if self.device is not None:
             payload["device"] = self.device.status()
         self.send_json(payload)
@@ -370,6 +379,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         payload = settings_store.as_dict()
         status = self.device.status() if self.device is not None else None
         payload["device"] = describe_device(status)
+        payload["cost"] = describe_cost(self.cost.reading())
         payload["pending"] = bool(
             status is not None and status.get("shutter", {}).get("state") == SHUTTER_PENDING
         )
@@ -463,7 +473,12 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             return
         status = self.device.status() if self.device is not None else None
         self.send_html(
-            render_control_page(self.settings_store.as_dict(), sorted(self.palettes), status)
+            render_control_page(
+                self.settings_store.as_dict(),
+                sorted(self.palettes),
+                status,
+                describe_cost(self.cost.reading()),
+            )
         )
 
     def send_json(self, payload: dict) -> None:

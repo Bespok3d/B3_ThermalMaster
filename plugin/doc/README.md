@@ -174,6 +174,32 @@ A dashboard tile keeps the stream open, so the camera stays live for as long as 
 screen. The idling is for the hours when nothing is open at all, which on the printer this was
 written for was most of them.
 
+**Off is the deeper version of the same idea, and it is a button.** Stop, on the settings page or
+in the camera view's toolbar, releases the USB device: nothing is read, nothing is rendered, and
+the camera can be unplugged. Start brings it back. Measured on the printer with the camera off and
+nothing open, the plugin used 0.0% of a core over half a minute, against 4.6% idling and 40.6%
+before any of this existed.
+
+While it is off, everything that shows the camera shows a "Stream off" picture naming the button
+that restarts it, rather than a broken image or an error, because that picture travels the same
+path a real frame does. `/thermal/frame.bin` and `/thermal/stats` refuse while it is off, since
+there are no temperatures behind a picture of words.
+
+The switch is saved with everything else, so a printer that reboots overnight comes back the way
+you left it. That is deliberate: a reboot should not quietly start burning processor time somebody
+had turned off, and the placeholder is what makes the state discoverable when it does come back.
+
+### What it says it costs
+
+Since 0.25.0 the settings page carries a line saying what this plugin is using, read from the
+kernel rather than estimated, and it refreshes every few seconds while that page is open. Two
+figures: what it is using now, and what it has averaged since the service started. The same
+numbers are in `/thermal/stats` under `cost`.
+
+The printer has four cores, so 100% of one core is a quarter of the machine, and the figure can
+pass 100% because the plugin has more than one thread. It reads highest on the settings page
+itself, which holds a live stream open and is therefore somebody watching.
+
 ## The display range
 
 Two ways to decide what the colours mean, on the settings page.

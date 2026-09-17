@@ -1923,25 +1923,102 @@ waits briefly for a fresh frame, because serving what was last published could h
 hour old picture. The auto-ranging should start clean on waking, since its smoothed bounds are as
 old as the idle.
 
-**Off, which is a switch and a deeper state.** It releases the USB device, so nothing runs and the
-camera can be unplugged, and it publishes a rendered placeholder as the current frame: "Stream off"
-as a title, and a line naming the button that brings it back. Everything then shows that with no
-error states, because it arrives through the same path a real frame does. `/thermal/frame.bin`
-refuses instead, since there are no temperatures behind a picture of words, and the viewer should
-say "no frame" rather than read numbers off it. The switch belongs on the settings page and in the
-viewer toolbar, hidden in a narrow tile as Rec and Spot are, and it survives a restart: a reboot
-should not quietly start burning CPU somebody turned off, and the placeholder is what makes that
-discoverable.
+**Confirmed on the printer, 0.23.0:** 4.6% of a core with nothing open, against 40.6% before, a
+drop of 89%. The two watched states did not move, 41.9% with a tile visible and 45.7% with somebody
+pointing, which is the half that would have been a bug: an open tile idling would mean a dead
+picture on the dashboard. What is left is the USB read keeping the camera in step, and that is the
+floor until the device is released.
 
-Measured with `scripts/measure-cpu-on-printer.sh`, before and after, with nothing watching. The
-protocol is part of the measurement: one open tile keeps the plugin fully awake by design, so a
-sample taken with a dashboard open is a different number and not a disappointing one.
+**Off, which is a switch and a deeper state. Shipped in 0.24.0.** It releases the USB device, so
+nothing runs and the camera can be unplugged, and it publishes a rendered placeholder as the
+current frame: "Stream off" as a title, and a line naming the button that brings it back.
+Everything then shows that with no error states, because it arrives through the same path a real
+frame does. `/thermal/frame.bin` refuses instead, since there are no temperatures behind a picture
+of words, and the viewer says "no frame" rather than reading numbers off it. The switch is on the
+settings page and in the viewer toolbar, hidden in a narrow tile as Rec and Spot are, and it
+survives a restart: a reboot should not quietly start burning CPU somebody turned off, and the
+placeholder is what makes that discoverable.
 
-**And then, separately: the plugin should report its own cost.** It can read `/proc/self/stat` and
-put its share of a core into `/thermal/stats`, so the control page can say "using 12% of a core"
-and the question stops needing ssh at all. It is a small feature and an honest one for a plugin
-whose whole design tension is what it costs the printer, which is exactly why it is written here
-rather than smuggled into the change above.
+Three decisions worth writing down, because each had a worse obvious alternative:
+
+- The placeholder is republished twice a second rather than once. Publishing once would leave the
+  MJPEG stream stalled on its last part and make every request wait out `wake`'s timeout before
+  being answered. Repeating it costs nothing, because the JPEG is encoded once and kept.
+- The state is a saved setting rather than a command with a flag beside it. That is what makes it
+  survive a restart for free, and it lets the capture loop ask "should I be running" between frames
+  as well as between sessions, so Stop is acted on within one frame instead of at the next
+  reconnect.
+- The viewer re-reads the settings whenever it comes back to the front. The switch is the
+  plugin's, so the settings page or another browser can change it while the viewer is not looking,
+  and a toolbar button showing the state from before that is worse than one a moment late. It costs
+  nothing when nobody returns, which is the constraint this whole phase is under.
+- Stopping mid-session returns from `stream_frames` rather than setting a flag somewhere. Returning
+  unwinds through `run_capture_session`, whose `finally` is what hands the USB interface back, so
+  releasing the camera goes down the path that was already tested rather than a second one written
+  for this.
+
+**Confirmed on the printer, 0.24.0, 2026-09-17:** 0.0% of one core over a 30 second window, after
+70 seconds of quiet, with the camera switched off and nothing open. Not "small enough to ignore":
+the kernel's own counter did not move at all, which is what a process that is sleeping on an event
+and doing nothing else looks like. Start and stop were exercised on hardware first.
+
+That completes the sequence for this phase: 40.6% of a core before any of it, 4.6% once the plugin
+stopped rendering into an empty room, and 0.0% once it stops reading the camera as well. The
+measurement was taken with `scripts/measure-cpu-on-printer.sh`, and the protocol is part of it: one
+open tile keeps the plugin fully awake by design, so a sample taken with a dashboard open is a
+different number and not a disappointing one.
+
+**And then, separately: the plugin reports its own cost. Shipped in 0.25.0.** It reads
+`/proc/self/stat` and puts its share of a core into `/thermal/stats` and onto the control page, so
+the question stops needing ssh at all. An honest feature for a plugin whose whole design tension is
+what it costs the printer, which is why it was written here rather than smuggled into the change
+above.
+
+Two numbers rather than one. Recent, over a window of at least two seconds, is what changes when a
+tile is opened or the camera is switched off; since the service started is the fair figure for a
+plugin that sleeps most of the day, and it is the one that is available immediately. Below a couple
+of seconds the window is mostly scheduling noise, so a request that arrives sooner is answered with
+the previous answer rather than with a division nobody should trust.
+
+No thread and no timer behind it: a feature about not working in the background is a poor place to
+start a background loop, so a reading is taken on the request that asks for one. The page polls it
+every five seconds, which is free in the one place it happens, because a settings page holds a
+video stream open and so the plugin is fully awake for as long as anybody is there to read the
+number.
+
+### Phase 7h: the repository README, which is a year out of date
+
+Reported by the maintainer, and it is worse than one stale section. `README.md` at the root of the
+repository still describes the project as it was planned rather than as it is, and somebody
+arriving at the repository reads it first.
+
+What is wrong, in the order a reader hits it:
+
+- **The name.** The title is `thermal-p1` and the opening paragraph is about the P1 only. The
+  plugin has driven both models since 0.5.0, the package is `thermal-master`, and the repository is
+  `B3_ThermalMaster_P1_P3`.
+- **"At 160x120 / ~25fps the work is trivial for the CPU."** It was not. It was 62.5% of a core
+  before Phase 5 and 40.6% before Phase 7g, and three phases of this roadmap exist because of it.
+  The sentence should say what it actually costs and point at the idle and off behaviour.
+- **The layout block.** It lists `files/bin/` as "hand-maintained Python" with no mention of
+  `files/lib/`, which is where the whole plugin now lives, and no mention of `plugin/tests/` or
+  `files/wheels/`. It names `scripts/pack.sh` and `scripts/generate-atom.mjs`, neither of which
+  exists: `b3-builder` replaced both in Phase 0. It does not name `scripts/check.sh`, which is the
+  one script a contributor has to run.
+- **"Not verified on hardware yet."** Flatly untrue since Phase 2. Every release from 0.5.0 onwards
+  has been confirmed on the maintainer's printer, and this roadmap records the measurements. The
+  section should be replaced by the hardware status that `plugin/doc/README.md` already carries
+  correctly: the P1 is exercised continuously, the P3 is implemented and untried.
+- **The vendoring and release sections** are broadly right and worth re-reading against
+  `VENDORING.md` and the workflow rather than trusted.
+
+`plugin/doc/README.md`, the one that ships inside the package and is rendered in the app, has been
+kept current throughout and is the model for what the root one should say. The two have different
+jobs: the shipped one is for somebody using the plugin, the root one is for somebody opening the
+repository, and the second has been reading like a plan for a plugin that does not exist yet.
+
+Worth doing as its own pass rather than folded into a feature, because the failure mode is a
+reader believing it.
 
 ## 8. Alternatives considered and rejected
 

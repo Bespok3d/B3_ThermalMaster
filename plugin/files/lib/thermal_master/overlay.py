@@ -521,6 +521,49 @@ def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
         draw_marker(image, marker, overlay, style, placed)
 
 
+# What the picture says while the stream is switched off. Two lines rather than one, because
+# "Stream off" alone tells somebody what has happened and not what to do about it, and the place
+# this is read is a dashboard tile with no other explanation anywhere near it.
+STREAM_OFF_TITLE = "Stream off"
+STREAM_OFF_HINT = "Press Start to turn the camera back on"
+
+
+# The size it is drawn at. Nothing is streaming, so there is no frame to take a shape from, and
+# this is what the sensor produces doubled: big enough for the text, small enough to be honest
+# about what the camera would give.
+STREAM_OFF_SIZE = (320, 240)
+
+
+@functools.lru_cache(maxsize=1)
+def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
+    """The placeholder, drawn once and kept.
+
+    A picture rather than an error, because it travels the same path a real frame does: the tile,
+    the viewer, the snapshot and anything else showing the camera all display it without a single
+    special case, and each of them says what has happened rather than showing a broken image.
+    """
+
+    picture = Image.new("RGB", size, (16, 18, 22))
+    style = overlay_style(size, colorbar=False)
+    title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
+    draw = ImageDraw.Draw(picture)
+    title_width = label_width(STREAM_OFF_TITLE, title_height)
+    draw.text(
+        ((size[0] - title_width) / 2, size[1] / 2 - title_height),
+        STREAM_OFF_TITLE,
+        font=overlay_font(title_height),
+        fill=OVERLAY_TEXT_RGB,
+    )
+    hint_width = label_width(STREAM_OFF_HINT, style.pixel_height)
+    draw.text(
+        ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height / 2),
+        STREAM_OFF_HINT,
+        font=overlay_font(style.pixel_height),
+        fill=(154, 160, 170),
+    )
+    return picture
+
+
 def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:
     """The upscale actually used, which the overlay can raise but never lower.
 

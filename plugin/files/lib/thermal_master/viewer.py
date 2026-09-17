@@ -127,7 +127,11 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
   @media (max-width: 380px) {{
     .tools .record {{ display: none; }}
     .tools .spots {{ display: none; }}
+    .tools .stream {{ display: none; }}
   }}
+  /* Switching the camera off is not a mode, so it does not get the toolbar's orange. It is closer
+     to what Fit is: a thing you press, which then reports what it did by changing its own word. */
+  .tools .stream[data-streaming="false"] {{ border-color: #4a7f5c; color: #9fd8b4; }}
   .tools button[disabled] {{ opacity: 0.4; cursor: default; }}
   /* Not the toolbar's orange. A recording is running until you stop it, and it should not look
      like one more thing that is merely switched on. */
@@ -167,6 +171,8 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
       <button type="button" id="shot" title="Save image">Save</button>
       <button type="button" id="record" class="record" aria-pressed="false"
               title="Record video">Rec</button>
+      <button type="button" id="stream" class="stream" data-streaming="true"
+              title="Stop the camera and release it">Stop</button>
     </div>
   </div>
   <div class="panel">
@@ -211,6 +217,7 @@ VIEWER_SCRIPT = """
   var unitsButton = document.getElementById("units");
   var shotButton = document.getElementById("shot");
   var recordButton = document.getElementById("record");
+  var streamButton = document.getElementById("stream");
   var spotButton = document.getElementById("mode-spot");
   var clearSpotsButton = document.getElementById("spots-clear");
   var regionGroup = document.getElementById("region-group");
@@ -244,6 +251,9 @@ VIEWER_SCRIPT = """
   var spots = [];
   var panFrom = null;
   var units = "celsius";
+  // Assumed on until the plugin says otherwise, which it does a moment later. Guessing off would
+  // show a Start button over a picture that is plainly moving.
+  var streaming = true;
 
   var frame = null;          // {width, height, scale, values}
   var region = null;         // {left, top, right, bottom} in frame pixels, inclusive
@@ -762,6 +772,33 @@ VIEWER_SCRIPT = """
     pushUnits(units === "fahrenheit" ? "celsius" : "fahrenheit");
   });
 
+  // Off is the plugin's state and not this page's: it releases the camera, so a second browser and
+  // the dashboard tile are looking at the same switch. Hence asking for it and then believing the
+  // answer, rather than flipping a local flag and hoping.
+  function showStream() {
+    streamButton.textContent = streaming ? "Stop" : "Start";
+    streamButton.title = streaming ? "Stop the camera and release it"
+                                   : "Start the camera again";
+    streamButton.setAttribute("data-streaming", streaming ? "true" : "false");
+  }
+
+  function pushStream(next) {
+    fetch("settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ streaming: next })
+    }).then(function (reply) {
+      return reply.ok ? reply.json() : Promise.reject(reply.status);
+    }).then(function (state) {
+      streaming = state.streaming !== false;
+      showStream();
+    }).catch(function () {
+      // The plugin refused or is not there; leave the button saying what is actually in force.
+    });
+  }
+
+  streamButton.addEventListener("click", function () { pushStream(!streaming); });
+
   function stamp() {
     var now = new Date();
     function two(value) { return String(value).padStart(2, "0"); }
@@ -935,22 +972,41 @@ VIEWER_SCRIPT = """
     recordButton.title = "This browser cannot record video";
   })();
 
-  // The unit in force belongs to the plugin, so it is asked for rather than assumed.
-  fetch("settings", { headers: { "Accept": "application/json" } })
-    .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
-    .then(function (state) {
-      units = state.units;
-      spots = Array.isArray(state.spots) ? state.spots : [];
-      showUnits();
-      showSpots();
-    })
-    .catch(function () { showUnits(); });
+  // The unit, the spots and the switch all belong to the plugin rather than to this page, so they
+  // are asked for rather than assumed.
+  function adopt(state) {
+    units = state.units;
+    spots = Array.isArray(state.spots) ? state.spots : [];
+    streaming = state.streaming !== false;
+    showUnits();
+    showSpots();
+    showStream();
+  }
+
+  function readSettings() {
+    return fetch("settings", { headers: { "Accept": "application/json" } })
+      .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
+      .then(adopt);
+  }
+
+  readSettings().catch(function () { showUnits(); });
+
+  // Asked for again whenever this page comes back to the front. They are the plugin's settings, so
+  // the settings form in another tab, a second browser, or the dashboard can have changed them
+  // while this page was not looking, and a toolbar button showing the state from before that is
+  // worse than one that is merely a moment late. Free, because it happens when a person returns
+  // rather than on a timer: an unwatched viewer still fetches nothing.
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { return; }
+    readSettings().catch(function () {});
+  });
 
   window.addEventListener("resize", paint);
   feed.addEventListener("load", paint);
   recallRegion();
   setMode("measure");
   showSpots();
+  showStream();
   // Painted once at startup, and this is not a nicety. The picture element is positioned by paint
   // rather than by the stylesheet, so until something calls it the image is nought by nought and
   // the page is blank. Before this, a viewer opened with no region showed nothing at all until the

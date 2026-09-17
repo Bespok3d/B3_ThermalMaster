@@ -18,8 +18,11 @@ from .camera import (
     SHUTTER_FAILED,
     SHUTTER_IDLE,
     SHUTTER_PENDING,
+    START_STREAM_ACTION,
+    STOP_STREAM_ACTION,
     VALID_GAINS,
 )
+from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 
@@ -37,6 +40,20 @@ RANGE_MODE_DESCRIPTIONS = {
     "auto": "Follow the scene",
     "fixed": "Hold these temperatures",
 }
+
+
+# What the switch says, and what pressing it asks for. Labelled by what it will do rather than by
+# what is happening, which is the convention every play button follows, and the word on it is the
+# word the placeholder picture tells people to look for.
+STREAM_SWITCH = {
+    True: (STOP_STREAM_ACTION, "Stop the camera"),
+    False: (START_STREAM_ACTION, "Start the camera"),
+}
+
+
+# How often the page asks what the plugin is costing. Slow enough to be free and fast enough that
+# switching the camera off in one window is visible in the number a moment later.
+COST_POLL_MILLISECONDS = 5000
 
 
 CONTROL_PAGE_TEMPLATE = """<!doctype html>
@@ -125,7 +142,10 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
       <button type="submit">Apply</button>
       <button type="submit" name="command" value="shutter">Calibrate now</button>
+      <button type="submit" name="command" value="{stream_command}"
+              id="stream-switch">{stream_label}</button>
       <p class="status" id="device-status">{device_status}</p>
+      <p class="status" id="plugin-cost">{plugin_cost}</p>
     </fieldset>
   </form>
   <p>Following the scene maps the coldest and hottest thing in view to the ends of the palette, so
@@ -152,6 +172,17 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
   <p>Emissivity is how much of what a surface radiates is its own heat rather than a reflection of
      the room, so a shiny surface reads cold until you tell the plugin it is shiny. It changes the
      numbers only, never the picture.</p>
+  <p>The cost line is this plugin's own share of the printer's processor, read from the kernel
+     rather than estimated, and it updates while this page is open. The printer has four cores, so
+     100% of one core is a quarter of the machine, and the figure can pass 100% because the plugin
+     has more than one thread. Expect it to be highest here, because a settings page is a live
+     stream and a live stream is somebody watching.</p>
+  <p>Stopping the camera releases it completely: nothing is read, nothing is rendered, and the
+     printer pays nothing at all for having the plugin installed. Everything that shows the camera
+     shows a "Stream off" picture instead of an error, and the temperatures behind it stop being
+     offered, because there are none behind a picture of words. It survives a restart, so a printer
+     that reboots overnight comes back the way you left it. The same switch is in the camera
+     view's toolbar.</p>
   <p>Calibration closes the camera's internal shutter for a moment and re-levels the sensor against
      it. The camera does this by itself about every ninety seconds; the button is for when the
      picture has drifted and you would rather not wait. It costs one frame.</p>
@@ -171,6 +202,8 @@ CONTROL_SCRIPT = """<script>
 (function () {
   var form = document.getElementById("controls");
   var line = document.getElementById("device-status");
+  var streamSwitch = document.getElementById("stream-switch");
+  var costLine = document.getElementById("plugin-cost");
   if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
   // getAttribute, not form.action. A named control shadows a form property of the same name, so
   // form.action is only the URL as long as nothing in the form is called "action". The attribute
@@ -218,6 +251,8 @@ CONTROL_SCRIPT = """<script>
   function show(state) {
     line.textContent = state.device;
     reflect(state);
+    showStream(state);
+    showCost(state);
     // A calibration is applied by the capture thread between two frames, so the answer to the post
     // itself is always "requested". Ask again a few times, briefly, for what actually happened.
     if (state.pending && polls < 8) {
@@ -243,6 +278,33 @@ CONTROL_SCRIPT = """<script>
         choose(field, state[field.name]);
       }
     }
+  }
+
+  function showCost(state) {
+    if (costLine && typeof state.cost === "string") { costLine.textContent = state.cost; }
+  }
+
+  // Asked for on its own timer, and only this line is touched with the answer. Running the whole
+  // of `show` would reflect every setting back into the form every few seconds, which is a fine
+  // way to overwrite a select somebody is halfway through changing. The request itself is free:
+  // it reads no frame and wakes nothing, and this page is holding a video stream open anyway, so
+  // the plugin is fully awake for as long as anyone is here to read the number.
+  function pollCost() {
+    fetch(endpoint, { headers: { "Accept": "application/json" } })
+      .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
+      .then(showCost)
+      .catch(function () {});
+  }
+
+  if (costLine) { setInterval(pollCost, COST_POLL_MS); }
+
+  // The one control the loop above cannot handle: it is a button, so its name is "command" and
+  // not the name of a setting, and what has to change is the label and the value it posts rather
+  // than a field's contents.
+  function showStream(state) {
+    if (!streamSwitch || typeof state.streaming !== "boolean") { return; }
+    streamSwitch.value = state.streaming ? "stop-stream" : "start-stream";
+    streamSwitch.textContent = state.streaming ? "Stop the camera" : "Start the camera";
   }
 
   // A select only takes a string one of its options actually carries, and this page writes some of
@@ -273,6 +335,8 @@ def describe_device(status: dict | None) -> str:
 
     if status is None:
         return "Camera state is not available."
+    if status.get("streaming") is False:
+        return "The camera is switched off. Nothing is being read and nothing is being rendered."
     shutter = status.get("shutter", {})
     detail = shutter.get("detail")
     said = {
@@ -285,14 +349,21 @@ def describe_device(status: dict | None) -> str:
 
 
 def render_control_page(
-    settings: dict, palette_names: list, device_status: dict | None = None
+    settings: dict,
+    palette_names: list,
+    device_status: dict | None = None,
+    cost: str | None = None,
 ) -> str:
     """The page itself. Plain form, no JavaScript: it has to work in whatever opens it."""
 
     def option(value: str, label: str, selected: bool) -> str:
         return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
 
+    stream_command, stream_label = STREAM_SWITCH[bool(settings["streaming"])]
     return CONTROL_PAGE_TEMPLATE.format(
+        plugin_cost=cost if cost is not None else describe_cost(None),
+        stream_command=stream_command,
+        stream_label=stream_label,
         emissivity_options="".join(
             option(f"{value:.2f}", label, abs(value - settings["emissivity"]) < EMISSIVITY_MATCH)
             for value, label in EMISSIVITY_PRESETS
@@ -302,7 +373,7 @@ def render_control_page(
             for name in VALID_GAINS
         ),
         device_status=describe_device(device_status),
-        control_script=CONTROL_SCRIPT,
+        control_script=CONTROL_SCRIPT.replace("COST_POLL_MS", str(COST_POLL_MILLISECONDS)),
         palette_options="".join(
             option(name, name.replace("-", " "), name == settings["palette"])
             for name in palette_names

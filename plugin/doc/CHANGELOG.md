@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.25.0
+
+- **The plugin says what it is costing the printer.** The settings page carries a line reading its
+  own share of the processor straight from the kernel, updated every few seconds while the page is
+  open, so the question no longer needs ssh and a shell script.
+- Two numbers, because they answer different things: what it is using now, which changes when you
+  open a tile or switch the camera off, and what it has averaged since the service started, which
+  is the fair figure for a plugin that sleeps most of the day.
+- The same numbers are in `/thermal/stats` for anything that would rather draw its own.
+
+The printer has four cores, so 100% of one core is a quarter of the machine, and the figure can
+pass 100% because the plugin has more than one thread.
+
+## 0.24.0
+
+- **You can switch the camera off.** A Stop button on the settings page and in the camera view's
+  toolbar releases the USB device completely: nothing is read, nothing is rendered, and the camera
+  can be unplugged. Press Start to bring it back.
+- While it is off, everything that shows the camera shows a "Stream off" picture telling you which
+  button brings it back, rather than a broken image or an error. The temperatures behind the
+  picture stop being offered, because there are none behind a picture of words.
+- The switch survives a restart, so a printer that reboots overnight comes back the way you left
+  it.
+
+This is the deeper half of what 0.23.0 started. Idling stops the rendering and keeps the camera in
+step so that waking costs one frame; off gives the camera back to the printer entirely.
+
 ## 0.23.0
 
 - **The plugin stops working when nobody is watching.** A minute after the last request for a

@@ -235,8 +235,6 @@ plugin/files/vendor/*
 !plugin/files/vendor/LICENSE.p3-ir-camera
 plugin/files/wheels/
 
-thermal-camera-P3-viewer/
-thermal-camera-P3-viewer/*
 # macOS turds. These are payload if they land under plugin/files, and the daemon refuses a package
 # holding an archive member its manifest does not list.
 .DS_Store

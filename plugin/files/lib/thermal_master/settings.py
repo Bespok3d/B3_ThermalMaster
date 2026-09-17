@@ -13,11 +13,17 @@ import dataclasses
 import json
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
-from .camera import VALID_GAINS, CameraSettings
+from .camera import (
+    SHUTTER_FIELD,
+    START_STREAM_ACTION,
+    STOP_STREAM_ACTION,
+    VALID_GAINS,
+    CameraSettings,
+)
 from .pipeline import (
     FIXED_RANGE,
     VALID_RANGE_MODES,
@@ -359,10 +365,33 @@ def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -
     )
 
 
-def camera_settings_from_json(payload: dict, current: CameraSettings) -> CameraSettings:
-    if payload.get("gain") in VALID_GAINS:
-        return dataclasses.replace(current, gain=payload["gain"])
+def switched_stream(commands: Sequence[object], current: CameraSettings) -> CameraSettings:
+    """The Start and Stop buttons, which set a saved setting rather than send a command.
+
+    Stop wins if both somehow arrive in one body. A request that asks for two opposite things is
+    confused, and the reading of a confused request that does less work is the safer one.
+    """
+
+    if STOP_STREAM_ACTION in commands:
+        return dataclasses.replace(current, streaming=False)
+    if START_STREAM_ACTION in commands:
+        return dataclasses.replace(current, streaming=True)
     return current
+
+
+def camera_settings_from_json(payload: dict, current: CameraSettings) -> CameraSettings:
+    """Two spellings of the switch, because two different pages press it.
+
+    The settings form has a button, so it arrives as a command; the viewer's toolbar has a toggle
+    that knows which way it is going, so it says so outright. Same setting either way.
+    """
+
+    updated = current
+    if payload.get("gain") in VALID_GAINS:
+        updated = dataclasses.replace(updated, gain=payload["gain"])
+    if isinstance(payload.get("streaming"), bool):
+        updated = dataclasses.replace(updated, streaming=payload["streaming"])
+    return switched_stream([payload.get(SHUTTER_FIELD)], updated)
 
 
 def clamped_emissivity(value: object, current: float) -> float:
@@ -390,7 +419,8 @@ def camera_settings_from_form(form: dict, current: CameraSettings) -> CameraSett
     """The half of the form that becomes a USB command rather than a rendering choice."""
 
     gain = form.get("gain", [""])[0]
-    return dataclasses.replace(current, gain=gain if gain in VALID_GAINS else current.gain)
+    updated = dataclasses.replace(current, gain=gain if gain in VALID_GAINS else current.gain)
+    return switched_stream(form.get(SHUTTER_FIELD, []), updated)
 
 
 class RendererSource:
