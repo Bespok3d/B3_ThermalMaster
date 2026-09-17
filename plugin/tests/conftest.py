@@ -83,6 +83,39 @@ def renderer_source(thermal_streamer):
 
 
 @pytest.fixture
+def palettes(thermal_streamer):
+    """The built palettes. Four test files had written this line for themselves."""
+
+    return thermal_streamer.build_palettes()
+
+
+@pytest.fixture
+def settings_dict(thermal_streamer):
+    """A settings dictionary shaped exactly like the one the plugin hands its own page.
+
+    Hand written literals kept going stale here: every new setting broke two tests that had no
+    opinion about it, and the fix each time was to paste one more key. Built from the real
+    dataclasses instead, so a test says only what it cares about and the rest comes along.
+    """
+
+    import dataclasses
+
+    def build(palette: str = "ironbow", **overrides):
+        camera_fields = {field.name for field in
+                         dataclasses.fields(thermal_streamer.CameraSettings())}
+        camera = {key: overrides.pop(key) for key in list(overrides) if key in camera_fields}
+        store = thermal_streamer.SettingsStore(
+            palette,
+            dataclasses.replace(thermal_streamer.RenderSettings(), **overrides),
+            None,
+            dataclasses.replace(thermal_streamer.CameraSettings(), **camera),
+        )
+        return store.as_dict()
+
+    return build
+
+
+@pytest.fixture
 def thermal_ramp_frame():
     """A P1-shaped frame ramping from about 24 C to about 40 C.
 

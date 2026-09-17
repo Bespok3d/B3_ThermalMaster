@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.22.0
+
+- **You can hold the display range.** Until now the colours always followed the scene, which is why
+  the picture re-maps and the ruler jumps when a toolhead crosses the view. The settings page now
+  offers two fixed temperatures instead, and a "Hold what I see now" button that fills them in from
+  the picture in front of you.
+- A held range is what lets you see a bed. Hold 90 to 100 on a bed at 100 C and its own variation
+  gets the whole palette, instead of arriving as one flat colour because the room is also in frame.
+- The ruler follows: on a held range it spans the two temperatures you set and stays put, and a
+  triangle at either end means the scene has gone past it. On auto it is unchanged.
+- Holding costs the printer slightly less than following the scene, because there is nothing to
+  measure.
+
+Your measurements are unaffected either way: every number comes from the sensor rather than from
+the picture.
+
 ## 0.21.0
 
 - **A choice about how the picture is enlarged.** The plugin makes the picture bigger before it

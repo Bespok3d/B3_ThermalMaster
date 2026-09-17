@@ -14,11 +14,6 @@ import pytest
 
 
 @pytest.fixture
-def palettes(thermal_streamer):
-    return thermal_streamer.build_palettes()
-
-
-@pytest.fixture
 def store(thermal_streamer, tmp_path):
     settings = thermal_streamer.RenderSettings()
     return thermal_streamer.SettingsStore("ironbow", settings, tmp_path / "settings.json")
@@ -160,21 +155,11 @@ def test_the_control_page_shows_the_current_state(thermal_streamer, store):
     assert page.count("checked") == 4  # the ruler and the three markers, all on by default
 
 
-def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer):
-    state = {
-        "palette": "sepia",
-        "rotation": 90,
-        "flip_horizontal": True,
-        "flip_vertical": False,
-        "colorbar": False,
-        "reticle": False,
-        "hotspot": False,
-        "coldspot": False,
-        "units": "celsius",
-        "emissivity": 0.95,
-        "upscale_filter": "smooth",
-        "gain": "high",
-    }
+def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer, settings_dict):
+    state = settings_dict(
+        palette="sepia", rotation=90, flip_horizontal=True, flip_vertical=False,
+        colorbar=False, reticle=False, hotspot=False, coldspot=False,
+    )
 
     page = thermal_streamer.render_control_page(state, ["ironbow", "sepia"])
 
@@ -190,14 +175,10 @@ def test_the_control_page_offers_the_camera_controls(thermal_streamer, store):
     assert 'name="command" value="shutter"' in page
 
 
-def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer):
-    state = dict(
-        palette="ironbow", rotation=0, flip_horizontal=False, flip_vertical=False,
-        colorbar=True, reticle=True, hotspot=True, coldspot=True,
-        units="celsius", emissivity=0.30, upscale_filter="smooth", gain="high",
+def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer, settings_dict):
+    page = thermal_streamer.render_control_page(
+        settings_dict(emissivity=0.30), ["ironbow"], None
     )
-
-    page = thermal_streamer.render_control_page(state, ["ironbow"], None)
 
     assert '<option value="0.30"' in page
     assert '<option value="0.30" selected' in page

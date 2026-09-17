@@ -1833,6 +1833,44 @@ its own, it just takes a while, which is the retry loop doing exactly what it wa
 Nothing to fix, and nothing was: the diagnosis plan below is kept only because the reasoning about
 `usb.core.find` after a libusb init is worth having if the symptom ever comes back for real.
 
+### Phase 7f: the display range, told rather than measured. Shipped in 0.22.0.
+
+The answer to two complaints that turned out to be one: the ruler moving whenever a toolhead
+crossed the view, and the bed arriving as a flat colour because the room is in frame too. Both are
+the auto-ranging doing its job, and the fix is to let it be switched off.
+
+- **`range_mode` is `auto` or `fixed`.** Fixed carries two temperatures, and the renderer converts
+  them to raw counts once per settings change rather than per frame.
+- **The conversion is a bisection through the driver**, not a formula. `raw_to_celsius_corrected`
+  is the vendored driver's physics, including the emissivity correction, and a hand-inverted copy
+  of it here would be a second physics that can drift. It is monotonic, so twenty-four halvings
+  land inside a hundredth of a degree, and it runs when the settings change.
+- **A told range does not measure one.** `frame_bounds` is not called at all, which is the second
+  most expensive step in the pipeline gone: about 0.9 ms a frame. A test asserts it by making the
+  function raise, because a silent return of that cost is exactly the kind of thing that creeps
+  back.
+- **The ruler follows the mode.** On auto it spans the scene, as since 0.15.0. On fixed it spans
+  the range, so it is a constant reference, and the triangles get their pre-0.15.0 meaning back:
+  something is past this end. That reading only became true again once the scale stopped moving,
+  and on fixed they follow the scene rather than the marker switches, since somebody who turned the
+  hotspot marker off still needs to know the picture is clipping.
+- **"Hold what I see now"** posts through the same `command` field the shutter uses and freezes the
+  range the picture is currently using, rounded to a tenth because it lands in a form field a
+  person then edits. With no frame yet it changes nothing rather than locking to a guess.
+
+Two housekeeping changes came out of the same work, both of them the rule of three arriving:
+
+- `scripts/refresh-facade.py`, because the package facade had been updated by hand four times in a
+  week and each time needed a second round to satisfy ruff's import order. It only adds, since
+  removing an export is a decision.
+- A `settings_dict` fixture and a shared `palettes` fixture in `conftest.py`. Two tests built a
+  settings dictionary from a literal, so every new setting broke tests that had no opinion about
+  it, and four files had written the palettes fixture for themselves.
+
+Still open, and deliberately: the decimation and the dead band for auto mode. The maintainer's
+call is to live with the modes first, because somebody who ends up in fixed mode most of the time
+does not need them.
+
 ## 8. Alternatives considered and rejected
 
 **A v4l2loopback virtual camera.** Upstream ships a UVC driver that presents the camera as

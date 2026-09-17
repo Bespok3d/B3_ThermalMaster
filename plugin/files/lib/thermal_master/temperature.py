@@ -65,6 +65,36 @@ EMISSIVITY_PRESETS = (
 )
 
 
+# A raw count is sixteen bits, so the search below never has to look outside this.
+RAW_COUNT_CEILING = 65535
+
+
+# Halvings of that range. Twenty-four takes the last step below a thousandth of a count, which is
+# far finer than the sensor resolves, and it runs once per settings change rather than per frame.
+RAW_SEARCH_STEPS = 24
+
+
+def raw_for_celsius(celsius: float, emissivity: float = DEFAULT_EMISSIVITY) -> float:
+    """The raw count that reads as this temperature.
+
+    The other direction from `raw_to_celsius_corrected`, and needed because a display range that a
+    person sets is in degrees while the normalisation works in counts. Found by bisection, asking
+    the driver, rather than by inverting its formula here: the emissivity correction is the
+    vendored driver's physics, and a second copy of it in this file is a second physics that can
+    drift from the first. The conversion is monotonic, which is what makes the search valid.
+    """
+
+    environment = EnvParams(emissivity=emissivity)
+    low, high = 0.0, float(RAW_COUNT_CEILING)
+    for _ in range(RAW_SEARCH_STEPS):
+        middle = (low + high) / 2.0
+        if float(raw_to_celsius_corrected(middle, environment)) < celsius:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2.0
+
+
 def to_display_temperature(celsius: float, units: str) -> float:
     """Celsius unless Fahrenheit was asked for. The sensor only ever speaks the one."""
 

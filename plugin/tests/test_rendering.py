@@ -19,11 +19,6 @@ EXPECTED_PALETTES = {"ironbow", "rainbow", "white-hot", "black-hot", "military",
 
 
 @pytest.fixture
-def palettes(thermal_streamer):
-    return thermal_streamer.build_palettes()
-
-
-@pytest.fixture
 def renderer(thermal_streamer, palettes):
     return thermal_streamer.ThermalRenderer(palettes["ironbow"])
 

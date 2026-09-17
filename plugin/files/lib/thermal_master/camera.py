@@ -90,6 +90,11 @@ SHUTTER_FIELD = "command"
 SHUTTER_ACTION = "shutter"
 
 
+# The other thing that arrives in that field. Not a camera command at all, but the field is "what
+# this post is asking for", and a second field would be a second thing for a page to get wrong.
+LOCK_RANGE_ACTION = "lock-range"
+
+
 # How many reads in a row may come back empty before the camera counts as stalled rather than slow.
 # At the idle sleep below this is a fifth of a second of nothing, where a healthy camera delivers
 # twenty-five frames a second.

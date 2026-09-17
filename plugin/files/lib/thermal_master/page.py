@@ -20,7 +20,7 @@ from .camera import (
     SHUTTER_PENDING,
     VALID_GAINS,
 )
-from .pipeline import VALID_ROTATIONS, VALID_UPSCALE_FILTERS
+from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 
 # What the two filters are called on the page. The names are about what a person sees rather than
@@ -29,6 +29,13 @@ from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 UPSCALE_FILTER_DESCRIPTIONS = {
     "smooth": "Smooth",
     "sharp": "Sharp, cheaper",
+}
+
+
+# The two ways the display range is decided, named for what they do rather than for how.
+RANGE_MODE_DESCRIPTIONS = {
+    "auto": "Follow the scene",
+    "fixed": "Hold these temperatures",
 }
 
 
@@ -56,6 +63,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
   label span {{ min-width: 7rem; }}
   select {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
             border: 1px solid #33373f; border-radius: 4px; }}
+  input[type="number"] {{ width: 6rem; padding: 0.35rem; background: #1d2026; color: inherit;
+                          border: 1px solid #33373f; border-radius: 4px; }}
   button {{ margin-top: 0.8rem; margin-right: 0.5rem; padding: 0.5rem 1.1rem; border: 0;
             border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
             cursor: pointer; }}
@@ -85,6 +94,18 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <button type="submit">Apply</button>
     </fieldset>
     <fieldset>
+      <legend>Range</legend>
+      <label><span>Colours</span><select name="range_mode">{range_mode_options}</select></label>
+      <label><span>From</span>
+             <input type="number" name="range_low_celsius" step="0.1"
+                    value="{range_low}"> C</label>
+      <label><span>To</span>
+             <input type="number" name="range_high_celsius" step="0.1"
+                    value="{range_high}"> C</label>
+      <button type="submit">Apply</button>
+      <button type="submit" name="command" value="lock-range">Hold what I see now</button>
+    </fieldset>
+    <fieldset>
       <legend>Readout</legend>
       <label><input type="checkbox" name="colorbar"{colorbar}>
              Temperature ruler down the edge</label>
@@ -107,6 +128,15 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <p class="status" id="device-status">{device_status}</p>
     </fieldset>
   </form>
+  <p>Following the scene maps the coldest and hottest thing in view to the ends of the palette, so
+     contrast is always as good as it can be and a colour means nothing in particular: it changes
+     whenever the scene does, which is what makes the picture breathe when a toolhead crosses it.
+     Holding two temperatures fixes the mapping, so a colour means the same thing in every frame
+     and the ruler becomes a constant reference. Anything outside the held range is drawn in the
+     end colour, and a triangle on the ruler says the scene has gone past it. "Hold what I see now"
+     fills the two boxes from the picture in front of you, which is usually easier than guessing
+     numbers. Holding also costs the printer slightly less work, since there is nothing to
+     measure.</p>
   <p>Enlarging is how the picture is made bigger before the readout is drawn on it, which only
      happens while some part of the readout is switched on. Smooth blends the sensor's pixels;
      sharp leaves them as squares and is about a sixth less work for the printer per frame. Which
@@ -246,6 +276,12 @@ def render_control_page(
             option(str(degrees), f"{degrees} degrees", degrees == settings["rotation"])
             for degrees in VALID_ROTATIONS
         ),
+        range_mode_options="".join(
+            option(name, RANGE_MODE_DESCRIPTIONS[name], name == settings["range_mode"])
+            for name in VALID_RANGE_MODES
+        ),
+        range_low=f"{settings['range_low_celsius']:.1f}",
+        range_high=f"{settings['range_high_celsius']:.1f}",
         upscale_filter_options="".join(
             option(name, UPSCALE_FILTER_DESCRIPTIONS[name], name == settings["upscale_filter"])
             for name in VALID_UPSCALE_FILTERS

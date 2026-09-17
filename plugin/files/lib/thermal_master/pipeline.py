@@ -27,6 +27,7 @@ from .temperature import (
     FrameStats,
     ThermalFrame,
     frame_statistics,
+    raw_for_celsius,
     spot_readings,
 )
 
@@ -54,6 +55,27 @@ VALID_ROTATIONS = (0, 90, 180, 270)
 # then resamples again, and that the viewer throws away outright by asking for the picture
 # pixelated. Whether it is worth it is a question about a particular scene on a particular screen,
 # so it is a setting rather than a decision taken here.
+# How the display range is decided. Auto follows the scene, which is right when you do not know
+# what you are looking at and wrong when you do: a toolhead crossing the view re-maps every colour
+# and moves the ruler with it. Fixed is told two temperatures and stays there, so a colour means
+# the same thing from frame to frame, the ruler is a constant reference, and the percentile pass
+# that auto needs is not run at all.
+AUTO_RANGE = "auto"
+FIXED_RANGE = "fixed"
+VALID_RANGE_MODES = (AUTO_RANGE, FIXED_RANGE)
+
+
+# Where a fixed range starts before anybody has chosen one: a printer at rest, so switching to
+# fixed without typing anything shows something sensible rather than a black rectangle.
+DEFAULT_RANGE_LOW_CELSIUS = 20.0
+DEFAULT_RANGE_HIGH_CELSIUS = 60.0
+
+
+# The narrowest fixed range worth allowing. Below this the picture is two colours and the noise
+# between them.
+MIN_RANGE_SPAN_CELSIUS = 1.0
+
+
 SMOOTH_UPSCALE = "smooth"
 SHARP_UPSCALE = "sharp"
 VALID_UPSCALE_FILTERS = (SMOOTH_UPSCALE, SHARP_UPSCALE)
@@ -113,6 +135,33 @@ def reduce_temporal_noise(
         return halved
     blended = weight * current.astype(np.float32) + (1.0 - weight) * previous.astype(np.float32)
     return blended.astype(np.uint16)
+
+
+def told_bounds(settings: RenderSettings) -> tuple[float, float] | None:
+    """The two raw counts a fixed range means, or None when the range is measured.
+
+    Worked out here, once per settings change, rather than per frame: the conversion from degrees
+    to counts is a search through the driver's own emissivity correction, which is cheap once and
+    silly at frame rate. It depends on the emissivity, which is why it is recomputed whenever the
+    settings are, and never cached across them.
+    """
+
+    if not settings.fixed_range:
+        return None
+    low, high = ordered_range(settings.range_low_celsius, settings.range_high_celsius)
+    return (
+        raw_for_celsius(low, settings.emissivity),
+        raw_for_celsius(high, settings.emissivity),
+    )
+
+
+def ordered_range(low: float, high: float) -> tuple[float, float]:
+    """The two ends the right way round, and far enough apart to be a range at all."""
+
+    low, high = min(low, high), max(low, high)
+    if high - low < MIN_RANGE_SPAN_CELSIUS:
+        high = low + MIN_RANGE_SPAN_CELSIUS
+    return (low, high)
 
 
 def frame_bounds(frame: np.ndarray) -> tuple[float, float]:
@@ -206,6 +255,9 @@ class RenderSettings:
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
     upscale_filter: str = SMOOTH_UPSCALE
+    range_mode: str = AUTO_RANGE
+    range_low_celsius: float = DEFAULT_RANGE_LOW_CELSIUS
+    range_high_celsius: float = DEFAULT_RANGE_HIGH_CELSIUS
     # Places somebody asked to watch, in the orientation the picture is displayed in, capped at
     # MAX_SPOTS. They live here rather than in the browser so that they are burned into the
     # picture: a spot that existed only in one viewer would be missing from the tile, from a
@@ -224,6 +276,12 @@ class RenderSettings:
         return bool(
             self.colorbar or self.reticle or self.hotspot or self.coldspot or self.spots
         )
+
+    @property
+    def fixed_range(self) -> bool:
+        """Whether the display range was told rather than measured."""
+
+        return self.range_mode == FIXED_RANGE
 
     @property
     def mirrors(self) -> tuple[bool, bool]:
@@ -246,6 +304,7 @@ class ThermalRenderer:
         self._settings = settings
         self._bounds: tuple[float, float] | None = None
         self._previous_frame: np.ndarray | None = None
+        self._told_bounds = told_bounds(settings)
 
     @property
     def bounds(self) -> tuple[float, float] | None:
@@ -277,7 +336,10 @@ class ThermalRenderer:
             thermal_raw, self._previous_frame, self._settings.noise_reduction_weight
         )
         self._previous_frame = denoised
-        self._bounds = smooth_bounds(
+        # A told range needs neither measuring nor easing: it is the same two counts every frame,
+        # worked out once when the settings changed. It is also the cheapest frame this plugin can
+        # render, since the percentiles are the second most expensive step in the pipeline.
+        self._bounds = self._told_bounds or smooth_bounds(
             self._bounds, frame_bounds(denoised), self._settings.bounds_smoothing
         )
         # Measured off the denoised frame rather than the raw one, so the number beside a marker is
@@ -332,6 +394,7 @@ class ThermalRenderer:
                 settings.reticle,
                 settings.hotspot,
                 settings.coldspot,
+                settings.fixed_range,
             )
             if settings.readout
             else None

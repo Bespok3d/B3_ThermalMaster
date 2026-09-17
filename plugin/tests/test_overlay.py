@@ -35,11 +35,6 @@ def raw_for(celsius: float) -> int:
 
 
 @pytest.fixture
-def palettes(thermal_streamer):
-    return thermal_streamer.build_palettes()
-
-
-@pytest.fixture
 def flat_frame():
     """A uniform 30 C field, so a pixel set hotter than it is unambiguously the hottest."""
 

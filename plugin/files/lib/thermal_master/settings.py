@@ -13,17 +13,27 @@ import dataclasses
 import json
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from .camera import VALID_GAINS, CameraSettings
 from .pipeline import (
+    FIXED_RANGE,
+    VALID_RANGE_MODES,
     VALID_ROTATIONS,
     VALID_UPSCALE_FILTERS,
     RenderSettings,
     ThermalRenderer,
+    ordered_range,
 )
-from .temperature import MAX_EMISSIVITY, MAX_SPOTS, MIN_EMISSIVITY, VALID_UNITS
+from .temperature import (
+    MAX_EMISSIVITY,
+    MAX_SPOTS,
+    MIN_EMISSIVITY,
+    VALID_UNITS,
+    FrameStats,
+)
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
 # was given rather than a common base, or every caller loses its type.
@@ -63,6 +73,38 @@ ORIENTING_SETTINGS = ("rotation", "flip_horizontal", "flip_vertical")
 
 # A spot is an x and a y. Anything else in the list is not a spot.
 SPOT_COORDINATES = 2
+
+
+def locked_range(settings: RenderSettings, stats: FrameStats | None) -> RenderSettings:
+    """Freeze the range the picture is using right now.
+
+    The point of the button: auto-ranging is good at finding a scene and bad at holding still, so
+    this lets it find the scene and then stops it. The numbers come from the frame that was last
+    rendered, which is the one the person was looking at when they pressed it, and they are rounded
+    to a tenth because they go into a form field a person then edits by hand.
+
+    With no frame yet there is nothing to freeze, so the settings come back untouched rather than
+    locked to a guess.
+    """
+
+    if stats is None:
+        return settings
+    low, high = ordered_range(stats.range_low_celsius, stats.range_high_celsius)
+    return dataclasses.replace(
+        settings,
+        range_mode=FIXED_RANGE,
+        range_low_celsius=round(low, 1),
+        range_high_celsius=round(high, 1),
+    )
+
+
+def posted_temperature(value: object, current: float) -> float:
+    """A temperature typed into a form, or the one that was there if it is not a number."""
+
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return current
 
 
 def clean_spots(value: object) -> tuple[tuple[int, int], ...]:
@@ -225,9 +267,17 @@ def settings_from_form(
     rotation = int(posted_rotation) if posted_rotation.isdigit() else -1
     posted_units = form.get("units", [""])[0]
     posted_filter = form.get("upscale_filter", [""])[0]
+    posted_mode = form.get("range_mode", [""])[0]
     updated = dataclasses.replace(
         current,
         rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
+        range_mode=posted_mode if posted_mode in VALID_RANGE_MODES else current.range_mode,
+        range_low_celsius=posted_temperature(
+            form.get("range_low_celsius", [""])[0], current.range_low_celsius
+        ),
+        range_high_celsius=posted_temperature(
+            form.get("range_high_celsius", [""])[0], current.range_high_celsius
+        ),
         flip_horizontal="flip_horizontal" in form,
         flip_vertical="flip_vertical" in form,
         colorbar="colorbar" in form,
@@ -245,6 +295,41 @@ def settings_from_form(
     )
 
 
+def one_of(options: tuple, field: str) -> Callable[[Any, RenderSettings], Any]:
+    """Take the posted value when it is one of these, and leave the setting alone otherwise."""
+
+    return lambda value, current: value if value in options else getattr(current, field)
+
+
+def a_temperature(field: str) -> Callable[[Any, RenderSettings], Any]:
+    return lambda value, current: posted_temperature(value, getattr(current, field))
+
+
+def a_switch(_field: str) -> Callable[[Any, RenderSettings], Any]:
+    return lambda value, _current: bool(value)
+
+
+# Every setting a JSON body may name, and what it has to be for the change to be taken. A table
+# rather than a run of `if key in payload`, because each of those was the same sentence written
+# again, and by the seventh the linter was right about it. Spots are not here: they are a list
+# whose emptiness means something, and they are handled on their own below.
+JSON_SETTINGS: dict[str, Callable[[Any, RenderSettings], Any]] = {
+    "rotation": one_of(VALID_ROTATIONS, "rotation"),
+    "units": one_of(VALID_UNITS, "units"),
+    "upscale_filter": one_of(VALID_UPSCALE_FILTERS, "upscale_filter"),
+    "range_mode": one_of(VALID_RANGE_MODES, "range_mode"),
+    "range_low_celsius": a_temperature("range_low_celsius"),
+    "range_high_celsius": a_temperature("range_high_celsius"),
+    "emissivity": lambda value, current: clamped_emissivity(value, current.emissivity),
+    "flip_horizontal": a_switch("flip_horizontal"),
+    "flip_vertical": a_switch("flip_vertical"),
+    "colorbar": a_switch("colorbar"),
+    "reticle": a_switch("reticle"),
+    "hotspot": a_switch("hotspot"),
+    "coldspot": a_switch("coldspot"),
+}
+
+
 def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -> tuple:
     """Apply only the settings a JSON body actually names.
 
@@ -257,19 +342,11 @@ def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -
     either way, because the rule about what a setting may be does not depend on how it arrived.
     """
 
-    changes = {}
-    if "rotation" in payload and payload["rotation"] in VALID_ROTATIONS:
-        changes["rotation"] = payload["rotation"]
-    if "units" in payload and payload["units"] in VALID_UNITS:
-        changes["units"] = payload["units"]
-    if payload.get("upscale_filter") in VALID_UPSCALE_FILTERS:
-        changes["upscale_filter"] = payload["upscale_filter"]
-    if "emissivity" in payload:
-        changes["emissivity"] = clamped_emissivity(payload["emissivity"], current.emissivity)
-    flags = ("flip_horizontal", "flip_vertical", "colorbar", "reticle", "hotspot", "coldspot")
-    for flag in flags:
-        if flag in payload:
-            changes[flag] = bool(payload[flag])
+    changes = {
+        key: check(payload[key], current)
+        for key, check in JSON_SETTINGS.items()
+        if key in payload
+    }
     palette_name = payload.get("palette")
     updated = dataclasses.replace(current, **changes)
     # The whole list every time, which makes placing, moving and clearing one kind of request

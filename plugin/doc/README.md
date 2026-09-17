@@ -164,6 +164,30 @@ them have met the hardware. If you have a P3, it should work, and a report eithe
 
 ## Notes
 
+## The display range
+
+Two ways to decide what the colours mean, on the settings page.
+
+**Follow the scene**, which is the default and what the plugin has always done: the coldest and
+hottest thing in view map to the ends of the palette, so contrast is always as good as it can be.
+The cost is that a colour means nothing in particular. When a toolhead crosses the view, everything
+re-maps and the ruler moves with it.
+
+**Hold these temperatures**, where you give it two numbers and it stays there. A colour then means
+the same thing in every frame, the ruler is a constant reference, and anything outside the held
+range is drawn in the end colour with a triangle on the ruler to say the scene has gone past it.
+"Hold what I see now" fills the two boxes from the picture in front of you, which is usually easier
+than guessing: let it settle on what you care about, then press the button.
+
+Holding is also what shows you a bed. A bed at 100 C with the room at 25 spends nine tenths of the
+palette on the difference between the bed and the room, so the bed itself arrives as one flat
+colour; hold 90 to 100 instead and the bed's own variation fills the whole palette, which is how
+you see a cold corner or the heater trace. It costs the printer slightly less than following the
+scene, since there is nothing to measure.
+
+The temperatures never depend on any of this. Markers, spots, the hover readout and the region box
+all read the sensor, not the picture, so a held range changes what you see and never what it says.
+
 - The image is auto-ranged: the coldest and hottest areas in view map to the ends of the palette, so
   contrast follows the scene. The range eases rather than jumping, so the picture stays steady when
   something warm passes through. It is still a relative thermal view, not a calibrated temperature

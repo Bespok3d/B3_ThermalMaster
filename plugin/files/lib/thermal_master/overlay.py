@@ -109,6 +109,9 @@ class Overlay:
     reticle: bool = True
     hotspot: bool = True
     coldspot: bool = True
+    # Whether the display range was told rather than measured. The bar is drawn differently for
+    # the two: see `bar_axis` and the triangles in `draw_colorbar`.
+    fixed_range: bool = False
 
 
 @functools.lru_cache(maxsize=8)
@@ -246,21 +249,26 @@ _Position = tuple[float, float]
 _Rectangle = tuple[float, float, float, float]
 
 
-def bar_axis(stats: FrameStats) -> tuple[float, float]:
+def bar_axis(stats: FrameStats, fixed_range: bool = False) -> tuple[float, float]:
     """The temperatures the bar spans, bottom and top.
 
-    The frame's own coldest and hottest, so the ends of the ruler are the numbers the markers show.
-    They were the ends of the *display range* until 0.14.0, which was defensible and confused every
-    person who looked at it: a ruler topped 25.3 beside a marker reading 30.0 reads as a
-    contradiction, however carefully the difference is explained. A ruler whose top is the hottest
-    thing in view needs no explaining.
+    On a measured range, the frame's own coldest and hottest, so the ends of the ruler are the
+    numbers the markers show. They were the ends of the display range until 0.14.0, which was
+    defensible and confused every person who looked at it: a ruler topped 25.3 beside a marker
+    reading 30.0 reads as a contradiction, however carefully the difference is explained. A ruler
+    whose top is the hottest thing in view needs no explaining.
 
-    A flat scene has no span of its own, so the display range stands in and the bar keeps a height.
+    On a told range, the range itself, which is the whole point of telling it: the ruler stops
+    moving, and a colour halfway up the bar means the same temperature in every frame. The markers
+    can then read past the ends, and the triangles are what says so.
+
+    A flat scene on a measured range has no span of its own, so the display range stands in and the
+    bar keeps a height.
     """
 
-    if stats.maximum_celsius > stats.minimum_celsius:
-        return (stats.minimum_celsius, stats.maximum_celsius)
-    return (stats.range_low_celsius, stats.range_high_celsius)
+    if fixed_range or stats.maximum_celsius <= stats.minimum_celsius:
+        return (stats.range_low_celsius, stats.range_high_celsius)
+    return (stats.minimum_celsius, stats.maximum_celsius)
 
 
 def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
@@ -298,13 +306,16 @@ def bar_gradient(
 def mark_bar(
     image: Image.Image, at_top: bool, style: OverlayStyle, colour: tuple[int, int, int]
 ) -> None:
-    """A triangle at one end of the bar, tying that end to the marker of the same colour.
+    """A triangle at one end of the bar.
 
-    It used to mean "this extreme is past the end of the scale", which was needed while the bar was
-    labelled with the auto-ranged bounds. The bar spans the scene now, so an extreme is never past
-    the end: it is exactly at it. What is left is a visual tie between the red cross on the picture
-    and the number at the top of the ruler, which is worth keeping and is why it is drawn only for
-    a marker that is actually on.
+    It means two things, and which one depends on the range. On a measured range the bar spans the
+    scene, so an extreme is never past the end, it is exactly at it: the triangle is a visual tie
+    between the red cross on the picture and the number at the top of the ruler, and it is drawn
+    only for a marker that is actually on.
+
+    On a told range the scene can leave the scale entirely, and then the triangle means what it
+    meant before 0.15.0: there is something past this end that the colours cannot show you. That
+    reading only makes sense once the scale is fixed, which is why it came back with it.
     """
 
     left, top, width, height = style.bar_box
@@ -316,13 +327,33 @@ def mark_bar(
     draw.polygon([(middle, apex), (left + 1, base), (left + width - 2, base)], fill=colour)
 
 
+def marks_top(overlay: Overlay, axis: tuple[float, float]) -> bool:
+    """Whether the top of the bar gets a triangle, which is two questions in one.
+
+    On a measured range it is there to tie the top of the ruler to the marker of the same colour,
+    so it follows that marker being switched on. On a told range it is there to say the scene has
+    gone off the top, so it follows the scene rather than the marker: somebody who switched the
+    hotspot marker off still needs to know the picture is clipping.
+    """
+
+    if overlay.fixed_range:
+        return overlay.stats.maximum_celsius > axis[1]
+    return overlay.hotspot
+
+
+def marks_bottom(overlay: Overlay, axis: tuple[float, float]) -> bool:
+    if overlay.fixed_range:
+        return overlay.stats.minimum_celsius < axis[0]
+    return overlay.coldspot
+
+
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
     """The ruler down the right edge, spanning the scene and labelled with its ends."""
 
     width = image.size[0]
     left, top, bar_width, bar_height = style.bar_box
     stats = overlay.stats
-    axis = bar_axis(stats)
+    axis = bar_axis(stats, overlay.fixed_range)
     ramp = bar_gradient(overlay.palette, axis, stats, bar_height)
     bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
     image.paste(bar.resize((bar_width, bar_height), Image.Resampling.NEAREST), (left, top))
@@ -334,8 +365,8 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
     # it the bar is flat and below it the colour varies. A line on top of an edge that is already
     # visible is one moving thing too many, and it read as noise on hardware.
     for at_top, shown, colour in (
-        (True, overlay.hotspot, HOTSPOT_RGB),
-        (False, overlay.coldspot, COLDSPOT_RGB),
+        (True, marks_top(overlay, axis), HOTSPOT_RGB),
+        (False, marks_bottom(overlay, axis), COLDSPOT_RGB),
     ):
         if shown:
             mark_bar(image, at_top, style, colour)
