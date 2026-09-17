@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.1
+
+- **"Hold what I see now" looked like it did nothing, and the next Apply undid it.** The plugin was
+  holding the range correctly; the settings page just went on showing "Follow the scene" and the
+  old numbers, and pressing Apply then posted what it was showing. The page now takes the state the
+  plugin sends back after every change, so a button that changes something is visible in the
+  controls straight away.
+
 ## 0.22.0
 
 - **You can hold the display range.** Until now the colours always followed the scene, which is why

@@ -142,6 +142,25 @@ def run_checks(page, store, device) -> list:
     page.click("form#controls fieldset:first-of-type button[type=submit]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("apply changes a setting", store.as_dict()["palette"], "sepia"))
+
+    # Holding the range is the first button that changes something the form is showing, and the
+    # page used to ignore the answer it got back: the plugin went to a fixed range, the page went
+    # on saying "follow the scene", and the next Apply posted what the page was saying and undid
+    # it. Both halves are checked, because the second one is what made it a defect rather than a
+    # missing flourish.
+    page.click("text=Hold what I see now")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    held = store.as_dict()
+    checks.append(("holding the range switches the plugin", held["range_mode"], "fixed"))
+    checks.append(("and the page says so", page.input_value("select[name=range_mode]"), "fixed"))
+    checks.append((
+        "and the boxes hold the numbers it froze",
+        float(page.input_value("input[name=range_low_celsius]")),
+        held["range_low_celsius"],
+    ))
+    page.click("text=Apply")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("and applying again does not undo it", store.as_dict()["range_mode"], "fixed"))
     checks.append(
         ("apply does not re-fire the last button", device.status()["shutter"]["state"], settled)
     )

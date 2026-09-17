@@ -217,12 +217,47 @@ CONTROL_SCRIPT = """<script>
 
   function show(state) {
     line.textContent = state.device;
+    reflect(state);
     // A calibration is applied by the capture thread between two frames, so the answer to the post
     // itself is always "requested". Ask again a few times, briefly, for what actually happened.
     if (state.pending && polls < 8) {
       polls += 1;
       setTimeout(function () { ask({ headers: { "Accept": "application/json" } }); }, 300);
     }
+  }
+
+  // The reply carries the whole of the settings, and this page used to throw all of it away
+  // except the status line. That was harmless while every change came from the form itself, and
+  // stopped being harmless the moment a button changed something the form was showing: "hold what
+  // I see now" switched the plugin to a fixed range, the page went on saying "follow the scene",
+  // and the next Apply posted what it was saying and undid the hold. A page that posts in the
+  // background has to accept the answer it gets back.
+  function reflect(state) {
+    for (var index = 0; index < form.elements.length; index += 1) {
+      var field = form.elements[index];
+      // Whatever is being typed into belongs to the person typing, not to the last reply.
+      if (!field.name || !(field.name in state) || field === document.activeElement) { continue; }
+      if (field.type === "checkbox") {
+        field.checked = !!state[field.name];
+      } else {
+        choose(field, state[field.name]);
+      }
+    }
+  }
+
+  // A select only takes a string one of its options actually carries, and this page writes some of
+  // those to a fixed number of decimals: an emissivity of 1 is the option "1.00". Spellings are
+  // tried in turn rather than special cased by field name, and a value that matches nothing leaves
+  // the field showing what it showed.
+  function choose(field, value) {
+    var spellings = [String(value)];
+    if (typeof value === "number") { spellings.push(value.toFixed(1), value.toFixed(2)); }
+    var was = field.value;
+    for (var index = 0; index < spellings.length; index += 1) {
+      field.value = spellings[index];
+      if (field.value === spellings[index]) { return; }
+    }
+    field.value = was;
   }
 })();
 </script>"""

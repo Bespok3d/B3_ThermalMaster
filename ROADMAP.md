@@ -1867,6 +1867,28 @@ Two housekeeping changes came out of the same work, both of them the rule of thr
   settings dictionary from a literal, so every new setting broke tests that had no opinion about
   it, and four files had written the palettes fixture for themselves.
 
+**F-71. The page threw away the answer it asked for.** Reported after the first hardware test of
+0.22.0: pressing "Hold what I see now" gave no sign of having worked. It had worked. The control
+page posts in the background, which is what keeps the video stream from being torn down on every
+change, and the reply carries the whole settings payload, but the script read one field out of it,
+the device status line, and dropped the rest.
+
+That was harmless for as long as every change originated in the form, since the form already knew
+what it had sent. It stopped being harmless the first time a button changed something the form was
+displaying. And the consequence was worse than the missing feedback: the form went on showing
+`range_mode=auto` and the old ends, so the next Apply posted those and silently undid the hold.
+
+The fix is one function: after a reply, walk the form and set every control the payload names,
+skipping whatever has focus so a reply cannot overwrite what somebody is typing. Selects need care,
+because the page writes some option values to a fixed number of decimals and an emissivity of 1 is
+the option "1.00", so the spellings are tried in turn rather than special cased by field name.
+
+The browser harness grew three checks, and they were confirmed to fail against the old page with
+exactly the symptom that was reported: the select reading "auto", the boxes reading 20.0, and the
+mode back to auto after a second Apply. The general lesson is worth keeping: a page that posts in
+the background has to accept the answer it gets back, not just the part of it that it expected to
+change.
+
 Still open, and deliberately: the decimation and the dead band for auto mode. The maintainer's
 call is to live with the modes first, because somebody who ends up in fixed mode most of the time
 does not need them.

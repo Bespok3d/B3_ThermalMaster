@@ -1,7 +1,7 @@
 {
   "name": "thermal-master",
   "title": "Thermal Master",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "license": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3/blob/main/plugin/doc/LICENSE",
   "author": "Mauker",
   "min_daemon_version": "0.14.0",
