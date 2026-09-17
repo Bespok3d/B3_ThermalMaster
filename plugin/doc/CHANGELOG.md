@@ -9,6 +9,8 @@
   open a tile or switch the camera off, and what it has averaged since the service started, which
   is the fair figure for a plugin that sleeps most of the day.
 - The same numbers are in `/thermal/stats` for anything that would rather draw its own.
+- The documentation shipped with the plugin now carries the current cost figures rather than the
+  ones measured three phases ago.
 
 The printer has four cores, so 100% of one core is a quarter of the machine, and the figure can
 pass 100% because the plugin has more than one thread.

@@ -1,4 +1,4 @@
-# thermal-p1: instructions for AI assistants
+# thermal-master: instructions for AI assistants
 
 You are working in a Bespok3d plugin repo. Bespok3d is a printer-agnostic plugin manager for Klipper
 printers that runs on stock firmware, with no custom-firmware flashing. This repo publishes one or more
@@ -11,8 +11,13 @@ If you are a non-Claude tool, `AGENTS.md` points you here.
 
 ## What this repo ships
 
-This repo streams the InfiRay-OEM Thermal Master P1 USB thermal camera as MJPEG, so you can watch a print 
-thermally in Fluidd/Mainsail with no UVC, no firmware flashing, and no Rockchip MPP dependency.
+This repo streams an InfiRay-OEM Thermal Master P1 or P3 USB thermal camera as MJPEG, so you can watch
+a print thermally in Fluidd/Mainsail with no UVC, no firmware flashing, and no Rockchip MPP
+dependency. Both cameras are driven from the same code path; the plugin detects which is plugged in.
+It also serves an interactive viewer that reads temperatures off the frame, and a settings page.
+
+The plugin runs on a printer that has a printer to run, so what it costs the processor is a design
+constraint rather than an afterthought. Read section 7g of `ROADMAP.md` before adding per-frame work.
 
 Read `README.md` for the repo's layout, build, and release mechanics before you change anything.
 

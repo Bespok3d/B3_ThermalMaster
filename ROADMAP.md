@@ -1986,17 +1986,17 @@ every five seconds, which is free in the one place it happens, because a setting
 video stream open and so the plugin is fully awake for as long as anybody is there to read the
 number.
 
-### Phase 7h: the repository README, which is a year out of date
+### Phase 7h: the repository README. Shipped in 0.25.0.
 
-Reported by the maintainer, and it is worse than one stale section. `README.md` at the root of the
+Reported by the maintainer, and it was worse than one stale section. `README.md` at the root of the
 repository still describes the project as it was planned rather than as it is, and somebody
 arriving at the repository reads it first.
 
 What is wrong, in the order a reader hits it:
 
 - **The name.** The title is `thermal-p1` and the opening paragraph is about the P1 only. The
-  plugin has driven both models since 0.5.0, the package is `thermal-master`, and the repository is
-  `B3_ThermalMaster_P1_P3`.
+  plugin has driven both models since Phase 4, the package has been `thermal-master` since 0.2.0,
+  and the repository is `B3_ThermalMaster_P1_P3`.
 - **"At 160x120 / ~25fps the work is trivial for the CPU."** It was not. It was 62.5% of a core
   before Phase 5 and 40.6% before Phase 7g, and three phases of this roadmap exist because of it.
   The sentence should say what it actually costs and point at the idle and off behaviour.
@@ -2017,8 +2017,13 @@ kept current throughout and is the model for what the root one should say. The t
 jobs: the shipped one is for somebody using the plugin, the root one is for somebody opening the
 repository, and the second has been reading like a plan for a plugin that does not exist yet.
 
-Worth doing as its own pass rather than folded into a feature, because the failure mode is a
-reader believing it.
+Done as its own pass rather than folded into a feature, because the failure mode is a reader
+believing it. The root `README.md` was rewritten: it now names both cameras, states what the plugin
+costs with the measured table rather than calling the work trivial, describes the layout that
+actually exists including `files/lib/` and the gate, documents the tag-driven release and both
+secrets, and replaces "not verified on hardware yet" with the real hardware status. Section 9 of
+this file was carrying the same rot, claiming nothing was committed, and has been split into a
+current status and the record that follows it.
 
 ## 8. Alternatives considered and rejected
 
@@ -2044,7 +2049,30 @@ the P1 and 2.4 MB/s for the P3, and it abandons the webcam widget that already w
 the scripts' entire job is the builder's job, and the class of bug in F-33 cannot occur if nobody hand-
 assembles a package.
 
-## 9. Where this stands, 2026-09-13
+## 9. Where this stands
+
+**2026-09-17, at 0.25.0.** Phases 0 through 7h are done and every one of them has been confirmed on
+the maintainer's printer with a P1 attached. The gate is green, the work is committed on `dev`, and
+the plugin is in daily use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
+an interactive viewer, holds a display range, measures spots and regions, records clips, switches
+itself off, and reports what it costs.
+
+What is left, in the order it is worth doing:
+
+- **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
+  release workflow and simply is not set; the decision is whether private testing is over.
+- **Three reports owed elsewhere**, all written up above: the driver's P1 shutter bug, the installer
+  dropping `userEditable`, and the filaman card defect.
+- **The P3 hardware trial**, whenever one turns up. Everything for it is implemented and none of it
+  has met the device.
+- **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
+  wait on somebody actually wanting them.
+
+What follows in this section is the running record, oldest first. It is kept as written rather than
+tidied, because what a defect looked like before it was understood is the part that is hard to
+reconstruct afterwards.
+
+### The state at 2026-09-13, kept as written
 
 Phase 0 is complete and the gate is green (6/6), but **nothing is committed**. The whole of the work
 below is sitting in the working tree on branch `claude`.

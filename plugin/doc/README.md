@@ -241,11 +241,16 @@ all read the sensor, not the picture, so a held range changes what you see and n
 
 ## Hardware status
 
-Run end to end on a U1 with a P1 attached: the camera tile renders in Fluidd and Mainsail, the
-control page changes palette, orientation and the readout live, and the settings survive a restart.
-Measured at 41.5% of one of the printer's four Cortex-A53 cores with the readout on, of which about
-half is the numpy pipeline rather than the JPEG encode. The P3 is driven by the same code path and
-the same protocol but has not been in front of one yet.
+Run end to end on a U1 with a P1 attached, and every release has been confirmed on one: the camera
+tile renders in Fluidd and Mainsail, the control page changes palette, orientation and the readout
+live, the viewer works inside a dashboard tile, and the settings survive a restart.
+
+Measured on that printer, as a share of one of its four Cortex-A53 cores: 45.7% with the viewer open
+and the pointer moving, 41.9% with a dashboard tile visible, 4.6% with nothing watching, and 0.0%
+with the camera switched off. The settings page reports the same figure for itself, so you do not
+have to take this table's word for it.
+
+The P3 is driven by the same code path and the same protocol but has not been in front of one yet.
 
 Worth checking after an install:
 

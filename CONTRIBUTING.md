@@ -43,9 +43,10 @@ smell, with a reason that answers "why is THIS one acceptable?", never a blanket
 ## Tests
 
 Tests live in `plugin/tests/` and run against a stand-in driver, so no camera and no printer are
-needed. `plugin/tests/conftest.py` explains the two awkward parts: the module under test is loaded
-by path because `thermal-p1-stream.py` is not a legal module name, and a stand-in `p3_camera` is
-registered before the load because the real driver is a gitignored build-time fetch.
+needed. `plugin/tests/conftest.py` explains the awkward part: a stand-in `p3_camera` is registered
+before the plugin is imported, because the real driver models a USB device and the plugin imports it
+at module scope. The tests then ask the `thermal_master` package for names rather than importing
+files, which is what let the code be split into modules without a single test changing.
 
 The stand-in camera reads from a scripted list of frames, where an entry can be a frame to return or
 an exception to raise, so a test can describe a glitched frame or a vanished device as plain data.
