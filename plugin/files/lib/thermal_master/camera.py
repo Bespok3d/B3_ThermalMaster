@@ -304,6 +304,7 @@ def stream_frames(
     """
 
     consecutive_failures = 0
+    idling = False
     while not shutdown.is_set():
         # Before the read rather than after it, so the first thing a fresh session does is put the
         # camera into the gain the user chose, ahead of any frame being published from the default.
@@ -312,6 +313,20 @@ def stream_frames(
         thermal_raw = next_thermal_frame(camera)
         if thermal_raw is not None:
             consecutive_failures = 0
+            # The frame is read either way, because the camera streams whether or not anyone is
+            # watching and a reader that stops reading falls out of step with it. What is skipped
+            # is the expensive half: nine tenths of this plugin's cost was rendering frames into
+            # an empty room.
+            if not frame_store.wanted():
+                frame_store.note_read()
+                idling = True
+                continue
+            if idling:
+                # Coming back after a silence. The renderer is holding a frame and a smoothed
+                # range from before it, and averaging the new frame with a minute old one shows up
+                # as a ghost; the range would ease away from wherever the scene has got to since.
+                renderer_source.restart()
+                idling = False
             rendered = renderer_source.current().render_frame(thermal_raw)
             frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
             continue
@@ -377,13 +392,13 @@ def capture_loop(
 
     reconnect_delay = INITIAL_RECONNECT_DELAY_SECONDS
     while not shutdown.is_set():
-        frames_before_session = frame_store.published_count
+        frames_before_session = frame_store.seen_count
         try:
             run_capture_session(frame_store, renderer_source, shutdown, device)
             return
         except Exception as error:  # noqa: BLE001
             print(f"thermal-master: capture error: {error}", file=sys.stderr, flush=True)
-        if frame_store.published_count > frames_before_session:
+        if frame_store.seen_count > frames_before_session:
             reconnect_delay = INITIAL_RECONNECT_DELAY_SECONDS
         shutdown.wait(reconnect_delay)
         reconnect_delay = next_reconnect_delay(reconnect_delay)

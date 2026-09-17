@@ -408,6 +408,17 @@ class RendererSource:
         self._revision: int | None = None
         self._renderer: ThermalRenderer | None = None
 
+    def restart(self) -> None:
+        """Forget the renderer, so the next frame is rendered by a fresh one.
+
+        For coming back from an idle: what a renderer carries between frames is the previous frame
+        and the smoothed display range, and after a silence both of those describe a scene that has
+        moved on.
+        """
+
+        self._renderer = None
+        self._revision = None
+
     def current(self) -> ThermalRenderer:
         revision, palette_name, settings = self._settings_store.snapshot()
         if revision != self._revision or self._renderer is None:

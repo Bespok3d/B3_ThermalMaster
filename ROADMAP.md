@@ -1902,7 +1902,20 @@ pointing, and the printer was doing the work anyway.
 
 Two states, agreed with the maintainer, and they are not alternatives:
 
-**Idle, which needs no switch.** A minute with nobody asking for a picture and the capture loop
+**Measured first, 2026-09-17, at 0.22.1**, with `scripts/measure-cpu-on-printer.sh`:
+
+| state | cost |
+| --- | --- |
+| nothing open | 40.6% of one core |
+| dashboard tile visible, nobody pointing | 42.3% |
+| viewer open, pointer moving | 45.1% |
+
+Nine tenths of the cost is paid whether or not anybody is looking, and serving a live viewer adds
+4.5 points on top of it. It also cross-checks the profiler: 14.94 ms a frame at 25 fps is 37%, and
+the USB read and the loop account for the rest, so two instruments built for different purposes
+agree.
+
+**Idle, which needs no switch. Shipped in 0.23.0.** A minute with nobody asking for a picture and the capture loop
 stops rendering. Any request wakes it. The detail that makes it safe is to keep reading frames from
 the camera and skip only the pipeline: the USB read is mostly waiting rather than CPU, the device
 stays in sync, and waking costs one frame instead of a reconnect. A request marks interest and

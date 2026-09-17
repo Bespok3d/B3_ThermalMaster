@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.23.0
+
+- **The plugin stops working when nobody is watching.** A minute after the last request for a
+  picture it stops rendering, and anything asking for one brings it straight back. On the
+  maintainer's printer it was using 40.6% of a core with nothing open at all, which was the same
+  work it does for somebody actually watching.
+- It keeps reading from the camera while it idles, so the device stays in step and waking costs one
+  frame rather than a reconnect. A request waits briefly for a fresh frame rather than being
+  answered with whatever was on screen an hour ago.
+- Coming back from an idle starts the picture clean, because averaging a new frame with a minute
+  old one shows as a ghost and the auto-range would ease away from a scene that has moved on.
+
+Nothing to switch on, and nothing changes while you have the camera open: a dashboard tile holds
+the stream open, which is what keeps it awake.
+
 ## 0.22.1
 
 - **"Hold what I see now" looked like it did nothing, and the next Apply undid it.** The plugin was

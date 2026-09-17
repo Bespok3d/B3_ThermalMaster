@@ -23,7 +23,17 @@ from fake_camera import (
 
 @pytest.fixture
 def frame_store(thermal_streamer):
-    return thermal_streamer.LatestFrame()
+    """A frame store somebody is watching.
+
+    Since 0.23.0 the capture loop renders only when something has asked for a picture, so a store
+    nobody has asked anything of produces no frames at all. Every test in this file is about what
+    the loop does while it is working, so they all start from somebody watching; the tests about
+    the idling itself say so for themselves.
+    """
+
+    store = thermal_streamer.LatestFrame()
+    store.note_interest()
+    return store
 
 
 def run_until_script_ends(thermal_streamer, camera, frame_store, renderer_source):

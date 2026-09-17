@@ -164,6 +164,16 @@ them have met the hardware. If you have a P3, it should work, and a report eithe
 
 ## Notes
 
+## What it costs when you are not looking
+
+Nothing much, since 0.23.0. A minute after the last request for a picture the plugin stops
+rendering frames; the next request wakes it. It goes on reading from the camera while it idles, so
+the device stays in step and coming back costs one frame rather than a reconnect.
+
+A dashboard tile keeps the stream open, so the camera stays live for as long as the tile is on
+screen. The idling is for the hours when nothing is open at all, which on the printer this was
+written for was most of them.
+
 ## The display range
 
 Two ways to decide what the colours mean, on the settings page.
