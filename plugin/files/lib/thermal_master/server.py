@@ -174,14 +174,30 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         if route is None:
             self.send_error(404)
             return
-        getattr(self, route)()
+        self.serve(route)
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler names it
         route = POST_ROUTES.get(urlparse(self.path).path)
         if route is None:
             self.send_error(404)
             return
-        getattr(self, route)()
+        self.serve(route)
+
+    def serve(self, route: str) -> None:
+        """Run a handler, and treat a client that left as the ordinary event it is.
+
+        Every reader here is a browser that can close a tab mid-answer: the viewer fetches a frame
+        every fifth of a second, and a tile closing between the headers and the body is normal
+        rather than exceptional. Without this each one writes a traceback to the service log, and a
+        log full of routine tracebacks is a log nobody reads when something real happens. The MJPEG
+        stream has always swallowed its own; this covers every other handler, including the ones
+        not written yet.
+        """
+
+        try:
+            getattr(self, route)()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def serve_viewer_page(self) -> None:
         """The interactive page. Needs no settings store, so it is served whatever else is wired."""

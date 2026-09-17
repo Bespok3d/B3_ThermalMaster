@@ -70,3 +70,41 @@ def test_the_viewer_has_its_own_path(thermal_streamer):
 
 def test_neither_accepts_a_post(thermal_streamer):
     assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
+
+
+def test_a_client_that_leaves_mid_answer_is_not_an_error(thermal_streamer):
+    """A browser closing a tab is routine, and a log full of routine tracebacks hides real ones.
+
+    The viewer asks for a frame five times a second, so this is the most ordinary way a request
+    can end. Checked at the routing level rather than per handler, because that is where the
+    guarantee has to hold for handlers nobody has written yet.
+    """
+
+    class LeavingClient(thermal_streamer.ThermalRequestHandler):
+        def __init__(self) -> None:  # the real one talks to a socket, and this never does
+            self.served = False
+
+        def serve_thermal_frame(self) -> None:
+            self.served = True
+            raise BrokenPipeError(32, "Broken pipe")
+
+    handler = LeavingClient()
+    handler.serve("serve_thermal_frame")
+
+    assert handler.served is True
+
+
+def test_a_handler_that_fails_for_its_own_reasons_still_raises(thermal_streamer):
+    """The guard is for the client leaving, not for silencing the plugin's own faults."""
+
+    import pytest
+
+    class BrokenHandler(thermal_streamer.ThermalRequestHandler):
+        def __init__(self) -> None:
+            pass
+
+        def serve_stats(self) -> None:
+            raise ValueError("the statistics are wrong")
+
+    with pytest.raises(ValueError):
+        BrokenHandler().serve("serve_stats")
