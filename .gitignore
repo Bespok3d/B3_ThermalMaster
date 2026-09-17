@@ -248,3 +248,7 @@ plugin/files/**/__pycache__/
 # Where an assistant puts anything it would otherwise delete, so the maintainer can look before it
 # goes. Never committed, and safe to empty by hand.
 _trash/
+
+# Frames captured off a real printer for judging a rendering change. Data, not source: they are
+# big, they are binary, and the decision they inform gets written down rather than the megabytes.
+reference/frames/

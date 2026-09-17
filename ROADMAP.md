@@ -950,7 +950,8 @@ Nothing blocking remains. Two decisions are outstanding, neither of which stops 
    means "this printer's USB camera pipeline", and the diagnosis reinforces it: the thermal camera
    enumerates on the USB bus with no `/dev/video` node of its own, entirely outside the V4L2 pipeline
    that capability describes. `klipper-generic`, as `u1-remote-screen` declares, is the recommendation.
-2. **Is CLAHE worth a numpy reimplementation?** A Phase 5 decision, best made by looking at a real print
+2. **Is CLAHE worth a numpy reimplementation? Answered no, on real frames. See 6.4.** Originally
+   a Phase 5 decision, best made by looking at a real print
    scene. See section 6.4.
 
 ### 6.3 Printer diagnosis, read only
@@ -988,7 +989,49 @@ most: the wheels being fetched are `manylinux2014_aarch64`, which requires glibc
 musl, they cannot load at all, whoever fetches them, and the vendoring approach needs rethinking rather
 than repairing.
 
-### 6.4 What CLAHE is, and why it is a question
+### 6.4 What CLAHE is, and why it was a question. Answered no, 2026-09-17.
+
+**Settled on six frames captured from the maintainer's own printer**, not on argument. The frames
+are gitignored under `reference/frames/`; `scripts/compare-rendering.py` re-renders them, and
+re-runs on any new capture in one command, which is the only reason this answer can be revisited
+cheaply.
+
+What the frames said:
+
+- **On ordinary scenes**, a bed and a part spanning 12 to 15 C, CLAHE opens up the machinery in the
+  background and adds grain to the bed. High-frequency texture, which on a flat surface is noise,
+  goes from 3.3 to 4.0 today up to 4.5 to 6.3 at clip 2 and 5.4 to 8.1 at clip 4.
+- **On a cold room**, where there is nothing to find, it amplifies sensor noise into what looks
+  like structure. That is the honest counter-example and it is plain to see.
+- **On a bed at 100 C with a part on it**, which is the case it was supposed to win, the grain cost
+  vanishes, since there is no flat field to stretch: texture actually drops, 4.3 to 4.0. It shows
+  more of the gantry and some mottling on the bed.
+- **And then the comparison that ended it.** Plain linear ranging, narrowed to the bed's own
+  temperatures, 90 to 99 C, shows the bed's real temperature distribution: hotter through the
+  middle and left, cooler at the edges, the part sitting on it as a cold spot, and in the frame
+  taken while it was still heating, the heater trace itself. Neither the global picture nor CLAHE
+  is close. The arithmetic behind it: the bed surface spans 90.3 to 99.1 C against a frame
+  auto-ranged 32.6 to 98.0, so its nine degrees get 39 of 256 levels, and they land at the top of
+  ironbow where everything is nearly white.
+
+So the answer to "I cannot see the detail on the bed" is a narrower range rather than a different
+algorithm. Narrowing keeps one linear mapping, which means the colours still mean a temperature and
+the ruler still tells the truth, and it costs less rather than more, because a fixed range has no
+percentiles to compute. CLAHE would have cost an estimated 3 to 5 ms a frame, on top of breaking
+the ruler: the maintainer's own suggestion was to hide the ruler whenever it was switched on, which
+is exactly the right coupling and is also the clearest statement of what it costs.
+
+One idea of mine died in the same experiment, which is worth recording because it sounded better
+than it was: ranging from the region box. A box drawn around the bed still contains the part, the
+frame and the gap, so its percentiles come out almost identical to the whole frame's and the
+picture barely changes. The range has to be set on what you want to see, which argues for typed
+numbers or a lock rather than for inferring one from a box.
+
+What would reopen it: a camera pointed at a hotend, where a 250 C object and a 30 C background
+share a frame, which is the case CLAHE was invented for and the one this printer cannot produce
+from above, because the toolhead hides the nozzle.
+
+### 6.4a What CLAHE is
 
 The viewer's "image enhancement" is three separate things stacked, and only one of them is awkward on
 the printer.
