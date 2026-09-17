@@ -240,6 +240,14 @@ def main() -> None:
             lambda: scratch.paste(bar.resize((bar_width, bar_height),
                                              Image.Resampling.NEAREST), (left, top)),
             options.repeats)
+    # Where the colorbar's remaining time might be. Its measured pieces come to about a quarter of
+    # what the whole thing costs, and the two labels account for another half of it, which leaves
+    # something unexplained. Every one of these functions builds its own drawing context, and the
+    # readout builds six or seven a frame between the bar, its two triangles and the markers.
+    measure("building an ImageDraw", lambda: ImageDraw.Draw(scratch), options.repeats)
+    measure("one triangle on the bar",
+            lambda: streamer.mark_bar(scratch, True, style, streamer.HOTSPOT_RGB),
+            options.repeats)
     measure("the outline rectangle",
             lambda: ImageDraw.Draw(scratch).rectangle(
                 (left, top, left + bar_width - 1, top + bar_height - 1), outline=(0, 0, 0)),

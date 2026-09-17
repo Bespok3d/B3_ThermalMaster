@@ -172,6 +172,7 @@ def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer):
         "coldspot": False,
         "units": "celsius",
         "emissivity": 0.95,
+        "upscale_filter": "smooth",
         "gain": "high",
     }
 
@@ -193,7 +194,7 @@ def test_the_control_page_preselects_the_stored_emissivity(thermal_streamer):
     state = dict(
         palette="ironbow", rotation=0, flip_horizontal=False, flip_vertical=False,
         colorbar=True, reticle=True, hotspot=True, coldspot=True,
-        units="celsius", emissivity=0.30, gain="high",
+        units="celsius", emissivity=0.30, upscale_filter="smooth", gain="high",
     )
 
     page = thermal_streamer.render_control_page(state, ["ironbow"], None)
@@ -469,3 +470,61 @@ def test_a_json_update_can_change_the_gain(thermal_streamer):
 
     assert thermal_streamer.camera_settings_from_json({"gain": "low"}, current).gain == "low"
     assert thermal_streamer.camera_settings_from_json({}, current).gain == "high"
+
+
+def test_the_control_page_offers_both_ways_of_enlarging(thermal_streamer, store):
+    """The one setting that trades a visible difference for printer time, so it is the user's.
+
+    Built from the store rather than from a literal, which is what the plugin does, so a setting
+    added later is present here whether or not anybody remembers this test.
+    """
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert 'name="upscale_filter"' in page
+    for name in thermal_streamer.VALID_UPSCALE_FILTERS:
+        assert f'value="{name}"' in page
+
+
+def test_enlarging_smoothly_is_what_a_camera_does_unless_told_otherwise(thermal_streamer):
+    """Upgrading must not change the picture under somebody who never asked."""
+
+    assert thermal_streamer.RenderSettings().upscale_filter == thermal_streamer.SMOOTH_UPSCALE
+
+
+def test_a_posted_filter_has_to_be_one_that_exists(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings()
+    form = {"palette": ["ironbow"], "rotation": ["0"], "units": ["celsius"],
+            "emissivity": ["0.95"], "upscale_filter": ["bicubic-please"]}
+
+    _, updated = thermal_streamer.settings_from_form(form, palettes, current)
+
+    assert updated.upscale_filter == thermal_streamer.SMOOTH_UPSCALE
+
+
+def test_the_sharp_filter_is_the_cheap_one(thermal_streamer):
+    """Named for what it does to the picture, and it has to reach the resize as nearest."""
+
+    from PIL import Image
+
+    assert thermal_streamer.resampling(thermal_streamer.SHARP_UPSCALE) is Image.Resampling.NEAREST
+    assert thermal_streamer.resampling(thermal_streamer.SMOOTH_UPSCALE) is Image.Resampling.BILINEAR
+
+
+def test_the_two_filters_produce_different_pictures(thermal_streamer):
+    """A setting nobody can see the effect of is not a setting."""
+
+    import numpy as np
+
+    counts = np.full((120, 160), 19000, dtype=np.uint16)
+    counts[40:80, 40:80] = 21000
+    palettes = thermal_streamer.build_palettes()
+    smooth = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], thermal_streamer.RenderSettings()
+    ).render_frame(counts).jpeg
+    sharp = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"],
+        thermal_streamer.RenderSettings(upscale_filter=thermal_streamer.SHARP_UPSCALE),
+    ).render_frame(counts).jpeg
+
+    assert smooth != sharp

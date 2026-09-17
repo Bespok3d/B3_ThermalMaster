@@ -20,8 +20,17 @@ from .camera import (
     SHUTTER_PENDING,
     VALID_GAINS,
 )
-from .pipeline import VALID_ROTATIONS
+from .pipeline import VALID_ROTATIONS, VALID_UPSCALE_FILTERS
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
+
+# What the two filters are called on the page. The names are about what a person sees rather than
+# about the algorithm: nobody choosing how their camera looks wants to be asked about bilinear
+# interpolation.
+UPSCALE_FILTER_DESCRIPTIONS = {
+    "smooth": "Smooth",
+    "sharp": "Sharp, cheaper",
+}
+
 
 CONTROL_PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -71,6 +80,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
              Mirror left to right</label>
       <label><input type="checkbox" name="flip_vertical"{flip_vertical}>
              Mirror top to bottom</label>
+      <label><span>Enlarging</span>
+             <select name="upscale_filter">{upscale_filter_options}</select></label>
       <button type="submit">Apply</button>
     </fieldset>
     <fieldset>
@@ -96,6 +107,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <p class="status" id="device-status">{device_status}</p>
     </fieldset>
   </form>
+  <p>Enlarging is how the picture is made bigger before the readout is drawn on it, which only
+     happens while some part of the readout is switched on. Smooth blends the sensor's pixels;
+     sharp leaves them as squares and is about a sixth less work for the printer per frame. Which
+     one looks better depends on the scene and the screen, so it is here rather than decided for
+     you.</p>
   <p>Changes take effect immediately and survive a restart. The picture takes about a second to
      settle afterwards, while the auto-ranging finds the scene again.</p>
   <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Anything
@@ -229,6 +245,10 @@ def render_control_page(
         rotation_options="".join(
             option(str(degrees), f"{degrees} degrees", degrees == settings["rotation"])
             for degrees in VALID_ROTATIONS
+        ),
+        upscale_filter_options="".join(
+            option(name, UPSCALE_FILTER_DESCRIPTIONS[name], name == settings["upscale_filter"])
+            for name in VALID_UPSCALE_FILTERS
         ),
         unit_options="".join(
             option(name, name.capitalize(), name == settings["units"]) for name in VALID_UNITS

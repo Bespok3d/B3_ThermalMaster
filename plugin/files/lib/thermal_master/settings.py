@@ -17,7 +17,12 @@ from pathlib import Path
 from typing import TypeVar
 
 from .camera import VALID_GAINS, CameraSettings
-from .pipeline import VALID_ROTATIONS, RenderSettings, ThermalRenderer
+from .pipeline import (
+    VALID_ROTATIONS,
+    VALID_UPSCALE_FILTERS,
+    RenderSettings,
+    ThermalRenderer,
+)
 from .temperature import MAX_EMISSIVITY, MAX_SPOTS, MIN_EMISSIVITY, VALID_UNITS
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
@@ -219,6 +224,7 @@ def settings_from_form(
     posted_rotation = form.get("rotation", [""])[0]
     rotation = int(posted_rotation) if posted_rotation.isdigit() else -1
     posted_units = form.get("units", [""])[0]
+    posted_filter = form.get("upscale_filter", [""])[0]
     updated = dataclasses.replace(
         current,
         rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
@@ -230,6 +236,8 @@ def settings_from_form(
         coldspot="coldspot" in form,
         units=posted_units if posted_units in VALID_UNITS else current.units,
         emissivity=posted_emissivity(form, current.emissivity),
+        upscale_filter=posted_filter if posted_filter in VALID_UPSCALE_FILTERS
+        else current.upscale_filter,
     )
     return (
         palette_name if palette_name in palettes else None,
@@ -254,6 +262,8 @@ def settings_from_json(payload: dict, palettes: dict, current: RenderSettings) -
         changes["rotation"] = payload["rotation"]
     if "units" in payload and payload["units"] in VALID_UNITS:
         changes["units"] = payload["units"]
+    if payload.get("upscale_filter") in VALID_UPSCALE_FILTERS:
+        changes["upscale_filter"] = payload["upscale_filter"]
     if "emissivity" in payload:
         changes["emissivity"] = clamped_emissivity(payload["emissivity"], current.emissivity)
     flags = ("flip_horizontal", "flip_vertical", "colorbar", "reticle", "hotspot", "coldspot")

@@ -78,6 +78,12 @@ templates and places the files, wires the symlinks, and restarts the named servi
 
 - **Never run git.** The maintainer commits. Leave the tree green and hand over exact commands if a git
   action is needed.
+- **Never delete a file outright. Move it to `_trash/` instead.** `_trash/<name>` at the repo root,
+  git-ignored, and say in the handover what went there and why. A deletion made by an assistant is
+  a deletion the maintainer never saw coming, and the cheapest way to make one reviewable is to
+  leave it where it can be looked at and emptied by hand. This covers tidying, superseded files and
+  anything a tool would otherwise unlink. It does not cover files a build tool replaces in place,
+  such as the wheels `b3-builder --bake` re-downloads; say when a step does that.
 - **Never write an assistant session link or id into the repo.** Not in a commit message, a PR body, a
   code comment, a doc or a changelog. A session URL is a durable pointer to a whole transcript, and a
   repo is the wrong place for one: it outlives the conversation, travels with every clone, and is one

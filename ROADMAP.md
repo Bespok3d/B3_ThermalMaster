@@ -733,6 +733,31 @@ this one yet. It also breaks the colorbar into its gradient, its paste and its o
   words rather than implying it works. The driver's own model configuration is in place; nothing
   has been run against the hardware.
 
+**The readout candidates, measured 2026-09-17.** One taken, three rejected, one still unexplained.
+
+- **Taken: the upscale filter becomes a setting.** 3.09 ms bilinear against 0.60 ms nearest, which
+  is 2.49 ms of a 14.85 ms frame, the largest saving available anywhere in this plugin. It is also
+  the only candidate that changes what is on screen, so it ships as "Enlarging: smooth or sharp" on
+  the control page, defaulting to smooth so that upgrading changes nobody's picture. The saving is
+  one click away and the page says what it is worth.
+- **Rejected: the same upscale through `np.repeat`**, 2.51 ms against Pillow's 0.61 ms for the
+  identical picture. Pillow's resize is not the slow thing; the filter is.
+- **Rejected: caching a whole label tile.** 0.24 ms to 0.10 ms when the string repeats, and 0.25 ms
+  to 0.39 ms when it does not. Five labels a frame, but only three distinct strings, since the bar's
+  ends carry the same numbers as the hotspot and coldspot markers: two guaranteed hits and three
+  builds on any frame where the numbers moved, which is a wash. And on a 160 by 120 sensor with
+  noise, the hottest pixel's tenth of a degree moves most frames, so the cold path is the common
+  one. A candidate whose value depends on how still the scene is, in both directions, is not worth
+  the cache.
+- **Rejected, and the old comment vindicated: Pillow's own `draw.text`.** 2.12 ms against 0.24 ms
+  for the glyph cache, which is the nine times the cache was justified by on a development machine
+  two years of ratios ago. It is the one measurement from that machine that has transferred.
+- **Unexplained: the colorbar.** 1.61 ms as it ships, against about 0.4 ms for its measured pieces
+  and another 0.5 ms for its two labels. The bench now also times building an `ImageDraw` and one
+  of the bar's triangles, because every function in the readout builds its own drawing context and
+  a frame builds six or seven of them. That is a suspicion with a cheap measurement attached, not a
+  change; it goes in the next run.
+
 Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
 single stage" was right when the stages were four lines. With every step timed, the pipeline is
 8.10 ms across seven steps and the readout is 8.75 ms across two, so the next round goes to the

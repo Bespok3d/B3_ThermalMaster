@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.0
+
+- **A choice about how the picture is enlarged.** The plugin makes the picture bigger before it
+  draws the readout on it, so the text has room, and until now it always blended the sensor's
+  pixels while doing so. "Enlarging" on the settings page now offers sharp instead, which leaves
+  the pixels as squares and costs the printer about a sixth less work per frame. Smooth stays the
+  default, so nothing changes unless you change it, and it only applies while some part of the
+  readout is switched on.
+- Closing a browser tab no longer writes an error into the plugin's log. It never was one.
+
 ## 0.20.0
 
 A quarter off the work the plugin does before it even starts encoding, and the picture is unchanged

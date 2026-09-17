@@ -244,3 +244,7 @@ thermal-camera-P3-viewer/*
 # Compiled modules under plugin/files would be packed into the .b3, where the daemon refuses any
 # archive member not listed in files[].
 plugin/files/**/__pycache__/
+
+# Where an assistant puts anything it would otherwise delete, so the maintainer can look before it
+# goes. Never committed, and safe to empty by hand.
+_trash/
