@@ -32,12 +32,27 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # Finds the running service and prints its interpreter and its entry script, one per line. The
 # loop rather than pgrep because the printer's userland is BusyBox and pgrep is not a given. None
 # of it reads standard input, which is carrying the python script.
+# Finds the running service and prints its interpreter and its entry script, one per line. The
+# loop rather than pgrep because the printer's userland is BusyBox and pgrep is not a given. None
+# of it reads standard input, which is carrying the python script.
+#
+# The two conditions are both load bearing. A process qualifies when one of its arguments IS the
+# entry script, ending in the file name rather than merely containing it, and when its first
+# argument is a python interpreter. The first version asked only whether the command line
+# contained "thermal-master-stream", and the command line it was running inside contains that
+# string too, in this very comment: given a process id that sorted first, the finder found itself,
+# took "bash" as the interpreter and no script at all, and reported that the service was not
+# running while it was serving happily on port 8082.
 FIND_PLUGIN='
 for process in /proc/[0-9]*; do
-    tr "\0" "\n" < "$process/cmdline" 2>/dev/null | grep -q "thermal-master-stream" || continue
-    PYTHON=$(tr "\0" "\n" < "$process/cmdline" | head -1)
-    STREAMER=$(tr "\0" "\n" < "$process/cmdline" | grep "stream[.]py$")
-    break
+    [ "${process#/proc/}" = "$$" ] && continue
+    arguments=$(tr "\0" "\n" < "$process/cmdline" 2>/dev/null) || continue
+    STREAMER=$(printf "%s\n" "$arguments" | grep "thermal-master-stream[.]py$") || continue
+    PYTHON=$(printf "%s\n" "$arguments" | head -1)
+    case "$PYTHON" in
+        */python3|*/python) break ;;
+        *) PYTHON=""; STREAMER="" ;;
+    esac
 done
 if [ -z "${PYTHON:-}" ] || [ -z "${STREAMER:-}" ]; then
     echo "no thermal-master service is running on this printer" >&2

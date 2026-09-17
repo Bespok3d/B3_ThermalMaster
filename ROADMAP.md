@@ -585,6 +585,24 @@ it. `scripts/profile-on-printer.sh` now reads the interpreter and the entry scri
 running service's own `/proc` command line and pipes the profiler in over stdin, which copies
 nothing to the printer and cannot disagree with what is actually running.
 
+**F-70. The finder found itself.** The third run reported "no thermal-master service is running on
+this printer" while the plugin was serving on 8082 with the camera on the bus. The loop asked
+whether a process's command line contained "thermal-master-stream", and the command line it was
+running inside contained that string too, as the search pattern: given a process id that sorted
+ahead of the service's, it matched its own shell, took "bash" as the interpreter, found no script
+path, and declared the service missing. It had worked twice before purely because of how two
+process ids happened to sort.
+
+The fix is to ask for what a service actually looks like rather than for a substring: one argument
+that IS the entry script, ending in its file name, and a first argument that is a python
+interpreter. Both conditions are needed; either alone still matches the wrong thing.
+
+Two diagnoses in a row went the same way here. The first guess was that the interpreter path was
+another plugin's layout; the printer said the path was right. The second guess, when the discovery
+failed, was that the daemon had moved to a private process namespace; the printer said the process
+was listed in `/proc` exactly where it should be, with the entry script in its command line. Both
+times the evidence was one read-only command away, and both times the plausible story was wrong.
+
 **Step 2 is built as one measurement rather than three round trips.** The printer is not a machine
 anyone develops on, so `scripts/bench-pipeline-candidates.py` carries every candidate for those
 steps and prints, for each, the current cost, the candidate's cost and how far the two answers
