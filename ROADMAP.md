@@ -673,6 +673,35 @@ of the encode and the same resize with NEAREST is seven times cheaper, which is 
 measured in the same run: the picture is resampled again by every browser that shows it, and the
 viewer asks for it pixelated anyway.
 
+**The readout half, measured, 2026-09-17 at 0.20.0.** Of a 15.03 ms frame:
+
+| part | cost |
+| --- | --- |
+| the 2x resize, bilinear | 3.06 ms |
+| the same resize, nearest | 0.60 ms |
+| saving the 2x JPEG | 1.81 ms |
+| the colorbar, all of it | 1.59 ms |
+| the three markers | 1.22 ms |
+| one label, of those | 0.24 ms |
+
+Two things fall out of it. **The single most expensive operation in the whole frame is the upscale**,
+at 3.06 ms, and it exists only so the text has pixels to land on: the picture itself gains nothing
+from being smoothly doubled, because every browser scales it again afterwards and the viewer asks
+for it pixelated. Nearest is 0.60 ms, which is 2.46 ms of a 15.03 ms frame, and it is the one
+candidate so far that changes what is on screen in a way a person could point at: edges become
+steps. Pixels differ by about half a level of 255 on average on a synthetic scene, which is a
+number rather than a judgement, so it goes to the maintainer with two pictures rather than being
+taken here.
+
+**And the labels are the biggest thing inside the drawing**, which nothing suspected: five labels a
+frame at 0.24 ms each is about 1.2 ms of the 2.99 ms. The candidate is caching a whole label tile
+rather than pasting it one character at a time, keyed by the string, which hits whenever the tenth
+of a degree has not changed. `scripts/bench-readout-candidates.py` measures that on a hit and on a
+permanent miss, and re-measures Pillow's own `draw.text` against the glyph cache, because the cache
+was justified on a development machine and no ratio from that machine has survived contact with
+this one yet. It also breaks the colorbar into its gradient, its paste and its outline, since
+1.59 ms for a strip 8 pixels wide is more than it looks like it should cost.
+
 Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
 single stage" was right when the stages were four lines. With every step timed, the pipeline is
 8.10 ms across seven steps and the readout is 8.75 ms across two, so the next round goes to the

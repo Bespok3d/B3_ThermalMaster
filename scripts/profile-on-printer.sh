@@ -58,3 +58,4 @@ run_remote() {
 
 run_remote "$HERE/profile-frame-cost.py" "$@"
 run_remote "$HERE/bench-pipeline-candidates.py"
+run_remote "$HERE/bench-readout-candidates.py" "$@"
