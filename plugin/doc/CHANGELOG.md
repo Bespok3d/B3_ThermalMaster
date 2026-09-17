@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.20.0
+
+A quarter off the work the plugin does before it even starts encoding, and the picture is unchanged
+byte for byte. Three steps, all measured on a printer rather than guessed at:
+
+- The display range is read from one pass over the frame instead of two.
+- The colour lookup goes through a faster path in numpy for exactly the same result.
+- Averaging a frame with the one before it stays in whole numbers rather than going out to floating
+  point and back.
+
+Nothing to change and nothing to notice, unless you were watching the processor.
+
 ## 0.19.0
 
 - **Spots.** Click the picture in Spot mode and it marks that place and reads its temperature, up to

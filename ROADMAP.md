@@ -567,24 +567,93 @@ three bad forecasts, and it also explains why removing the 4x upscale in 0.5.2 r
 rather than the three quarters predicted: the upscale was never four fifths of the work on hardware,
 it was four fifths of the work on a laptop.
 
-Where the pipeline time plausibly goes, in order of suspicion, none of it measured yet:
+**Step 1, done, and the profiler was broken.** It loaded the streamer by path, which stopped being
+the plugin when the code moved into a package (F-47), and it built settings with an `overlay` field
+that the 0.10.0 split replaced. So the table above is from 0.8.x and nothing has been measured since.
+It now imports the package the way the harness does, and prints a second table timing every step
+inside the pipeline on its own: noise reduction, the two percentiles, statistics, normalise, the
+unsharp mask and its blur, the palette lookup, orient, both encodes and the readout drawing.
 
-- `frame_bounds` calls `np.percentile` twice, and each call sorts or partitions all 19,200 pixels.
-  One call asking for both percentiles would halve it, and taking them from a 2x2 subsample would
-  quarter that again, at no cost to a display range that is smoothed over a second anyway.
-- `enhance_detail` and `blur_3x3` make about six full-frame passes in float32, on data that arrived
-  as uint8.
-- `reduce_temporal_noise` casts to float32 and back for what is, at the default weight, an average
-  of two integers.
+**And the invocation failed, on a path that turned out to be right.** Both commands answered
+"No such file or directory" for the interpreter, so the working theory was that
+`$BESPOK3D/venv-plugins/<plugin>/bin/python3` was another plugin's layout rather than this one's.
+The discovery run then printed exactly that path. The interpreter was never the problem; the
+handover was, a two line recipe with shell variables that only works if both lines are run in one
+shell. Recorded because the wrong conclusion was one inference away from being written down as a
+platform fact, and the thing that corrected it was asking the printer rather than reasoning about
+it. `scripts/profile-on-printer.sh` now reads the interpreter and the entry script out of the
+running service's own `/proc` command line and pipes the profiler in over stdin, which copies
+nothing to the printer and cannot disagree with what is actually running.
 
-The readout is the other half of the story: 6.82 ms of the 16.62, split about evenly between the
-doubled encode and the drawing. The drawing is 3.31 ms on the printer against 0.19 ms on a
-development machine, so pasting glyph tiles with an alpha mask is far more expensive there than the
-glyph cache measurements suggested. Worth revisiting whether the tiles can be pasted without a mask,
-or composited once into a strip.
+**Step 2 is built as one measurement rather than three round trips.** The printer is not a machine
+anyone develops on, so `scripts/bench-pipeline-candidates.py` carries every candidate for those
+steps and prints, for each, the current cost, the candidate's cost and how far the two answers
+differ. A candidate earns its way in by being faster there and by agreeing with what it replaces.
+Candidates: both percentiles from one call; both from a 2x2 subsample; the half-and-half noise
+reduction in integers; the unsharp mask in integers with the blur carried at 16 times its value;
+and the palette lookup through `np.take`.
 
-Sequencing: fix the pipeline first. It is the largest single stage, it is paid whether or not the
-readout is on, and unlike the readout it has no toggle.
+On a development machine, where the ratios famously do not transfer, one percentile call is 40%
+off that step with identical numbers, the subsample is 60% off with the range ends moving 0.047 C,
+the integer noise reduction is exact, the integer unsharp mask differs by at most one of 255 on
+0.0% of pixels, and `np.take` is three times faster than fancy indexing with identical output. The
+last one is not on F-56's list of suspects at all, which is the argument for measuring the whole
+pipeline rather than the three steps somebody guessed at.
+
+**Measured, 2026-09-17, at 0.19.0.** The same four stages, and every step inside the pipeline on
+its own. The stage table barely moved across a dozen releases of new features, which is worth knowing on
+its own: 17.20 ms a frame with the readout on, against 16.62 ms at 0.8.x.
+
+| step | cost | share of a core at 25 fps |
+| --- | --- | --- |
+| noise reduction | 0.18 ms | 0.4% |
+| bounds, two percentiles | 1.85 ms | 4.6% |
+| statistics and emissivity | 0.54 ms | 1.4% |
+| normalise to bytes | 0.33 ms | 0.8% |
+| unsharp mask, of which 1.20 ms is the blur | 1.62 ms | 4.0% |
+| palette lookup | 1.44 ms | 3.6% |
+| orient | 0.97 ms | 2.4% |
+| encode at 1x | 1.03 ms | 2.6% |
+| encode at 2x | 5.29 ms | 13.2% |
+| draw the readout | 3.46 ms | 8.6% |
+
+**Taken, and in 0.20.0.** All three are the same picture, byte for byte, which is why they are taken
+without argument:
+
+- **Both percentiles from one call**, 2.07 ms to 1.14 ms. The largest single saving in the pipeline,
+  and the two numbers are identical to the last bit.
+- **The palette lookup through `np.take`**, 1.44 ms to 0.48 ms, output identical. This was on
+  nobody's list. It is the argument for timing every step rather than the three that looked
+  expensive: the suspicions named the unsharp mask, which turned out to be worth a fifth of this.
+- **The half-and-half noise reduction in integers**, 0.19 ms to 0.14 ms, exactly equal because the
+  sum is well inside float32's exact range and the float version was already computing the same
+  floor.
+
+About 1.9 ms of the 8.10, a quarter of the pipeline and a ninth of the whole frame.
+
+**Rejected, with reasons, both still in the bench.**
+
+- **Percentiles from a 2x2 subsample**, 1.14 ms to 0.80 ms on top of the change above. It moves the
+  range ends by about a twentieth of a degree, which is a change to what is on screen in exchange
+  for a third of what the single call already saves. Available if the frame budget ever gets tight.
+- **The unsharp mask in integers**, 1.58 ms to 1.36 ms, with one pixel in the frame differing by one
+  of 255. Named as a prime suspect by the original finding and worth 0.22 ms in practice, which does
+  not pay for a picture that is not quite the same picture.
+
+**Where the next round is, and it is not the pipeline.** The encode at 2x is 5.29 ms and the readout
+drawing is 3.46 ms: 8.75 ms between them, more than the whole pipeline, and both exist only because
+the burned-in text needs pixels to land on. The suspicion is the same as it was, now with a number
+behind it: the drawing is 3.46 ms on the printer against 0.10 ms on a development machine, so what
+is expensive there is not the glyph rendering the cache already avoids but the pasting. Candidates
+to bench next, in the same one-run style: a cheaper resize filter for the 2x step, since the picture
+is resampled again by every browser that shows it; pasting glyph tiles without an alpha mask;
+compositing a whole label into one tile, cached by its string, so a label is one paste rather than
+seven.
+
+Sequencing note, kept because it stopped being true: "fix the pipeline first, it is the largest
+single stage" was right when the stages were four lines. With every step timed, the pipeline is
+8.10 ms across seven steps and the readout is 8.75 ms across two, so the next round goes to the
+readout.
 
 Reducing the connection churn is worth doing regardless, and there is a constraint worth recording
 before anyone plans it: `keepalive` is only valid inside an nginx `upstream` block, which belongs to
