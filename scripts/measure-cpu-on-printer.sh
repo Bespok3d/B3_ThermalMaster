@@ -28,13 +28,19 @@ SAMPLE="${2:-30}"
 QUIET="${3:-0}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# The source directive is for a run with -x. The gate checks each script on its own without it,
+# so the file cannot be followed from here; it is checked in its own right by the same run.
 # shellcheck source=scripts/find-plugin.sh
+# shellcheck disable=SC1091
 . "$HERE/find-plugin.sh"
 
 # Reading the counter twice on the printer rather than over two ssh connections, so the window is
 # the window and not the round trip. The comm field is in brackets and may hold anything, so it is
 # cut off by its closing bracket rather than counted as a field: after that, user time and system
 # time are the twelfth and thirteenth.
+# The single quotes are the point, as in find-plugin.sh: this is shell for the printer, and
+# $PID, $QUIET and $SAMPLE are the remote shell's variables rather than this one's.
+# shellcheck disable=SC2016
 MEASURE='
 ticks=$(getconf CLK_TCK 2>/dev/null || echo 100)
 cores=$(grep -c "^processor" /proc/cpuinfo)
@@ -54,4 +60,7 @@ awk -v a="$started" -v b="$finished" -v t="$SAMPLE" -v k="$ticks" -v c="$cores" 
 '
 
 # The two settings travel as environment for the remote shell rather than being pasted into it.
+# SC2029: expanding here is the intent. The values are this script's arguments, and they have
+# to be written into the command for the remote shell to receive them as its environment.
+# shellcheck disable=SC2029
 ssh "$HOST" "SAMPLE=$SAMPLE QUIET=$QUIET; $FIND_PLUGIN $MEASURE"

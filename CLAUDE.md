@@ -60,6 +60,14 @@ templates and places the files, wires the symlinks, and restarts the named servi
 
 1. **Understand first.** Read the plugin's `manifest.json`, its `files/`, and its `doc/README.md`. Do
    not invent structure; if the intent is unclear, ask one specific question and stop.
+
+   **Treat this repo's own prose as a lead, not as a fact.** `ROADMAP.md` is written from memory
+   after the work, and it is the most valuable file here precisely because it records what a defect
+   looked like before it was understood. That also means its specifics drift. On 2026-09-18 three
+   write-ups were right in substance and wrong in detail: a cause that could not produce the error
+   attributed to it, a count taken from one rotated log out of nine, and a defect that no longer
+   reproduced at all. Before acting on a recorded finding, re-derive it from the code or the data,
+   and correct the section in the same change.
 2. **Scope it to a user story.** "As a [role], I want [capability] so that [value]." Implement only what
    the story needs: no speculative features, no defensive code for cases that cannot happen.
 3. **Write the change** to the rules above.

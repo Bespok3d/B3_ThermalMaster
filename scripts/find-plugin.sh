@@ -8,8 +8,16 @@
 # the search pattern, so with an unlucky process id the finder found itself and reported that the
 # service was not running while it served happily on port 8082 (F-70). One copy, fixed once.
 #
+# It is sourced and so has no shebang, which leaves shellcheck unable to infer a shell when it
+# checks this file on its own. It runs under the printer's BusyBox ash, so it is checked as sh.
+# shellcheck shell=sh
+#
 # Sets PID, PYTHON and STREAMER on the printer, and says what it found on stderr. It reads no
 # standard input, which is what lets a caller pipe a python script through it.
+# SC2034: FIND_PLUGIN is read by the scripts that source this file, never inside it.
+# SC2016: the single quotes are the point. This is shell for the printer and has to arrive
+# unexpanded, because every variable in it names something on the printer, not here.
+# shellcheck disable=SC2034,SC2016
 FIND_PLUGIN='
 for process in /proc/[0-9]*; do
     [ "${process#/proc/}" = "$$" ] && continue

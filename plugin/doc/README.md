@@ -262,6 +262,19 @@ Worth checking after an install:
 5. Unplug and replug the camera, and confirm the stream recovers on its own.
 6. Uninstall, and confirm the camera tile disappears and nothing is left behind.
 
+## Where to buy a P1
+
+Thermal Master supports this project with hardware and an affiliate arrangement. If you are buying a
+camera and want the project to benefit, buy it through the shop link below, where the discount code
+applies:
+
+- Shop: https://thermalmaster.com/BESPOKD
+- Discount code: `THERMALYML01`, at that shop
+
+It is an affiliate link, so the project earns a commission, at no extra cost to you. It changes
+nothing about what this documentation says: the P3 still has not been tested, which is worth knowing
+before buying one.
+
 ## Credits
 
 USB driver vendored from [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera)

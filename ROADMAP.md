@@ -2061,8 +2061,11 @@ What is left, in the order it is worth doing:
 
 - **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
   release workflow and simply is not set; the decision is whether private testing is over.
-- **Three reports owed elsewhere**, all written up above: the driver's P1 shutter bug, the installer
-  dropping `userEditable`, and the filaman card defect.
+- **Two reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug, which goes
+  as a comment on upstream issue #17 rather than as a new issue, and the filaman card, which goes
+  privately to its owner. Both were drafted outside the repo, since a message addressed to another
+  project is spent once it is sent; section 10 is the version that stays. The third, the installer dropping
+  `userEditable` values, was retested on 2026-09-18, did not reproduce, and is closed.
 - **The P3 hardware trial**, whenever one turns up. Everything for it is implemented and none of it
   has met the device.
 - **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
@@ -2153,7 +2156,7 @@ One clarification for anyone reading this later and trying to check it. "Only wo
 is a statement about the URLs the page emitted, not an invitation to open port 8082 in a browser.
 The service binds to 127.0.0.1 by design, so the port is unreachable from anywhere but the printer
 itself and refuses the connection: that is the intended posture and not a symptom. The direct mount
-point is verified by `scripts/check-control-page.py`, which serves the page on loopback and drives
+point is verified by `scripts/check-in-browser.py`, which serves the page on loopback and drives
 it there, and on the printer by curling 127.0.0.1:8082 from its own shell.
 
 The browser check is not in the gate; a browser download is too much to ask of a printer plugin
@@ -2161,3 +2164,224 @@ contributor. What went into the suite instead are the two rules it taught, as as
 rendered HTML: no form control may share a name with a property of `HTMLFormElement`, and the page
 may not emit an absolute path. Those are cheap, they run everywhere, and either one would have
 caught its bug.
+
+## 10. Reports owed elsewhere
+
+Three defects found while building this plugin, none of which belongs to this repository. Two are
+owed to somebody: 10.1 as a comment on an issue that already exists, 10.3 as a private message. The
+third, 10.2, was retested on 2026-09-18 and is not reproducible, so it is closed rather than sent,
+and kept here with the retest that closed it.
+
+They are written up here because the finding is the expensive part and it is the part that
+evaporates: each one cost hours to diagnose, the workaround is already in this codebase, and the
+diagnosis exists nowhere else. Two of the three were wrong in their specifics when they were
+re-checked against the code and the data, which is the argument for writing them down in a form that
+can be re-checked at all.
+
+### 10.1 The vendored driver's `trigger_shutter` is broken on a P1
+
+**Where it goes:** [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera), the upstream
+of `plugin/files/vendor/p3_camera.py`. Pinned here at `e3205dca5727682ff2d903585d1dce5a1d19f1f6`.
+
+**It is already reported, and not by us.** Issue #17, "Error with trigger shutter", opened
+2026-03-21 by brandonrwin: same exception, same line, same P1, same commit, on macOS rather than on
+a printer. It is open, it has no comments, and no pull request addresses it. So this is a comment on
+#17, not a new issue, and what we contribute is the model constant analysis, the second defect
+below, and confirmation on a second platform.
+
+**What happens:** calling `trigger_shutter` on a Thermal Master P1 raises `memoryview assignment:
+lvalue and rvalue have different structures`, and no calibration happens.
+
+**Why, corrected 2026-09-18.** Both shutter constants are measurements of what a P3 emits and they
+scale to a P1 by sensor width only, but they fail in a different order than this section first
+recorded.
+
+The raise comes from the read loop. `trigger_shutter` reads until it has `frame_read_size +
+shutter_seg_1` bytes into a buffer allocated at exactly that size, so the headroom for the mistimed
+partial frame is `shutter_seg_1`, which is `shutter_seg_1_lines * sensor_w` with the line count
+hardcoded at 36 for both models. On a P1 the camera's real post shutter emission does not fit that
+assumption, the last read returns more than the buffer has room for, and
+`frame_buf_view[pos:next_pos] = chunk_buf_view[:n]` assigns a longer rvalue into a shorter slice.
+That is the only memoryview assignment in the method.
+
+The `shutter_seg_2` arithmetic this section used to blame is real but is the second defect, not the
+first. 800 lines is 204,812 bytes on a P3 and sits inside its 206,872 byte buffer; on a P1 it is
+128,012 into a buffer of 83,224, which is 44,788 bytes past the end. A memoryview slice with out of
+range bounds clamps rather than raising, so that alone never threw: it would return an empty second
+segment and a silently short frame. Nobody sees it today because the read raises first. Fix only the
+read, which is what #17 proposes, and a P1 stops raising and starts returning a truncated frame with
+no way for the caller to tell.
+
+One more correction, because it changes what the fix should be. #17 says `read_frame` "properly
+constrains reads" and `trigger_shutter` does not. Neither constrains: both call
+`dev.read(0x81, chunk_buf, 10000)` with the whole chunk buffer. What `read_frame` has is the resync
+guard above its assignment, which restarts at `pos = 0` when a read lands at or past the end of the
+frame without being a 12 byte end marker. That guard is what keeps it from overrunning, so bounding
+the read without adding the guard trades a loud failure for a quiet one.
+
+**Suggested fix for upstream:** drop the read-back, since `read_frame` already recovers from a
+mistimed frame by exactly that guard, which makes the method model independent by making it do less
+and retires both defects at once. Failing that, give the read the guard rather than only a bound,
+and derive both segment offsets from the model config with an offset that does not fit the buffer
+rejected instead of clamped.
+
+**What this plugin does instead:** `fire_shutter` in `plugin/files/lib/thermal_master/camera.py`
+sends `COMMANDS["shutter"]` and reads the status, which is all a calibration needs, and lets the
+ordinary reader resynchronise over the frame that follows. That reaches past an underscore
+deliberately: the alternative is copying the endpoint, the request numbers and the timeout out of
+the driver, where they would rot the next time the pin moves. The driver is pinned and is not ours
+to edit (`VENDORING.md`).
+
+**Confirmed on:** a P1, `3474:45c2`, on a Snapmaker U1. Not tried on a P3, where it presumably
+works, since the constants were measured there. What is not measured anywhere, ours or #17's, is the
+P1's actual post shutter emission size: both of us stopped calling the method rather than
+instrumenting it.
+
+### 10.2 Closed, not sent: `userEditable` values reaching a templated file
+
+**Status: retested 2026-09-18 and not reproducible. No report goes anywhere.** It is kept here in
+full, because a finding that was reasonable at the time and did not survive a retest is worth more
+on the page than deleted, and because the retest is a one minute recipe if it ever comes back.
+
+**What was believed:** that a `config[]` entry declared `userEditable: true` is presented to the
+user at install time, the user sets it, and the file templated from it comes out holding the
+manifest's `default` instead of the value the user chose. It would have gone to the Bespok3d daemon
+and installer, whoever owns the install path that templates `install.place[]` entries, and never to
+`b3-builder`: the package was built correctly and carried the right template.
+
+**How it was found, 2026-09-14, during Phase 5b.** This plugin's `files/webcam.conf.tmpl` is a
+Moonraker `[webcam]` fragment templated from two config values, `THERMAL_CAMERA_NAME` and
+`THERMAL_CAMERA_ASPECT`, both `userEditable`. The camera was mounted the other way round, so the
+picture needed rotating, and Fluidd can only rotate a camera from a config file this plugin owns:
+the correction therefore had to arrive through a reinstall. Every reinstall came up with the
+defaults, so the sideways camera could not be corrected at all, by any route available to a user.
+
+Three rounds went into diagnosing that, and two of the theories were wrong before this one was
+adopted: that Fluidd ignores `aspect_ratio`, and that rotating server side would fix the letterbox
+bars. Both were disproved on hardware. What was recorded as certain is that the values entered did
+not reach the rendered config. The mechanism behind that was never established, because the
+workaround below had already made it not matter.
+
+**The retest, 2026-09-18, on the maintainer's own printer.** Before: the values sat at their
+defaults, which he had accepted at install, so the placed file agreeing with them proved nothing.
+He then reinstalled through the app choosing a name and a shape that are not the defaults. After:
+
+| | before | after |
+| --- | --- | --- |
+| `usr/local/plugins/thermal-master/user_vars.json` | `Thermal`, `4:3` | `IR`, `3:4` |
+| the placed `moonraker/thermal-master.cfg` | `[webcam Thermal]`, `4:3` | `[webcam IR]`, `3:4` |
+
+Capture and templating are both correct. The chosen value is stored and it reaches the rendered
+file.
+
+**And the plugin has not changed in any way that could explain it.** The `config[]` block, the
+`requires.variables` block, the `$THERMAL_CAMERA_NAME` and `$THERMAL_CAMERA_ASPECT` substitutions
+and the `moonraker-config` place entry with `render: true` are identical in the packages for 0.6.0,
+0.7.0 and 0.25.0, compared by reading the manifests out of `dist/`. Nothing this repo ships accounts
+for the difference, so either the daemon changed between 14 and 18 September, or what happened on
+14 September had a cause that was never found and this section named the wrong culprit. Both remain
+open; there is no way to choose between them from here, and a maintainer should not be sent a defect
+his installer does not exhibit.
+
+One thing could not be pinned down: the daemon's version. `/userdata/bespok3d/etc/version` reads
+`0.0.1`, which is not it, since the catalogue publishes `bespok3d-daemon 0.14.0` and the index was
+last assembled on 31 August. So this is "not reproducible on 2026-09-18", not "fixed in version X".
+
+**How to retest it in a minute**, if a templated value ever comes out wrong again:
+
+```sh
+ssh <printer> 'cat /userdata/bespok3d/usr/local/plugins/thermal-master/user_vars.json
+grep -E "^\[webcam|^aspect_ratio" /oem/printer_data/config/bespok3d/moonraker/thermal-master.cfg'
+```
+
+Reinstall with a name and a shape that are not the defaults and run it again. The two outputs
+agreeing with what was chosen is the working case. `user_vars.json` right and the placed file wrong
+puts the fault in templating; `user_vars.json` wrong puts it in capture, before templating is
+reached. Knowing which is the difference between a useful report and this one.
+
+**What this plugin does instead, and would keep doing either way:** it stopped depending on
+install-time configuration for anything correctable. Orientation, palette, mirroring and the rest
+moved into the plugin's own settings page and a `SettingsStore` persisted to `$BESPOK3D/var`, and
+Fluidd's own rotation is pinned to zero in the fragment. The two config values that remain are the
+camera's display name and the tile shape, neither of which breaks the plugin if it comes out as the
+default. That was the right design regardless of whose defect this was.
+
+### 10.3 A filaman card polls an endpoint nobody serves, forever
+
+**Where it goes:** the **filaman** plugin, privately. It is a private plugin with no public URL, so
+this is a message to its owner rather than an issue. Not `fluidd-plugin`, even though the offending
+file's own header says so: that misattribution is part of the defect, because it sends anyone
+debugging this to the wrong repository, and `Bespok3d/fluidd-plugin` does have the
+`scripts/patch-fluidd.sh` the header names and nothing whatsoever to do with this card.
+
+**Measured, 2026-09-18, and the first write up of this section was wrong about the size of it.** It
+recorded 39,081 requests, which was one rotated log out of nine. Reading all nine gives **647,327**.
+The 13 August start date was right.
+
+Every figure below can be re-derived from the maintainer's log backups without any tool of ours: the
+orphan is every line containing `server/filaman/status` logged `404`, the window is the first and
+last of those timestamps, the share is that count against the file's total lines, and the retention
+comparison is the span each 10 MB rotated file covers, before 13 August against after. The script
+written to do it analyses another plugin's defect and has no business in this repo, so it goes to
+filaman's owner with the report rather than being kept here.
+
+**What happens:** on a printer where filaman is not installed, every open Fluidd tab issues
+`GET /server/filaman/status` every five seconds, for as long as the tab stays open, forever.
+
+**Three defects, and the third is what makes the others permanent.**
+
+*It has never been answered.* All 647,327 requests are logged 404, from the first at 09:50 on
+13 August to the last at 08:28 on 14 September. The filaman component itself loads at 18:36:54 that
+first day and again at 18:46:58 after a restart, and it comes up healthy: post init runs, it
+discovers all four filament sensors by name, it sets a spool, it registers an announcements feed.
+The polling continues through both loads without pausing, still 404, for about nine hours. So the
+card is not asking for something that used to exist; it asks for a route the component does not
+serve, and has since the day it arrived. This was nearly claimed on the wrong evidence: Moonraker
+logs no request it answers, 647,354 lines record a 404 and not one records a 200 while 101, 201,
+503 and 500 all appear, so a working poll would be invisible. The finding rests on 404s recorded
+during confirmed component uptime, never on an absence of successes.
+
+*The poll never stops.* `b3d-filaman-card.js` documents itself in its own header as inert on a
+printer without the filaman component. It is not. `whenDocumentIsReady` calls `setInterval(poll,
+5000)` unconditionally, and the failure handler calls only `removeCardElement` and never clears the
+timer. So the card removes itself from the page, which is why nobody sees anything wrong, and goes
+on polling from a document it has already removed itself from. The timers also appear to stack
+rather than running one per tab: across the nine files the observed rate runs from 1.05 to 2.34
+times what a single five second timer could produce, and in one file 22,925 requests land under a
+second apart. That last part is inference and is marked as such in the report; the card's source
+could not be re-read, because the file was gone from the printer before the measuring started.
+
+*The orphan.* An earlier filaman version instrumented the fluidd plugin's bundle: it appended
+`<script src="./b3d-filaman-card.js"></script>` to `index.html` and installed
+`b3d-filaman-card.js` beside it. filaman 0.2.1 ships neither, so upgrading or uninstalling leaves
+both behind permanently. The plugin that made the change no longer declares it, so nothing on the
+printer knows the change is there to undo. A plugin that modifies a file it does not own has to keep
+declaring that modification for as long as any installed version of it might still be on a printer,
+or it cannot be cleaned up by anything except a human who already knows.
+
+**What it costs:** 88.0% of every line written to the Moonraker log over that month, and 90.7% of
+the bytes, at about 20,000 requests a day. The damage is the log, not the requests. One 10 MB file
+held 25 March to 13 August, 141 days; after the card arrived a 10 MB file fills in two to five days,
+which quietly destroys the printer's ability to answer any question about last week. That is how it
+was found at all. Removing the two leftovers on 14 September took the log from 17,634 lines a day to
+611.
+
+**Suggested fixes, smallest first:**
+
+1. Clear the interval in the failure path. One line, and it makes the behaviour match what the
+   file's own header already claims.
+2. Check `/server/info` for the filaman component before starting the timer at all, which avoids
+   even the first request on a printer that does not have it.
+3. Work out why the endpoint answers 404 with the component loaded. Until that is understood, 1 and
+   2 silence a card that still does not work for anybody.
+4. Have filaman keep declaring the files it installed into the fluidd bundle, so an upgrade or an
+   uninstall removes them. Without this, the rest fix only printers that receive a new copy of a
+   file that is no longer shipped, which is none of them.
+5. Correct the header's attribution, which currently points at `fluidd-plugin`'s `patch-fluidd.sh`.
+
+**Cleaning up a printer that already has one:** the two leftovers are `b3d-filaman-card.js` in the
+fluidd bundle and the `<script>` tag appended to its `index.html`. Removing both stops the polling.
+
+**A separate small thing found alongside it:** `announcements.py:_fetch_moonlight()` failed to
+update the subscription named `filaman` with its own HTTP 404, at both component loads. Unrelated to
+the polling, but it is a registered feed that does not resolve.

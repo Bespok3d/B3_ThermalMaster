@@ -152,6 +152,30 @@ has never been in front of one. The sensor is 256x192 against the P1's 160x120, 
 reads from the driver rather than assuming. If you have a P3, it should work, and a report either
 way is welcome.
 
+## Sponsorship
+
+Thermal Master supports this project with hardware and an affiliate arrangement. It does not fund
+it, and it does not buy any of the technical content. The performance figures above are measurements
+taken from a printer, the hardware status section still says plainly that the P3 has never been in
+front of one, and anything that stops being true about either camera gets written here whatever the
+arrangement is.
+
+### Where to buy a P1
+
+If you are buying one and want the project to benefit, buy it through the shop link below. It costs
+you nothing extra, and the discount code applies there.
+
+| | |
+| --- | --- |
+| Official shop | https://thermalmaster.com/BESPOKD |
+| Discount code | `THERMALYML01`, at that shop |
+
+Before buying a P3, read the hardware status above. The plugin drives it from the same code path and
+the same driver model config, and it has never been in front of one.
+
+Disclosure: the shop link is an affiliate link, so the project earns a commission on purchases made
+through it, at no extra cost to you.
+
 `plugin/doc/README.md` is the documentation that ships inside the package and is rendered in the
 app. It is written for somebody using the plugin; this file is written for somebody opening the
 repository.

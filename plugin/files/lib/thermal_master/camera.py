@@ -164,13 +164,22 @@ def fire_shutter(camera: P3Camera) -> None:
     """Fire the calibration shutter, without asking the driver to read the frame that follows.
 
     The driver has its own `trigger_shutter`, and it cannot be used on a P1. It sends this command
-    and then reads back the mistimed frame the camera emits afterwards, reassembling it from two
-    segments whose offsets are absolute line counts measured on a P3. `shutter_seg_2` is 800 lines:
-    on a 256 wide sensor that is 204,812 bytes and lands inside the 206,872 byte frame buffer, and
-    on a 160 wide P1 it is 128,012 bytes into a buffer of 83,224. The read overruns the buffer
-    first, which on hardware surfaced as "memoryview assignment: lvalue and rvalue have different
-    structures" and no calibration. Reported upstream. Not patched here: the vendored driver is
-    pinned and is not ours to edit (VENDORING.md).
+    and then reads back the mistimed frame the camera emits afterwards, sized and reassembled from
+    line counts measured on a P3 that scale to a P1 by sensor width alone.
+
+    Two of those constants are wrong on a P1 and they bite in that order. The read target and the
+    frame buffer both carry `shutter_seg_1`, 36 lines, as the headroom for the partial frame; the
+    P1's real emission does not fit it, so the last read returns more than the buffer holds and the
+    assignment raises "memoryview assignment: lvalue and rvalue have different structures", with no
+    calibration. Behind that, `shutter_seg_2` is 800 lines, which is 204,812 bytes inside a P3's
+    206,872 byte buffer and 128,012 bytes into a P1 buffer of 83,224. An out of range memoryview
+    slice clamps rather than raising, so that one never threw: it waits to return a silently short
+    frame to whoever fixes the read without fixing it too.
+
+    Upstream issue #17 has the raise, from March 2026 and still open. The second constant, and the
+    fact that `read_frame` survives the same reads through its resync guard rather than through any
+    bound of its own, are ours to add there. Not patched here: the vendored driver is pinned and is
+    not ours to edit (VENDORING.md).
 
     The command itself is model independent, a fixed control transfer and its acknowledgement, and
     those two lines are all a calibration actually needs. The frame afterwards is the part we did

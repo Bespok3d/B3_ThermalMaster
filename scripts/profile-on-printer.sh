@@ -31,7 +31,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # The discovery half lives in one file, because two copies of it is how the bug it already had
 # comes back in only one of them.
+# The source directive is for a run with -x. The gate checks each script on its own without it,
+# so the file cannot be followed from here; it is checked in its own right by the same run.
 # shellcheck source=scripts/find-plugin.sh
+# shellcheck disable=SC1091
 . "$HERE/find-plugin.sh"
 
 run_remote() {
