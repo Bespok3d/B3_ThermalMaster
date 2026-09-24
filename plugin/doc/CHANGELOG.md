@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.1
+
+- **The camera no longer floods your network when it is open in two places at once.** With the
+  picture showing in two tabs, or on a laptop and a phone together, the plugin could send each of
+  them the same frame over and over, as fast as the network would carry it. It now sends each new
+  frame once to everybody watching. With the camera open in one place only, nothing changes.
+- The documentation explains a freeze of about three seconds every thirty or so, which comes from a
+  printer stuck reconnecting to a wifi network rather than from the plugin, and what to do about it.
+- The documentation says where to buy a camera, with a discount code, through Thermal Master, who
+  support this project.
+
 ## 0.25.0
 
 - **The plugin says what it is costing the printer.** The settings page carries a line reading its

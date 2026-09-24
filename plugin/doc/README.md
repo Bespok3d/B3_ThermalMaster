@@ -164,6 +164,13 @@ them have met the hardware. If you have a P3, it should work, and a report eithe
 
 ## Notes
 
+**If the picture freezes for about three seconds, every thirty seconds or so,** check that the
+printer is not stuck reconnecting to a wifi network. Blocking a printer at the router while it runs
+on ethernet does not turn its wifi off: it keeps joining, being refused and trying again, and each
+attempt can briefly interrupt the picture on its way to you. Turn the wifi off, or make the printer
+forget the network, on the printer itself. The plugin is not involved; the camera keeps capturing
+throughout.
+
 ## What it costs when you are not looking
 
 Nothing much, since 0.23.0. A minute after the last request for a picture the plugin stops

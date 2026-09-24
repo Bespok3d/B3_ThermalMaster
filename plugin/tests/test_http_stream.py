@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import http.client
 import json
+import socket
 import threading
+import time
 
 import pytest
 
@@ -86,6 +88,81 @@ def test_the_stream_announces_itself_as_multipart(serving):
     content_type = response.getheader("Content-Type")
     assert content_type == "multipart/x-mixed-replace; boundary=frame"
     connection.close()
+
+
+STREAM_PART_BOUNDARY = b"--frame\r\n"
+
+# Long enough for a handler to be parked in its wait, short enough that no stream reaches the one
+# second timeout that resends the current frame before a test has finished counting.
+STREAMS_SETTLE_SECONDS = 0.1
+QUIET_STREAM_SECONDS = 0.2
+COUNTING_GIVES_UP_SECONDS = 0.5
+
+
+def open_stream(server) -> socket.socket:
+    """A raw connection that has asked for the stream, so a test can count exactly what arrives."""
+
+    host, port = server.server_address
+    stream = socket.create_connection((host, port), timeout=5.0)
+    stream.sendall(b"GET /stream.mjpg HTTP/1.1\r\nHost: thermal\r\n\r\n")
+    return stream
+
+
+def parts_arriving(stream: socket.socket) -> int:
+    """How many parts arrive before the stream falls quiet, or counting gives up."""
+
+    stream.settimeout(QUIET_STREAM_SECONDS)
+    deadline = time.monotonic() + COUNTING_GIVES_UP_SECONDS
+    pending = b""
+    parts = 0
+    while time.monotonic() < deadline:
+        try:
+            chunk = stream.recv(65536)
+        except TimeoutError:
+            break
+        if not chunk:
+            break
+        pending += chunk
+        parts += pending.count(STREAM_PART_BOUNDARY)
+        # Kept short of a whole boundary, so one that straddles two reads is counted once.
+        pending = pending[-(len(STREAM_PART_BOUNDARY) - 1):]
+    return parts
+
+
+def test_interest_noted_elsewhere_sends_open_streams_nothing(serving):
+    """Every stream notes its interest before each part, on the condition frames are announced on.
+
+    A stream that took somebody else's interest for a new frame resent the current one, and noted
+    its own interest in turn, which woke the other: two open streams sent each other the same frame
+    as fast as the network drained it, 830 parts a second on hardware against the camera's 25
+    (F-73). Interest is not a frame, and must bring an open stream no part at all.
+    """
+
+    server, frame_store = serving
+    first, second = open_stream(server), open_stream(server)
+    time.sleep(STREAMS_SETTLE_SECONDS)
+
+    frame_store.note_interest()
+
+    assert parts_arriving(first) == 0
+    assert parts_arriving(second) == 0
+    first.close()
+    second.close()
+
+
+def test_a_new_frame_reaches_every_open_stream_exactly_once(serving):
+    """The other half, so that a stream silenced for good would not pass for a fixed one."""
+
+    server, frame_store = serving
+    first, second = open_stream(server), open_stream(server)
+    time.sleep(STREAMS_SETTLE_SECONDS)
+
+    frame_store.publish(FAKE_JPEG)
+
+    assert parts_arriving(first) == 1
+    assert parts_arriving(second) == 1
+    first.close()
+    second.close()
 
 
 def test_the_stream_sends_a_well_formed_part(serving):

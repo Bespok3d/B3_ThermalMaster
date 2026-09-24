@@ -211,10 +211,27 @@ class LatestFrame:
         with self._updated:
             return self._jpeg
 
-    def wait_next(self, timeout: float) -> bytes | None:
+    def wait_next(self, timeout: float, newer_than: int) -> tuple[bytes | None, int]:
+        """The first frame published after publication `newer_than`, or the current one at timeout.
+
+        Waited for in a loop, for the reason `wake` gives: the condition is shared, and every
+        stream notes its interest on it before each part. A single wait took another stream's
+        interest for a new frame and resent the current one, which noted its own interest and woke
+        the first in turn, so two open streams sent each other the same frame as fast as the
+        network drained it (F-73). The resend at timeout is kept: a stream with nothing new still
+        repeats its picture once a timeout, as it always has.
+
+        Returns the frame and the publication it is, which the caller hands back next time.
+        """
+
+        deadline = time.monotonic() + timeout
         with self._updated:
-            self._updated.wait(timeout)
-            return self._jpeg
+            while self._published_count <= newer_than:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._updated.wait(remaining)
+            return self._jpeg, self._published_count
 
 
 def resolve_route(request_path: str) -> str | None:
@@ -517,12 +534,15 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             return
 
     def write_parts_until_disconnect(self) -> None:
+        # The publication this stream last sent, so it waits for a newer frame rather than for any
+        # wake-up of a condition every other request notifies too (F-73).
+        last_sent = self.frames.published_count
         while True:
             # Said on every part rather than once at the start: a stream held open for an hour is
             # an hour of somebody watching, and the interest has to keep up with the clock or the
             # capture loop would idle underneath a tile that is plainly on screen.
             self.frames.note_interest()
-            jpeg = self.frames.wait_next(STREAM_WAIT_SECONDS)
+            jpeg, last_sent = self.frames.wait_next(STREAM_WAIT_SECONDS, newer_than=last_sent)
             if jpeg is not None:
                 self.write_one_part(jpeg)
 

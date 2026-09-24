@@ -2165,6 +2165,102 @@ rendered HTML: no form control may share a name with a property of `HTMLFormElem
 may not emit an absolute path. Those are cheap, they run everywhere, and either one would have
 caught its bug.
 
+**F-72. The picture froze for three seconds every thirty-one, and it was not the plugin.** Found on
+hardware on 2026-09-24, after the printer moved to a USB ethernet adapter on a powered hub shared
+with the camera, with its wifi blocked at the router.
+
+What it looked like: the viewer's picture held still for about three seconds and then carried on,
+at regular intervals, and a clip recorded at the time captured the same freezes. A ping from the
+laptop watching it lost packets at the same moments.
+
+What it was: blocking the printer at the router did not turn its wifi off. `wlan0` joined the
+access point, was refused, disconnected and tried again, on a fixed cycle: a drop every 30.97 s,
+back up 3.1 s later. Measured with a watcher on the printer printing the UTC time of every wifi
+event while a two minute clip was recorded: eight drops fell inside the clip and there were eight
+freezes, each starting within a second of a drop and ending at the reconnect, and none of two
+seconds or more anywhere else. The laptop's ping lost 11.6%, where three seconds in every
+thirty-one predicts about 10%. With the network forgotten on the printer itself, the same test gave
+no wifi events, no loss in 150 pings, and no freeze longer than 0.58 s.
+
+Where it bit was not the printer's wired side, which pinged its router twice for two minutes across
+several cycles with no loss at all. It was delivery to a laptop on wifi, on the same access point
+the printer kept hammering, with TCP's retransmission backoff stretching a sub-second disruption
+into a stall of a few seconds. That mechanism is inferred; the correlation and the fix are measured.
+It is also the likely cause of the printer's intermittent trouble reaching its cloud service, which
+is expected to stop and not yet confirmed.
+
+One theory was wrong on the way. The first clip's first freeze, 3.15 s, matched the plugin's 3.0 s
+reconnect delay closely enough to look like a camera reconnect. It was the wifi cycle, and the
+numbers coincided. An earlier twenty minute ping from the same laptop lost only 1.7%, less than the
+loop predicts; its conditions were not recorded and nothing here depends on it.
+
+What it taught about diagnosing this plugin:
+
+- **A clip that shows a freeze does not implicate the camera.** The viewer records in the browser,
+  from the picture it is showing, so a frame that never reached the laptop and a frame the camera
+  never produced look identical in the recording.
+- **An empty `dmesg` search is not evidence that nothing happened.** The kernel's ring buffer is
+  small and a chatty driver empties it: at eight lines a cycle the wifi driver left only the last
+  38 minutes, so boot messages and anything from the time of the first clip were already gone.
+  There is no syslog on the printer to fall back on.
+- **The clocks differ.** A saved clip is named with the laptop's local time at the moment it is
+  saved, not when it started, and the printer keeps UTC.
+- **The plugin's log carries no timestamps**, so its capture errors cannot be tied to a moment.
+  That is a real diagnosability gap, recorded here rather than fixed.
+
+Still open when this was written, and settled the same day: short holds of a third to half a second
+remained in the clips whose scene was nearly still, and there were none in the one clip with a busy
+scene. On a near static thermal picture the video encoder can round away the sensor's noise, so a
+frame comparison cannot tell those from real stalls. The first attempt to time the stream itself
+found a separate defect instead, F-73, and this entry briefly guessed the holds belonged to it. They
+do not. Timed on its own, the stream delivered 25.0 fps with nothing longer than 143 ms between
+frames in two minutes, so the holds are on the browser side, most likely the encoder.
+
+**F-73. Two open streams sent each other the same frame as fast as the network would take it.**
+Found on hardware on 2026-09-24, while timing the stream to settle what F-72 had left open. Fixed in
+0.25.1.
+
+What it looked like: a script timing frames on the stream, with the viewer open at the same time,
+counted 99,707 frames in two minutes, 830.9 a second, from a camera that produces 25. A clip the
+viewer recorded meanwhile repeated 46% of its paints and held still for more than a quarter of a
+second 80 times, against 13 to 17% and about a dozen in quiet clips made without it. Alone, the
+same script measured 25.0 fps, a median gap of 40 ms, and nothing longer than 143 ms.
+
+Why: `LatestFrame.wait_next` did a single wait on the frame store's condition and returned whatever
+frame was current. That condition is notified by `publish`, and also by `note_interest`, which
+every stream calls before every part. So one stream's interest woke another, which resent the
+current frame, noted its own interest, and woke the first. The docstring on `wake`, twenty lines
+above, already named the trap, that the condition is shared and a single wait takes another
+request's interest for a frame, and `wake` loops to avoid it. `wait_next` did not. Any other
+request that notes interest, a temperature poll from the viewer among them, also cost every open
+stream one duplicate.
+
+The fix: each stream remembers the publication it last sent, and `wait_next` waits until a newer
+one exists, looping over wake-ups that are not a frame, as `wake` does. The resend of the current
+frame once a timeout when nothing new arrives, which the existing stream test relies on, is kept
+exactly. Two regression tests in `test_http_stream.py` open two raw streams and count the parts
+that arrive: on the old code one noted interest produced 12,183 parts in half a second where none
+were due, and one new frame produced 4,130 where one was. On the fix, 0 and 1.
+
+What it cost in practice: in ordinary use, nothing measurable. On hardware, the settings page, the
+Fluidd dashboard tile and Fluidd's full screen view each held one connection to the plugin, with
+467 to 559 KB/s leaving the printer and the plugin at 41.3% to 42.9% of a core, in line with the
+41.9% recorded for a visible tile. The duplicates are cheap for the plugin itself, because rendering
+and encoding happen once per camera frame however many parts go out; the cost lands on nginx, the
+network and the browser. That makes the plugin's own CPU figure the wrong instrument for this defect
+and the bytes leaving the printer the right one, which is worth remembering for anything else of its
+kind. The flood needs two streams at once, and the camera open in two tabs or on two devices is
+enough for that.
+
+To confirm on hardware once 0.25.1 is installed: with two tabs open, two connections and about
+twice a single stream's bandwidth, not megabytes a second; and the timing script alongside a viewer
+reading 25 fps, not 830.
+
+One thing noticed on the way and left alone: the comment above `VIEWER_RECORD_FPS` in `viewer.py`
+says the camera "runs at about fifteen". It never did. Fifteen was the snapshot tile's poll rate,
+Moonraker's default `target_fps`, as recorded beside F-55; the stream has run at the camera's 25
+since the tile became an iframe of the viewer in 0.16.0.
+
 ## 10. Reports owed elsewhere
 
 Three defects found while building this plugin, none of which belongs to this repository. Two are
