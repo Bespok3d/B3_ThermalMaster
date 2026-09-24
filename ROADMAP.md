@@ -2252,9 +2252,13 @@ and the bytes leaving the printer the right one, which is worth remembering for 
 kind. The flood needs two streams at once, and the camera open in two tabs or on two devices is
 enough for that.
 
-To confirm on hardware once 0.25.1 is installed: with two tabs open, two connections and about
-twice a single stream's bandwidth, not megabytes a second; and the timing script alongside a viewer
-reading 25 fps, not 830.
+Confirmed on hardware the same day, with 0.25.1 installed and a process started after the install.
+With the Fluidd dashboard and the viewer open side by side: two connections and 891 KB/s leaving the
+printer, about twice the single stream's 467. With the timing script alongside an open viewer, the
+exact situation that had counted 830 fps: 25.0 fps, a median gap of 40 ms, nothing longer than
+67 ms. The plugin used 45.5% of a core with both viewers open, against 41.3% to 42.9% with one, so
+a second viewer costs it about three points. There is no measurement of two viewers before the fix
+to set against that, so it says what a second viewer costs now, not what the fix saved.
 
 One thing noticed on the way and left alone: the comment above `VIEWER_RECORD_FPS` in `viewer.py`
 says the camera "runs at about fifteen". It never did. Fifteen was the snapshot tile's poll rate,
