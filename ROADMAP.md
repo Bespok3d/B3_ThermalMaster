@@ -2258,7 +2258,11 @@ printer, about twice the single stream's 467. With the timing script alongside a
 exact situation that had counted 830 fps: 25.0 fps, a median gap of 40 ms, nothing longer than
 67 ms. The plugin used 45.5% of a core with both viewers open, against 41.3% to 42.9% with one, so
 a second viewer costs it about three points. There is no measurement of two viewers before the fix
-to set against that, so it says what a second viewer costs now, not what the fix saved.
+to set against that, so it says what a second viewer costs now, not what the fix saved. With four
+viewers open: four connections, 1,766 KB/s, which is 441 KB/s each, and the plugin at 47.3%. The
+bandwidth scales with the number of viewers to within about five per cent, as a stream without
+duplicates should, and each viewer past the first costs the plugin one to three points, which is
+about as fine as a thirty second sample resolves.
 
 One thing noticed on the way and left alone: the comment above `VIEWER_RECORD_FPS` in `viewer.py`
 says the camera "runs at about fifteen". It never did. Fifteen was the snapshot tile's poll rate,
