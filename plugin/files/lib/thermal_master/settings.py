@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import dataclasses
 import json
-import sys
 import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -24,6 +23,7 @@ from .camera import (
     VALID_GAINS,
     CameraSettings,
 )
+from .log import log_line
 from .pipeline import (
     FIXED_RANGE,
     VALID_RANGE_MODES,
@@ -236,7 +236,7 @@ class SettingsStore:
         try:
             saved = json.loads(self._state_file.read_text())
         except (OSError, ValueError) as error:
-            print(f"thermal-master: ignoring unreadable settings: {error}", file=sys.stderr)
+            log_line(f"ignoring unreadable settings: {error}")
             return
         self._palette_name = saved.pop("palette", self._palette_name)
         self._settings = restored(self._settings, migrated(saved))
@@ -255,7 +255,7 @@ class SettingsStore:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             self._state_file.write_text(json.dumps(self.as_dict(), indent=2))
         except OSError as error:
-            print(f"thermal-master: could not save settings: {error}", file=sys.stderr, flush=True)
+            log_line(f"could not save settings: {error}")
 
 
 def settings_from_form(

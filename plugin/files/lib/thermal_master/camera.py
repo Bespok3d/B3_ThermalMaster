@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import sys
 import threading
 import time
 from typing import TYPE_CHECKING, cast
@@ -35,6 +34,7 @@ from p3_camera import (  # type: ignore[import-not-found]
 # The placeholder for the switched off state. Rendering is the other half of this module's job,
 # so importing it here is the direction the dependencies already run: pipeline knows nothing about
 # the camera, and this is the one picture the capture loop produces without one.
+from .log import log_line
 from .pipeline import stream_off_jpeg
 
 if TYPE_CHECKING:
@@ -428,6 +428,9 @@ def run_capture_session(
     camera.connect()
     camera.init()
     camera.start_streaming()
+    # The other half of every capture error: without it an outage in the log has a start and no
+    # end, and nobody reading it can say how long the camera was gone.
+    log_line(f"camera connected: {model.upper()}, streaming")
     if device is not None:
         device.forget_session()
     try:
@@ -480,7 +483,7 @@ def capture_loop(
             # what then publishes the placeholder. The `while` is what ends it on shutdown.
             continue
         except Exception as error:  # noqa: BLE001
-            print(f"thermal-master: capture error: {error}", file=sys.stderr, flush=True)
+            log_line(f"capture error: {error}")
         if frame_store.seen_count > frames_before_session:
             reconnect_delay = INITIAL_RECONNECT_DELAY_SECONDS
         shutdown.wait(reconnect_delay)

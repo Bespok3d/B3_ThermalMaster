@@ -2206,7 +2206,43 @@ What it taught about diagnosing this plugin:
 - **The clocks differ.** A saved clip is named with the laptop's local time at the moment it is
   saved, not when it started, and the printer keeps UTC.
 - **The plugin's log carries no timestamps**, so its capture errors cannot be tied to a moment.
-  That is a real diagnosability gap, recorded here rather than fixed.
+  That is a real diagnosability gap, recorded here rather than fixed. Since fixed in 0.25.2, and
+  confirmed on hardware as recorded below: every line carries UTC to the millisecond and the seconds since
+  boot, the clock `dmesg` counts in, and says `bespok3d/thermal-master`; one function writes them
+  all and a test fails if anything prints around it; and a line when the camera is streaming again
+  gives each outage an end as well as a start.
+
+**The log fix, confirmed on hardware with 0.25.2 the same evening.** From the first stamped line
+to six minutes later, UTC advanced 363.66 s and the seconds since boot 363.73 s, so the second
+clock really is the one `dmesg` keeps. The server came up and the camera was streaming 3.7 s later,
+the first time that interval had ever been visible. Then the camera was pulled from the hub and
+plugged back in, and the log and the kernel lined up:
+
+| since boot | from | what happened |
+| --- | --- | --- |
+| 34911.01 s | plugin | `capture error: [Errno 5] Input/Output Error` |
+| 34912.33 s | kernel | the camera, `3-1.3.4`, disconnects |
+| 34914.01 s | plugin | the retry, exactly the 3.0 s reconnect delay later: no camera yet |
+| 34915.14 s | kernel | **the ethernet adapter, `3-1.3.3`, disconnects** |
+| 34915.65 s | kernel | the camera enumerates again |
+| 34917.81 s | kernel | the ethernet adapter enumerates again |
+| 34923.17 s | plugin | `camera connected: P1, streaming` |
+
+The read fails 1.3 s before the kernel logs the disconnect, which is the right order: the transfer
+breaks when the contacts do, the log line waits for the hub to report the port change. The outage
+the log records, 12.2 s, is mostly the reconnect backoff doing its job, since the camera was
+physically absent for about 3.3 s and the next attempt, after the delay doubled to 6 s, came about
+4.4 s after it was back; setup then took 3.2 s. That is the trade the backoff was designed to make,
+and it is visible now.
+
+What the stamps also caught, and nothing could have caught before them: **the ethernet adapter on
+the same hub dropped off the bus for 2.7 s at the moment the camera was plugged back in**, although
+only the camera was touched. Either the camera's inrush current sagged the hub's 5 V supply, a
+1 A adapter shared with a gigabit ethernet adapter, or plugging it in jostled the neighbouring
+connector. Not yet told apart. The test is to replug the camera in the hub port farthest from the
+adapter, holding the hub still: if the adapter drops again the cause is electrical, and a larger
+supply or moving the adapter off this hub is the remedy. It matters because any reconnect of the
+camera would then briefly take the printer off the network.
 
 Still open when this was written, and settled the same day: short holds of a third to half a second
 remained in the clips whose scene was nearly still, and there were none in the one clip with a busy

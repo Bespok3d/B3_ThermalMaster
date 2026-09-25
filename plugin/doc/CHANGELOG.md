@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.25.2
+
+- **The plugin's log says when each thing happened.** Every line now starts with the time in UTC,
+  to the millisecond, and the seconds since the printer started, followed by
+  `bespok3d/thermal-master` so it is clear which plugin wrote it. Until now a line had no time on
+  it at all, so an error in the log could not be matched to anything that happened on the printer.
+- **The log also says when the camera comes back.** It used to record only that capture had
+  failed, so an outage had a start and no end. A line now marks each time the camera is connected
+  and streaming again.
+
 ## 0.25.1
 
 - **The camera no longer floods your network when it is open in two places at once.** With the

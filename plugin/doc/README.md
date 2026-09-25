@@ -171,6 +171,16 @@ attempt can briefly interrupt the picture on its way to you. Turn the wifi off, 
 forget the network, on the printer itself. The plugin is not involved; the camera keeps capturing
 throughout.
 
+**The plugin's log** is at `/userdata/bespok3d/var/log/thermal-master.log`, and is the first thing
+worth sending with a report. Each line reads like this:
+
+```
+2026-09-24T14:08:54.512Z up 13837.44 bespok3d/thermal-master: camera connected: P1, streaming
+```
+
+The time is UTC. The number after `up` is the seconds since the printer started, the same clock
+the printer's kernel log counts in, so an entry here can be matched to one there.
+
 ## What it costs when you are not looking
 
 Nothing much, since 0.23.0. A minute after the last request for a picture the plugin stops

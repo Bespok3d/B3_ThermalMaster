@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import argparse
 import signal
-import sys
 import threading
 from pathlib import Path
 
 from .camera import DEFAULT_GAIN, VALID_GAINS, CameraSettings, DeviceController, capture_loop
+from .log import log_line
 from .palettes import DEFAULT_PALETTE, build_palettes
 from .pipeline import (
     DEFAULT_JPEG_QUALITY,
@@ -100,10 +100,9 @@ def main() -> None:
         (options.bind, options.port), frame_store, settings_store, palettes, device
     )
     install_shutdown_handlers(shutdown, server)
-    listening_on = f"thermal-master: serving http://{options.bind}:{options.port}/stream.mjpg"
-    print(listening_on, file=sys.stderr, flush=True)
+    log_line(f"serving http://{options.bind}:{options.port}/stream.mjpg")
     server.serve_forever()
     # Give the capture thread its chance to put the camera down before the process goes away. It is
     # a daemon thread, so without this the interpreter exits from under it mid-read.
     worker.join(SHUTDOWN_GRACE_SECONDS)
-    print("thermal-master: stopped", file=sys.stderr, flush=True)
+    log_line("stopped")

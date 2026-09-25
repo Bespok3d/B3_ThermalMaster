@@ -107,6 +107,24 @@ def test_the_camera_is_released_when_a_session_ends(thermal_streamer, frame_stor
     assert camera.disconnect_calls == 1
 
 
+def test_a_session_that_reaches_the_camera_says_so_in_the_log(
+    thermal_streamer, frame_store, renderer_source, capsys
+):
+    """The log recorded when capture failed and never when it came back, so every outage had a
+    start and no end. One line once a session is streaming gives it the end (F-72)."""
+
+    fake_camera.PRESENT_PRODUCT_IDS.add(P1_PRODUCT_ID)
+    shutdown = threading.Event()
+
+    with pytest.raises(ScriptExhaustedError):
+        thermal_streamer.run_capture_session(frame_store, renderer_source, shutdown)
+
+    written = capsys.readouterr().err.splitlines()
+    connected = [line for line in written if "camera connected" in line]
+    assert len(connected) == 1
+    assert connected[0].endswith("bespok3d/thermal-master: camera connected: P1, streaming")
+
+
 def test_a_camera_pulled_mid_session_is_still_released(
     thermal_streamer, frame_store, renderer_source
 ):
