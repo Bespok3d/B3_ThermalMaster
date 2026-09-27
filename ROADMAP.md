@@ -2202,7 +2202,9 @@ What it taught about diagnosing this plugin:
 - **An empty `dmesg` search is not evidence that nothing happened.** The kernel's ring buffer is
   small and a chatty driver empties it: at eight lines a cycle the wifi driver left only the last
   38 minutes, so boot messages and anything from the time of the first clip were already gone.
-  There is no syslog on the printer to fall back on.
+  The fallback is `/userdata/logs/syslog`, rotated to `syslog.0` and `syslog.1`: it keeps kernel
+  lines with wall-clock times, so search it before concluding that nothing happened. (An earlier
+  version of this bullet said the printer had no syslog; that was wrong.)
 - **The clocks differ.** A saved clip is named with the laptop's local time at the moment it is
   saved, not when it started, and the printer keeps UTC.
 - **The plugin's log carries no timestamps**, so its capture errors cannot be tied to a moment.
