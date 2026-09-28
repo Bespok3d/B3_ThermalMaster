@@ -1,5 +1,9 @@
 # thermal-master
 
+This is [`Bespok3d/B3_ThermalMaster`](https://github.com/Bespok3d/B3_ThermalMaster)[^name], the
+home of the `thermal-master` plugin. It was `Mauker1/B3_ThermalMaster_P1_P3` until 2026-09-28, and
+GitHub redirects the old address.
+
 The Bespok3d **Thermal Master** plugin for the Snapmaker U1: streams an InfiRay-OEM Thermal Master
 **P1 or P3** USB thermal camera, so you can watch a print thermally in Fluidd or Mainsail with no
 UVC, no firmware flashing, and no Rockchip MPP dependency. Plug either one in; the plugin works out
@@ -55,7 +59,9 @@ scripts/
   profile-on-printer.sh       where the time inside a frame goes, measured on the printer
   refresh-facade.py      keep the package facade in step with what the modules export
   tag_version_guard.sh   refuse a release tag whose version the manifest does not declare
-.github/workflows/release.yml   CI: bake, pack, release, register the atom
+plugin/tests/run.sh          the tests as CI runs them, without the gate's private submodule
+.github/workflows/release.yml   CI on a release tag: bake, test, pack, sign, release, register
+.github/workflows/tests.yml     CI on every pull request and branch push: the tests, no secrets
 ```
 
 The entry script is a name and a `sys.path` and nothing else. `thermal-master-stream` is a legal
@@ -94,7 +100,7 @@ schema:
 ```sh
 npm install --prefix ~/.b3-builder github:Bespok3d/b3-builder
 ~/.b3-builder/node_modules/.bin/b3-builder build \
-  --source ./plugin --out dist --atom-repo Mauker1/B3_ThermalMaster_P1_P3 --bake
+  --source ./plugin --out dist --atom-repo Bespok3d/B3_ThermalMaster --bake
 ```
 
 `--bake` downloads the arm64 wheels for `plugin/requirements.txt` into `plugin/files/wheels/`. It is
@@ -118,6 +124,10 @@ git submodule sync --recursive && git submodule update --init --recursive
 bash scripts/check.sh
 ```
 
+`lib_bespok3d` is private to the Bespok3d organisation, so a clone from outside it has no gate.
+`sh plugin/tests/run.sh` runs the test suite on its own, which is also what CI runs on every pull
+request.
+
 Both pages are the part the test suite cannot really exercise, and both have shipped defects that
 were invisible from Python and obvious to a browser. After touching either one:
 
@@ -129,23 +139,26 @@ python3 scripts/check-in-browser.py
 ## Releasing
 
 A release is published by a version tag and by nothing else. Bump `version` in
-`plugin/manifest.json`, commit it, and push a tag of the form `plugin-thermal-master-v<version>`
-naming the same number. `scripts/tag_version_guard.sh` refuses a tag whose version the manifest does
-not declare, and refuses anything that is not a release tag at all, so a run off a branch cannot
-publish. CI then bakes the wheels, packs the `.b3`, publishes a GitHub release with it, and registers
-the atom in the org's index.
+`plugin/manifest.json`, commit it, push the branch, and then push a tag of the form
+`plugin-thermal-master-v<version>` naming the same number. `scripts/tag_version_guard.sh` refuses a
+tag whose version the manifest does not declare, and refuses anything that is not a release tag at
+all, so a run off a branch cannot publish. CI then bakes the wheels, runs the tests, packs and signs
+the `.b3`, publishes a GitHub release with it, and registers the list in the org's index.
 
-**Secrets:** `MAIN_INDEX_TOKEN` (fine-grained PAT with `contents:write` on `Bespok3d/main-index`) to
-register the atom; without it the release is still cut and only the registration is skipped.
-`REGISTRY_SIGNING_KEY` signs the package if it is set. Neither is required to build locally.
+**Signing.** Packages are signed with the Bespok3d organisation's key, whose fingerprint the signing
+step stamps into the packed manifest in place of `"publisher": "PLACEHOLDER"`. The key and the index
+token are organisation secrets, `REGISTRY_SIGNING_KEY` and `MAIN_INDEX_TOKEN`, which this public
+repository reads by name; neither is ever written into a file here, and neither is needed to build
+locally. Only maintainers can push a `plugin-*` tag, because anyone who can push one publishes a
+package carrying the organisation's signature.
 
 ## Hardware status
 
-Run end to end on a U1 with a **P1** attached since 0.2.2, continuously: every release in
-`plugin/doc/CHANGELOG.md` since then has been confirmed on the maintainer's printer, and the performance
-figures above and in the roadmap are measurements from it rather than estimates. The camera tile
-renders in Fluidd and Mainsail, the control page and the viewer both work in a dashboard tile, the
-settings survive a restart, and an unplug and replug recovers on its own.
+Run end to end on a U1 with a **P1** attached since 0.2.2, continuously: every release since then,
+in `CHANGELOG_DEV.md` and `plugin/doc/CHANGELOG.md`, has been confirmed on the maintainer's
+printer, and the performance figures above and in the roadmap are measurements from it rather than
+estimates. The camera tile renders in Fluidd and Mainsail, the control page and the viewer both work
+in a dashboard tile, the settings survive a restart, and an unplug and replug recovers on its own.
 
 The **P3** is driven by the same code path, the same protocol and the same driver model config, and
 has never been in front of one. The sensor is 256x192 against the P1's 160x120, which the plugin
@@ -179,3 +192,6 @@ through it, at no extra cost to you.
 `plugin/doc/README.md` is the documentation that ships inside the package and is rendered in the
 app. It is written for somebody using the plugin; this file is written for somebody opening the
 repository.
+
+[^name]: Named for the camera family rather than for the P1 and P3, because it may carry drivers for
+    more Thermal Master cameras later.

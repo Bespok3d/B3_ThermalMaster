@@ -42,7 +42,7 @@ B3D_TOOLS_VENV="$REPO_ROOT/.venv-$(uname -s)-$(uname -m)"
 B3D_PY="$B3D_TOOLS_VENV/bin/python"
 
 echo ""
-echo "B3_ThermalMaster_P1_P3 gate"
+echo "B3_ThermalMaster gate"
 
 b3d_python_tools
 
@@ -73,13 +73,13 @@ workflow_pinning_check "$REPO_ROOT"
 # files/udev here is safe whether or not it survives the manifest rewrite.
 # --suffix adds to the guard's defaults, which cover code and prose but not the config formats this
 # plugin ships: an em-dash in an nginx location or a Moonraker fragment is as much a Rule Zero
-# violation as one in a comment.
-em_dash_check --suffix .conf --suffix .tmpl \
+# violation as one in a comment. The same goes for the workflows, which the defaults skip too.
+em_dash_check --suffix .conf --suffix .tmpl --suffix .yml \
     "$PLUGIN_DIR/files" \
     "$PLUGIN_DIR/doc" "$PLUGIN_DIR/tests" "$PLUGIN_DIR/manifest.json" "$PLUGIN_DIR/requirements.txt" \
     "$REPO_ROOT/scripts" "$REPO_ROOT/README.md" "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/AGENTS.md" \
     "$REPO_ROOT/CONTRIBUTING.md" "$REPO_ROOT/SECURITY.md" "$REPO_ROOT/ROADMAP.md" \
-    "$REPO_ROOT/VENDORING.md" "$REPO_ROOT/NOTICE"
+    "$REPO_ROOT/VENDORING.md" "$REPO_ROOT/NOTICE" "$REPO_ROOT/CHANGELOG_DEV.md" "$REPO_ROOT/.github"
 
 # Same reasoning: the viewer clone ships its own shell scripts, which are not this repo's to lint.
 shellcheck_repo "$REPO_ROOT/scripts" "$PLUGIN_DIR/files"

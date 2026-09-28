@@ -2145,6 +2145,39 @@ Repeat F-74's tests with 0.26.0 and write down the results:
 `CHANGELOG.md` 0.26.0; the plugin README's troubleshooting note gains a sentence on the badge; F-74
 gains its confirmation paragraph; section 9's list of what is left gains this phase until it ships.
 
+### Phase 8: signed, public, and in the Bespok3d organisation. Planned for 0.27.0.
+
+Decided on 2026-09-28, once Phase 7i had been confirmed on hardware: private testing is over, and
+the plugin is published before the timelapse is built rather than after, so that what already works
+reaches people and the timelapse ships as a release of its own.
+
+- **The repository moves to the organisation and is renamed.** Transferred from
+  `Mauker1/B3_ThermalMaster_P1_P3` to `Bespok3d/B3_ThermalMaster`, which GitHub redirects from the
+  old address, and made public. The new name is the camera family rather than the two models, since
+  more Thermal Master drivers may follow. The local working folder keeps its old name.
+- **Signed with the organisation's key**, the one every package in the Bespok3d main index carries,
+  fingerprint `679939555819fb5f6423dc68c4388e76bfa9b4e0`. A public repository in the organisation
+  reads the organisation's `REGISTRY_SIGNING_KEY` and `MAIN_INDEX_TOKEN` directly, so it holds no
+  secrets of its own. `publisher` stays `PLACEHOLDER` in source; the signing step stamps it. This
+  closes F-5 and F-6 once the first signed release is out.
+- **`release.yml` rebuilt from the organisation's template.** The builder is pinned to
+  `9322144c063a621191fe50951c803c6f79227277` (main on 2026-09-28) and registers the list itself,
+  replacing the separate registration step. The checkout no longer asks for submodules: the
+  workflow's token reaches only its own repository, so checking out the private `lib_bespok3d`
+  would have failed the first public run.
+- **The tests run in CI, twice.** `plugin/tests/run.sh` builds its own environment from
+  `requirements.txt` plus pytest and runs the suite, since CI cannot have the gate's private
+  submodule. The builder runs it after packing and before releasing, and `tests.yml` runs it on
+  every pull request and branch push, with read access only and no secrets, so a pull request from
+  a fork can never reach the key. A failing test blocks a merge once the branch rule requires the
+  `tests` check.
+- **Published as `rc`**, "mostly stable; some rough edges": every release has been confirmed on one
+  printer and nobody else has run it yet. Promoted to `stable` in a later release once somebody has.
+  A user left on the default `stable` setting does not see an `rc` plugin until they reach for it.
+- **Tags are protected** before the first one is pushed: a ruleset on `plugin-*` restricting who
+  creates, updates or deletes them to maintainers, because a tag is what publishes a package with
+  the organisation's signature.
+
 ### Phase 9: a thermal timelapse, one frame per layer. An idea, for after Phase 8.
 
 The printer's own camera makes a timelapse of each print. A thermal one would show something that
@@ -2196,6 +2229,10 @@ Sketched on 2026-09-28 and not started; nothing here is built.
    keep what was gathered and encode that.
 6. Which range to render with: the whole print's measured extremes, or the display range the user
    has set (Phase 7f).
+7. How this sits beside Bespok3d's own `timelapse` plugin (`Bespok3d/fluidd-timelapse`, stable in
+   the main index on 2026-09-28). If it drives Moonraker's timelapse from a camera's snapshot URL,
+   `/thermal/snapshot.jpg` may already work with it, which would give a thermal timelapse with no
+   new code; if not, whether the two should share a trigger. Look at it before building anything.
 
 ## 8. Alternatives considered and rejected
 
@@ -2231,7 +2268,7 @@ itself off, and reports what it costs.
 
 What is left, in the order it is worth doing:
 
-- **The adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
+- **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
   adapter, holding the hub still, and see whether the adapter drops again. It matters more now that
   the printer is off wifi, since an adapter drop would take it off the network entirely.
   **Run on 2026-09-28: it dropped again.** The camera, on `3-1.3.4`, was unplugged at 3460.2 s
@@ -2248,12 +2285,13 @@ What is left, in the order it is worth doing:
   since boot (14:05:47.8), registered again at 220.6 s and had link at 223.9 s (14:05:52.6), 4.7 s
   from gone to link against 6.6 s on the 1 A supply. The camera was streaming at 14:05:58.5. The
   maintainer saw no drop from outside, so a drop this short is easy to miss without the kernel log.
-  A larger supply is therefore not the whole answer. Left to try: the adapter on its own port of
-  the printer rather than on the camera's hub, or a hub that switches its ports individually.
-  Replugging the camera is rare, so this is a nuisance rather than a defect, and the viewer now
-  says what happened when it does.
-- **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
-  release workflow and simply is not set; the decision is whether private testing is over.
+  A larger supply is therefore not the whole answer. **Closed on 2026-09-28, left as it is.** The
+  U1 has a single USB port, which is why the hub is there at all, so the adapter cannot have a
+  port of its own. Replugging the camera is rare, the drop costs about 15 s on the network, and the
+  viewer now says what happened and recovers by itself. A hub that switches its ports individually
+  might avoid it, and is not worth buying for this.
+- **Phase 8, signed and public**, planned for 0.27.0 in section 7: the repository is now
+  `Bespok3d/B3_ThermalMaster`, signed with the organisation's key, published as `rc`.
 - **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
   layer count, kept as temperatures and encoded on the printer after the print. After Phase 8.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
@@ -2640,12 +2678,12 @@ on a 2.4 A supply. Times are UTC; the clip reads two hours ahead.
 | 14:05:10.4 | camera unplugged; the plugin logs the I/O error, the picture freezes |
 | 14:05:16.9 | "no frames from the camera since 14:05:12", 5.7 s after the freeze, and no restart |
 | 14:05:47 | the viewer's question goes unanswered |
-| 14:05:46 | the adapter's `eth0` is unregistered as the camera goes back in, and `dhcpcd` deletes 10.0.1.6 and its routes |
+| 14:05:46 | the adapter's `eth0` is unregistered as the camera goes back in, and `dhcpcd` deletes the printer's address and its routes |
 | 14:05:51 | `eth0` has link again; `dhcpcd` waits 1.2 s, then asks to rebind its lease |
 | 14:05:51.7 | "printer not answering since 14:05:47", dated by when that question was asked |
 | 14:05:56 | the second request is acknowledged; three ARP probes for the address follow |
 | 14:05:58.5 | the plugin logs the camera streaming again |
-| 14:06:01 | `dhcpcd` adds 10.0.1.6 and its routes back: the printer is reachable again |
+| 14:06:01 | `dhcpcd` adds the address and its routes back: the printer is reachable again |
 | 14:06:03.3 | the picture moves and the line clears |
 
 Network times are from the printer's syslog, to the second, which puts the kernel's 219.2 s about
@@ -2657,8 +2695,9 @@ picture was back 2.3 s after the printer had its address again, one beat of the 
 restart. Almost all of the outage was the printer's own network coming back: a 4.7 s adapter drop
 became 15 s without an address, 10 s of it after the link had returned, spent rebinding a lease
 whose first request went unanswered and then probing the address three times before using it.
-Stopping the adapter drop is the cure; shortening `dhcpcd`'s return, with a static address or no
-ARP probing, would only trim it, and would change the printer's own configuration.
+Stopping the adapter drop would be the cure, and cannot be had on a printer with one USB port
+(section 9); shortening `dhcpcd`'s return, with a static address or no ARP probing, would only trim
+it, and would change the printer's own configuration.
 
 The last of the round, the same afternoon: switching the camera off during a recording ended the
 recording and saved it on its own. The 5.4 s clip moves until 5.0 s and ends on the camera's last

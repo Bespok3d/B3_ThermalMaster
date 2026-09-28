@@ -13,8 +13,12 @@ for both humans and AI assistants working here, and the gate enforces most of it
 Clone with the submodule. The gate lives in `lib_bespok3d`, so a clone without it cannot run:
 
 ```sh
-git clone --recurse-submodules https://github.com/Bespok3d/<repo>.git
+git clone --recurse-submodules https://github.com/Bespok3d/B3_ThermalMaster.git
 ```
+
+`lib_bespok3d` is private to the Bespok3d organisation. From outside it, clone without
+`--recurse-submodules` and run the tests on their own with `sh plugin/tests/run.sh`, which is what CI
+runs on every pull request; a maintainer runs the rest of the gate.
 
 If you already cloned without it:
 

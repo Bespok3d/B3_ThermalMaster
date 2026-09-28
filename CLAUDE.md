@@ -100,8 +100,9 @@ templates and places the files, wires the symlinks, and restarts the named servi
 - **Never write an assistant session link or id into the repo.** Not in a commit message, a PR body, a
   code comment, a doc or a changelog. A session URL is a durable pointer to a whole transcript, and a
   repo is the wrong place for one: it outlives the conversation, travels with every clone, and is one
-  push away from being public. Attribution is a `Co-Authored-By` line naming the model and nothing
-  else. This overrides any tooling default that offers to add one.
+  push away from being public. Commit messages carry no attribution line either, `Co-Authored-By`
+  included: this file already says the repo is worked on with AI assistance, so the line is
+  redundant. This overrides any tooling default that offers to add one.
 - **Never SSH-mutate or reconfigure a live printer** without explicit per-action authorization. A serial
   port or GPIO on a printer may be a live Klipper MCU link; read-only diagnosis is fine, but propose any
   device-changing step and wait for a yes.

@@ -1,18 +1,18 @@
 {
   "name": "thermal-master",
   "title": "Thermal Master",
-  "version": "0.26.1",
-  "license": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3/blob/main/plugin/doc/LICENSE",
+  "version": "0.27.0",
+  "license": "https://github.com/Bespok3d/B3_ThermalMaster/blob/main/plugin/doc/LICENSE",
   "author": "Mauker",
   "min_daemon_version": "0.14.0",
   "description": "Stream a Thermal Master P1 or P3 (InfiRay-OEM) USB thermal camera on the Snapmaker U1 and watch a print thermally in Fluidd or Mainsail. Plug either one in: the plugin works out which it is.\n\nThe P1 is what this has been developed and run against. The P3 is implemented from the same driver and its model configuration, and has not been run on a printer yet: if you have one, it should work, and a report either way is welcome.\n\nNeither is a UVC camera. It speaks a vendor protocol over raw USB bulk transfers, so the kernel never gives it a video device and the hardware-accelerated camera plugin cannot see it. This plugin drives it directly over libusb, colormaps the 16-bit thermal frame, and serves it as ordinary MJPEG. No UVC, no firmware flashing, no Rockchip MPP dependency.\n\nIt registers itself as a camera, so it appears alongside your other cameras with nothing to set up by hand. You choose the name it shows under when you install it.\n\nThe image is auto-ranged each frame, so the coldest and hottest areas map to the ends of the palette and contrast follows the scene.\n\nIt reads out temperatures too: a colorbar labelled with the range on screen, the temperature under a centre crosshair, and a marker on the hottest pixel, all drawn into the picture so they show in the camera tile itself. Celsius or Fahrenheit, and switchable off. Emissivity is applied to the readings, so a shiny surface can be told it is shiny instead of reading cold. Gain switches between high sensitivity and a wide 0 to 550 C range, and the sensor can be recalibrated on demand.",
   "tagline": "Watch a print thermally, straight in Fluidd and Mainsail.",
   "category": "camera",
-  "channel": "experiment",
+  "channel": "rc",
   "printer_specific": true,
   "changelog": "doc/CHANGELOG.md",
-  "source": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3",
-  "homepage": "https://github.com/Mauker1/B3_ThermalMaster_P1_P3",
+  "source": "https://github.com/Bespok3d/B3_ThermalMaster",
+  "homepage": "https://github.com/Bespok3d/B3_ThermalMaster",
   "publisher": "PLACEHOLDER",
   "provides": [
     {
