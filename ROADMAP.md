@@ -2025,6 +2025,88 @@ secrets, and replaces "not verified on hardware yet" with the real hardware stat
 this file was carrying the same rot, claiming nothing was committed, and has been split into a
 current status and the record that follows it.
 
+### Phase 7i: the viewer notices a dead stream. Planned for 0.26.0.
+
+The stream is an `<img>` of a never ending multipart response, and an `<img>` says nothing when that
+response ends. The viewer therefore has to look for itself, and it has two things to look at: the
+picture it is showing, and the plugin's own count of frames published.
+
+**The pieces.**
+
+1. **`/stats` says how many frames the plugin has published and how long ago the last one was.**
+   Two fields, `frame` (the publication count `LatestFrame` already keeps) and `frame_age_seconds`.
+   This is what separates a dead stream from a camera that stopped: in the first the count moves
+   and the picture does not, in the second neither does.
+
+2. **The viewer samples its own picture.** Every two seconds it draws the displayed frame into a
+   32 by 24 canvas and compares it with the last sample. The picture is same origin, so reading it
+   back is allowed. The cost is one tiny draw every two seconds. It remembers when the picture last
+   changed.
+
+3. **The viewer asks the plugin, on the same beat.** It fetches `stats`, relative like every other
+   URL the page emits, and only while the page is visible: a hidden tab needs no watchdog, and
+   becoming visible triggers a check at once.
+
+4. **What it concludes:**
+
+   | Plugin answers | Plugin's count | Picture | Conclusion | Action |
+   |---|---|---|---|---|
+   | no | | | printer not reachable | badge "printer not answering since HH:MM:SS"; keep asking, backing off to 10 s |
+   | yes, stream off | | | the placeholder is meant to be still | nothing |
+   | yes | moving | changed within 3 s | healthy | clear any badge |
+   | yes | moving | unchanged for 3 s | this page's stream is dead | restart it; badge "reconnecting" if it is still stale 3 s later |
+   | yes | not moving for 3 s | | the camera stopped sending | badge "no frames from the camera since HH:MM:SS" |
+
+   Restarting sets the `<img>` source to `stream.mjpg?n=<counter>`. The router already drops the
+   query string before the lookup, so this reaches the same handler, and the changing URL is what
+   makes the browser open a new request. At most one restart every 5 seconds. An `error` event on
+   the `<img>` restarts at once, within the same limit.
+
+   Three seconds, agreed on 2026-09-28: at 25 fps it is 75 frames, and the quietest stretch
+   measured in F-74's clip changed in 88% of them. Raise it if it proves too eager.
+
+5. **The badge** is a line over the picture, in the style the pointer readout already uses for "no
+   frame", with the local time the picture last changed. It clears itself when frames flow again.
+
+6. **Recordings carry it.** While the badge shows, the recorder paints it into the clip, so a clip
+   can never pass a frozen stretch off as a still scene. That is the confusion F-74 took an
+   afternoon to settle.
+
+**Tests.**
+
+- `/stats` includes `frame` and `frame_age_seconds`, the count moves with each publish, and the
+  age is the time since the last one.
+- `stream.mjpg?n=7` routes to the stream handler.
+- The rendered page has the watchdog's timings substituted, like the recorder's, and the restart
+  URL is relative (the existing no absolute paths test should catch it if not).
+- The watchdog's decision table is one pure function taking the last sample time, the count, its
+  last change and whether the plugin answered, and returning an action. That keeps the logic in
+  one testable place.
+
+**Decided on 2026-09-28:** no JavaScript runtime tests for the decision function yet. The gate
+already requires Node for the shared detectors, and `test_page_scripts.py` runs `node --check`
+over both pages' scripts, which catches the syntax errors a script inside a Python string invites.
+The behaviour is left to the hardware round, as the viewer's has been so far. Revisit if the viewer
+gains a second piece of logic worth testing on its own.
+
+**Hardware round.**
+
+Repeat F-74's tests with 0.26.0 and write down the results:
+
+1. The viewer on its own, laptop wifi off for 30 s: the badge appears, and the picture returns by
+   itself within a few seconds of the wifi coming back, with no reload.
+2. The same for 90 s, past nginx's 60 s.
+3. The same two inside Fluidd.
+4. Stream switched off: no badge, the placeholder shows.
+5. Camera unplugged while streaming: the camera badge, not a restart loop. Plugged back in: it
+   clears once the capture loop reconnects.
+6. A recording across test 1: the badge is in the clip.
+
+**Documentation.**
+
+`CHANGELOG.md` 0.26.0; the plugin README's troubleshooting note gains a sentence on the badge; F-74
+gains its confirmation paragraph; section 9's list of what is left gains this phase until it ships.
+
 ## 8. Alternatives considered and rejected
 
 **A v4l2loopback virtual camera.** Upstream ships a UVC driver that presents the camera as
@@ -2051,7 +2133,7 @@ assembles a package.
 
 ## 9. Where this stands
 
-**2026-09-17, at 0.25.0.** Phases 0 through 7h are done and every one of them has been confirmed on
+**2026-09-28, at 0.25.2.** Phases 0 through 7h are done and every one of them has been confirmed on
 the maintainer's printer with a P1 attached. The gate is green, the work is committed on `dev`, and
 the plugin is in daily use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
 an interactive viewer, holds a display range, measures spots and regions, records clips, switches
@@ -2059,13 +2141,19 @@ itself off, and reports what it costs.
 
 What is left, in the order it is worth doing:
 
+- **Phase 7i, the viewer notices a dead stream**, planned for 0.26.0 in section 7. It answers F-74:
+  a network break freezes the viewer for good, and nothing in the plugin notices.
+- **The adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
+  adapter, holding the hub still, and see whether the adapter drops again. It matters more now that
+  the printer is off wifi, since an adapter drop would take it off the network entirely.
 - **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
   release workflow and simply is not set; the decision is whether private testing is over.
-- **Two reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug, which goes
-  as a comment on upstream issue #17 rather than as a new issue, and the filaman card, which goes
-  privately to its owner. Both were drafted outside the repo, since a message addressed to another
-  project is spent once it is sent; section 10 is the version that stays. The third, the installer dropping
-  `userEditable` values, was retested on 2026-09-18, did not reproduce, and is closed.
+- **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
+  comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
+  to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted
+  outside the repo, since a message addressed to another project is spent once it is sent; section
+  10 is the version that stays. The installer dropping `userEditable` values was retested on
+  2026-09-18, did not reproduce, and is closed.
 - **The P3 hardware trial**, whenever one turns up. Everything for it is implemented and none of it
   has met the device.
 - **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
@@ -2254,6 +2342,39 @@ found a separate defect instead, F-73, and this entry briefly guessed the holds 
 do not. Timed on its own, the stream delivered 25.0 fps with nothing longer than 143 ms between
 frames in two minutes, so the holds are on the browser side, most likely the encoder.
 
+**Off wifi at last, 2026-09-27, and why forgetting never held.** Unplugging the ethernet cable to
+reach the printer's wifi settings showed it connected to the network it had been told to forget on
+2026-09-24. The router's client log has its wifi leaving then and rejoining two minutes later, and connected
+from then on, so every retest since, F-73's included, ran on a printer holding an address on both
+links. None of the plugin's measurements there obviously depended on the wifi, but a retest
+should say which links the printer had.
+
+Traced from the printer's own state:
+
+- **Forgetting leaves the network saved and enabled.** `wpa_cli list_networks` shows it before and
+  after, and all three copies of the configuration keep it: `/etc/wpa_supplicant.conf`, its
+  persistent copy under `/oem/overlay/upper/etc`, and the screen's own copy under
+  `/oem/printer_data/gui`. The network screen showed the wifi switch off while the printer held a
+  fresh wifi lease.
+- **Something restarts the wifi client about 30 seconds after any disconnect**, rebuilding it from
+  `/etc/wpa_supplicant.conf`: disabled by hand with `wpa_cli`, the network was back within
+  30 seconds, with new `dhcpcd` and `wpa_supplicant` processes and the file rewritten. What
+  triggers the restart was not found; neither `gui` nor `unisrv` calls `ifup`.
+- **`disabled=1` in `/etc/wpa_supplicant.conf` holds.** Added there and in the screen's copy, with
+  backups in `/userdata` on the printer, the next restart carried it into the runtime copy and the
+  printer stayed off wifi. It survived a reboot and a power cycle on 2026-09-28; a firmware update may still replace
+  the file.
+
+While both links were up, two things went wrong that were not the plugin's. Traffic to the wifi
+address arrived over wifi and its replies left by ethernet, the preferred route: since boot the
+wifi interface had received 3.5 million packets and sent 26 thousand. And Snapmaker Orca uploads
+print files over the local network to the address it learns from the printer, which was the wifi
+one: on 2026-09-27 three of five uploads stalled partway, with Moonraker logging each request and
+never the rest of the file. With the wifi off, the slicer's check of that address times out and it
+goes through the cloud instead, as it did on 2026-09-24 while the router was blocking the wifi.
+Both are in the report to Snapmaker, which this section's finding about forgetting has corrected:
+it had offered forgetting the network as the workaround.
+
 **F-73. Two open streams sent each other the same frame as fast as the network would take it.**
 Found on hardware on 2026-09-24, while timing the stream to settle what F-72 had left open. Fixed in
 0.25.1.
@@ -2307,18 +2428,78 @@ says the camera "runs at about fifteen". It never did. Fifteen was the snapshot 
 Moonraker's default `target_fps`, as recorded beside F-55; the stream has run at the camera's 25
 since the tile became an iframe of the viewer in 0.16.0.
 
+**F-74. A network break freezes the picture for good, and only Fluidd ever brought it back.**
+Found on 2026-09-27, while chasing a brief slicer disconnect at the start of a print. Not fixed;
+Phase 7i is the plan.
+
+What it looked like: a clip recorded in the viewer during the print's start froze 33.8 seconds in
+and stayed frozen to its end, 66.7 seconds. Measured frame by frame, a live thermal stream is never
+identical to the frame before it, whatever the scene is doing: sensor noise and the readouts see
+to that. Before the freeze 85 to 97% of consecutive frames differed, 88% even in a stretch where
+the bed was barely changing. After it, 0 of 291 did, apart from a single pixel at exactly the
+clip's keyframes, which is the encoder. The readings sat at 47.7 and 44.7 while the bed heated, and
+the picture stopped in the middle of the toolhead moving through it.
+
+What it was not: the plugin or the printer. The plugin's log, timestamped since 0.25.2, says
+nothing for the whole minute, so capture never faltered. The printer's own camera service kept
+counting frames on schedule and ran its print-start checks in about 210 ms each; the kernel log
+and syslog are empty for the window; Moonraker logged throughout. In the same seconds Moonraker's
+websocket from the same browser went without a pong, was closed with 45 seconds elapsed, and the
+browser reconnected about a minute after the last pong. The laptop's wifi stayed associated to the
+same access point with a strong signal, no transmit failures, no roam and no sleep, and the router
+logged nothing. The router's silence is weak evidence: it also logged nothing for the ethernet
+adapter's seven second drop during the camera replug on 2026-09-24. What broke the path is not
+known. The printer was on the network twice at the time, wired and wifi, because its wifi had
+rejoined on its own; that belongs to F-72, which records how it was finally taken off.
+
+A slicer disconnect in the same minute was unrelated: Snapmaker Orca drops its own cloud
+connection about 47 seconds after its print dialog connects, reported to Snapmaker separately.
+
+Reproduced the same day by turning the laptop's wifi off and on with the tile open in Fluidd:
+
+| Outage | What the tile did |
+|---|---|
+| about 30 s | froze, and stayed frozen until the page was reloaded |
+| about 30 s, again | came back, when Fluidd reconnected to Moonraker |
+| longer | came back after a short while, the same way |
+
+With the browser's network panel open on the tile's frame, the page's one `stream.mjpg` request
+ended as a 200 after 11.62 s, having carried 4,935 kB, and no second request followed. The stream
+does not survive a break in the path, and the viewer has nothing that notices it ended or asks
+again: the `<img>` keeps showing the last part of a finished response. Every recovery seen came
+from Fluidd rebuilding its panels when its own websocket reconnected, which does not happen when
+Fluidd's connection happens to survive, and never happens for the viewer opened on its own.
+
+nginx's `/thermal/` location has `proxy_buffering off` and `proxy_read_timeout 300s` and sets no
+`send_timeout`, so the default of 60 seconds decides how long it holds a browser that stopped
+reading. Its access log is off for the Fluidd site and its error log says nothing about the
+stream. It also started afresh twice that day, which ends every stream just as surely; the cause
+was not looked into.
+
+What it taught about diagnosing this plugin:
+
+- **A frozen clip can be proven frozen.** Compare consecutive frames: a thermal stream that is
+  delivering is never pixel identical from one frame to the next, so a run of identical frames is
+  a run with no data, whatever the scene.
+- **A Moonraker websocket closed with about 45 seconds of pong elapsed usually means the laptop
+  slept.** Of 57 such closes on the wired address over 2026-09-24 and 25, 48 began within 9 seconds
+  of macOS going to sleep and one during a wifi roam. Seven more fall in the hours F-72's loop was
+  running, and one is unexplained.
+
 ## 10. Reports owed elsewhere
 
-Three defects found while building this plugin, none of which belongs to this repository. Two are
-owed to somebody: 10.1 as a comment on an issue that already exists, 10.3 as a private message. The
-third, 10.2, was retested on 2026-09-18 and is not reproducible, so it is closed rather than sent,
-and kept here with the retest that closed it.
+Five defects found while building this plugin, none of which belongs to this repository. 10.1 went
+as a comment on an issue that already exists, and 10.3 goes as a private message. 10.2 was retested
+on 2026-09-18 and is not reproducible, so it is closed rather than sent, and kept here with the
+retest that closed it. 10.4 and 10.5 went to Snapmaker on 2026-09-28, after the plugin had been a
+suspect in each.
 
 They are written up here because the finding is the expensive part and it is the part that
 evaporates: each one cost hours to diagnose, the workaround is already in this codebase, and the
 diagnosis exists nowhere else. Two of the three were wrong in their specifics when they were
 re-checked against the code and the data, which is the argument for writing them down in a form that
-can be re-checked at all.
+can be re-checked at all. Two of the first three, that is; the Snapmaker reports were corrected
+several times before they went, for the same reason.
 
 ### 10.1 The vendored driver's `trigger_shutter` is broken on a P1
 
@@ -2527,3 +2708,52 @@ fluidd bundle and the `<script>` tag appended to its `index.html`. Removing both
 **A separate small thing found alongside it:** `announcements.py:_fetch_moonlight()` failed to
 update the subscription named `filaman` with its own HTTP 404, at both component loads. Unrelated to
 the polling, but it is a registered feed that does not resolve.
+
+### 10.4 Sent: the U1's wifi retries, rejoins, and will not stay off
+
+**Where it went:** Snapmaker support, through its own messaging system, on 2026-09-28. With it went
+two exports of the printer's system log (2026-09-24 and 2026-09-28, both encrypted for Snapmaker),
+the printer's network screen showing the wifi off while it was connected, and the router's log of
+the printer's wifi client and its client list, with the network's name and the home's public
+address blacked out. The report carries its measurements as an appendix. The thermal camera's clips
+were left out, since the plugin is not stock software and the pings show the same outage.
+
+**What it says:**
+
+- Blocked at the router, the printer retries the refused network every 30.97 seconds, forever, and
+  is unreachable for about three seconds of each cycle (F-72).
+- Neither the off switch nor forgetting the network keeps it off. Forgetting leaves the network
+  saved and enabled in `/etc/wpa_supplicant.conf`, its overlay copy and the screen's own copy, and
+  the firmware restarts `wpa_supplicant` and `dhcpcd` from that file about 30 seconds after any
+  disconnect. What triggers the restart was not found.
+- With both links up, traffic to the wifi address arrives over wifi and its replies leave by
+  ethernet, and Snapmaker Orca uploads print files to the wifi address.
+- `/usr/bin/wifi-connect.sh` prints the wifi password to its output. It was found in no log.
+
+**What keeps the maintainer's printer off wifi:** `disabled=1` added to the network in
+`/etc/wpa_supplicant.conf` and in `/oem/printer_data/gui/wpa_supplicant.conf`, with backups of both
+in `/userdata`. It has survived a reboot and a power cycle. A firmware update may put the files
+back, so check after every update: `wpa_cli -i wlan0 list_networks` should show the network
+`[DISABLED]`, and `ip -4 addr show wlan0` no address.
+
+### 10.5 Sent: Snapmaker Orca disconnects after the print dialog connects, and uploads stall
+
+**Where it went:** Snapmaker, the same day and the same way, with the slicer's log folder, two
+screen recordings, and the 2026-09-28 export of the printer's system log. The report carries its
+data as an appendix, with the search patterns that find each finding in the log folder.
+
+**What it says:**
+
+- Over 2026-09-15 to 2026-09-28, 11 of the 13 cloud connections the print dialog opened were
+  followed by the slicer disconnecting from the printer 46 to 47 seconds later, the first
+  "Connection lost" 18 to 20 seconds after the connection. None of the 13 the device page opened
+  were. One suggested cause, unconfirmed: both parts of the app use the same MQTT client ID, and
+  AWS IoT Core closes the older of two connections with the same ID.
+- Uploads go over the local network to the address the slicer learned from the printer. On
+  2026-09-27 three of five stalled partway, with Moonraker logging each request arriving and
+  nothing after it; the dialog gave no sign of it.
+- With the printer off wifi, the slicer kept its stored wifi address, spent up to 3 seconds
+  checking it before each upload, and then went through the cloud.
+
+**Why it is recorded here:** the slicer's disconnect arrived in the same minute as F-74's freeze and
+looked like one event with it. It is not the plugin, and it is not the network.
