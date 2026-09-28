@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.1
+
+- **The plugin's page in the Bespok3d app carries its dates**, when it was first published and when
+  it was last updated. 0.27.0 went out without them, and its page showed no documentation and no
+  changelog. Nothing about the plugin itself changes.
+
 ## 0.27.0
 
 The first public release, signed by Bespok3d and published as a release candidate: it has run

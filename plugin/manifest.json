@@ -1,7 +1,7 @@
 {
   "name": "thermal-master",
   "title": "Thermal Master",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "license": "https://github.com/Bespok3d/B3_ThermalMaster/blob/main/plugin/doc/LICENSE",
   "author": "Mauker",
   "min_daemon_version": "0.14.0",
@@ -11,6 +11,8 @@
   "channel": "rc",
   "printer_specific": true,
   "changelog": "doc/CHANGELOG.md",
+  "published_at": "2026-09-28",
+  "updated_at": "2026-09-28",
   "source": "https://github.com/Bespok3d/B3_ThermalMaster",
   "homepage": "https://github.com/Bespok3d/B3_ThermalMaster",
   "publisher": "PLACEHOLDER",

@@ -139,7 +139,8 @@ python3 scripts/check-in-browser.py
 ## Releasing
 
 A release is published by a version tag and by nothing else. Bump `version` in
-`plugin/manifest.json`, commit it, push the branch, and then push a tag of the form
+`plugin/manifest.json`, set `updated_at` to the release date (the builder does not stamp it, and
+`published_at` stays at the first release's), commit it, push the branch, and then push a tag of the form
 `plugin-thermal-master-v<version>` naming the same number. `scripts/tag_version_guard.sh` refuses a
 tag whose version the manifest does not declare, and refuses anything that is not a release tag at
 all, so a run off a branch cannot publish. CI then bakes the wheels, runs the tests, packs and signs

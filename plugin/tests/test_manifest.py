@@ -184,3 +184,18 @@ def test_the_frame_endpoint_is_proxied_and_uncacheable():
 
     assert "/thermal/frame.bin" in conf
     assert conf.count('add_header Cache-Control "no-store" always;') == 2
+
+
+def test_the_manifest_carries_its_publication_dates():
+    """Written by hand, because the builder does not stamp them (F-76).
+
+    0.27.0 went out without either, the index entry carried two empty strings, and the plugin's page
+    in the Bespok3d app showed no documentation and no changelog. Bespok3d's own plugins write both
+    in source. `updated_at` moves with every release; `published_at` never does.
+    """
+
+    date = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+    assert date.match(MANIFEST["published_at"])
+    assert date.match(MANIFEST["updated_at"])
+    assert MANIFEST["published_at"] <= MANIFEST["updated_at"]
