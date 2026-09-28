@@ -16,6 +16,11 @@ eggs/
 .eggs/
 lib/
 lib64/
+# ...except this plugin's own modules. The rule above comes from the standard Python template,
+# where lib/ means a build artifact. Here it silently matched plugin/files/lib, which is the
+# entire plugin: the package still built, because b3-builder reads the working tree rather than
+# git, so the first sign would have been a commit whose plugin had no code in it.
+!plugin/files/lib/
 parts/
 sdist/
 var/
@@ -151,6 +156,10 @@ activemq-data/
 .env
 .envrc
 .venv
+.venv-*/
+
+# Local reference material, not part of the repo. See reference/*/README.md.
+reference/
 env/
 venv/
 ENV/
@@ -216,3 +225,28 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Vendor specific files
+# Build output (the baked wheel trees) is ignored; the pinned upstream driver is not. It is one
+# source file and its licence, checked in so that what ships is reviewable in a diff and cannot
+# change under us when upstream moves. See VENDORING.md.
+plugin/files/vendor/*
+!plugin/files/vendor/p3_camera.py
+!plugin/files/vendor/LICENSE.p3-ir-camera
+plugin/files/wheels/
+
+# macOS turds. These are payload if they land under plugin/files, and the daemon refuses a package
+# holding an archive member its manifest does not list.
+.DS_Store
+
+# Compiled modules under plugin/files would be packed into the .b3, where the daemon refuses any
+# archive member not listed in files[].
+plugin/files/**/__pycache__/
+
+# Where an assistant puts anything it would otherwise delete, so the maintainer can look before it
+# goes. Never committed, and safe to empty by hand.
+_trash/
+
+# Frames captured off a real printer for judging a rendering change. Data, not source: they are
+# big, they are binary, and the decision they inform gets written down rather than the megabytes.
+reference/frames/

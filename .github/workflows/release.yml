@@ -1,0 +1,55 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Mauker and the Bespok3d contributors
+# SPDX-License-Identifier: Apache-2.0
+name: build-and-release
+
+# Build, bake, test, pack, sign and release the plugin through the shared Bespok3d build Action,
+# then register this repo's list in the org's index. The repository is public and in the Bespok3d
+# organisation, so both secrets are the organisation's own: nothing about a key is in this file
+# beyond the names.
+on:
+  push:
+    tags:
+      # A release is published by a version tag and by nothing else. A branch trigger would hand
+      # every enrolled printer a package built from whatever that branch happened to hold, work in
+      # progress included, and the shared release-trigger detector fails the gate if one is added.
+      # scripts/tag_version_guard.sh refuses a tag whose version the manifest does not declare.
+      - 'plugin-*-v*'
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create releases on this repo
+    steps:
+      # No submodules: lib_bespok3d is private, and this workflow's token reaches only this
+      # repository. Nothing the release needs lives there; the gate does, and runs locally.
+      - uses: actions/checkout@v4
+
+      # The Run workflow button stays usable: this step, not a job level `if`, is what decides. A
+      # manual run against a release tag republishes it; a manual run against a branch is refused
+      # here, loudly, instead of skipping the job and reporting success.
+      - name: Refuse a ref that is not a plugin release tag
+        run: sh scripts/tag_version_guard.sh "${{ github.ref_name }}"
+
+      # For plugin/tests/run.sh, which the builder runs after packing and before anything is
+      # released: the printer's Python, so the tests run against the interpreter the plugin will.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: Bespok3d/b3-builder@9322144c063a621191fe50951c803c6f79227277  # main @ 2026-09-28
+        with:
+          unit: repo
+          signing-key: ${{ secrets.REGISTRY_SIGNING_KEY }}
+          # This plugin declares Python dependencies, so the bake is what fills files/wheels. Without
+          # it the builder refuses to pack rather than shipping a plugin that cannot start.
+          bake: 'true'
+          atom-repo: ${{ github.repository }}
+          list-name: 'Thermal Master'
+          # The fingerprint of the organisation key REGISTRY_SIGNING_KEY holds, the same one every
+          # Bespok3d package in the main index is signed with.
+          list-publisher: '679939555819fb5f6423dc68c4388e76bfa9b4e0'
+          list-ref-name: 'Thermal Master'
+          main-index-repo: Bespok3d/main-index
+          main-index-token: ${{ secrets.MAIN_INDEX_TOKEN }}

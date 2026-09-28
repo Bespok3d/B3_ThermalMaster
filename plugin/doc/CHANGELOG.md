@@ -1,0 +1,29 @@
+# Changelog
+
+## 0.27.0
+
+The first public release, signed by Bespok3d and published as a release candidate: it has run
+daily on its maintainer's printer, with every version tested on the hardware, and moves to `stable`
+once somebody else has run it too.
+
+- **A thermal camera in Fluidd and Mainsail.** Plug in a Thermal Master P1 or P3 and it appears
+  alongside your other cameras, under the name you choose when you install it. The plugin works
+  out which model it is.
+- **Temperatures in the picture.** A colour bar labelled with the range on screen, the temperature
+  at the centre, and markers on the hottest and coldest points, in Celsius or Fahrenheit. Emissivity
+  is applied to the readings, the gain switches between high sensitivity and a wide 0 to 550 C
+  range, and the sensor can be recalibrated from the settings page.
+- **An interactive viewer** at `/thermal/view`: point at the picture to read the temperature there,
+  drag a box to measure a region, place up to four spots, zoom and pan, save a still or record a
+  clip.
+- **A display range you can hold**, so a colour means the same temperature in every frame.
+- **Light on the printer.** It stops rendering when nobody is watching, can be switched off
+  entirely, and its settings page says what it is costing the printer's processor.
+- **It notices a dead picture.** If the connection drops, the viewer says what is wrong in a line
+  across the picture, and reconnects by itself when it can.
+
+The P1 is what this has been developed and run against. The P3 is implemented from the same driver
+and has not been run on a printer yet: if you have one, a report either way is welcome.
+
+The history before this release, 0.1.0 to 0.26.1, is in the repository as
+[`CHANGELOG_DEV.md`](https://github.com/Bespok3d/B3_ThermalMaster/blob/main/CHANGELOG_DEV.md).

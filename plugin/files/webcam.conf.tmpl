@@ -1,0 +1,20 @@
+# Registers the thermal camera in Fluidd and Mainsail, so the user never has to add it by hand under
+# Settings. The name is theirs to choose at install time.
+#
+# One entry, not two. Until 0.16.0 this file registered a plain picture and the interactive viewer
+# as separate tiles, on the argument that the viewer is a script and a picture is not, so a broken
+# script still left a camera on the dashboard. That argument cost more than it bought: a camera
+# defined in a config file is read-only in Fluidd, so the dashboard showed two cameras of the same
+# thing and no way inside the UI to hide either. The fallback now lives in the page instead. The
+# viewer's stylesheet lays the picture out on its own, and the script only ever overrides that, so
+# with no JavaScript at all this URL is still the camera, correctly fitted.
+#
+# `iframe` reaches Fluidd and Mainsail as a real tile; `u1-remote-screen` ships the same mechanism,
+# which is what settles it.
+[webcam $THERMAL_CAMERA_NAME]
+service: iframe
+stream_url: /thermal/view
+# Not used by the iframe tile, which has no still. It is here for everything else that asks a
+# Moonraker webcam for one picture, and it costs nothing when nothing asks.
+snapshot_url: /thermal/snapshot.jpg
+aspect_ratio: $THERMAL_CAMERA_ASPECT

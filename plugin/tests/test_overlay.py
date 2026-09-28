@@ -1,0 +1,589 @@
+# SPDX-FileCopyrightText: Copyright (C) 2026 Mauker and the Bespok3d contributors
+# SPDX-License-Identifier: Apache-2.0
+"""The temperature readout: the numbers, where the markers land, and what they cost.
+
+A wrong marker is worse than no marker, because it looks authoritative. So the coordinate tests
+here do not check the arithmetic against itself: they mark one pixel, orient the frame with the
+same function the renderer uses, and assert the marked pixel is where `orient_point` said it would
+be. Any drift between the two shows up as a failure rather than as a cross drawn on cold metal.
+"""
+
+from __future__ import annotations
+
+import io
+
+import numpy as np
+import pytest
+from fake_camera import (
+    KELVIN_AT_ZERO_CELSIUS,
+    P1_SENSOR_HEIGHT,
+    P1_SENSOR_WIDTH,
+    RAW_UNITS_PER_KELVIN,
+    thermal_frame,
+)
+from PIL import Image
+
+ORIENTATIONS = [
+    (rotation, mirrors)
+    for rotation in (0, 90, 180, 270)
+    for mirrors in ((False, False), (True, False), (False, True), (True, True))
+]
+
+
+def raw_for(celsius: float) -> int:
+    return int((celsius + KELVIN_AT_ZERO_CELSIUS) * RAW_UNITS_PER_KELVIN)
+
+
+@pytest.fixture
+def flat_frame():
+    """A uniform 30 C field, so a pixel set hotter than it is unambiguously the hottest."""
+
+    return np.full((P1_SENSOR_HEIGHT, P1_SENSOR_WIDTH), raw_for(30.0), dtype=np.uint16)
+
+
+def test_fahrenheit_converts_and_celsius_passes_through(thermal_streamer):
+    assert thermal_streamer.to_display_temperature(100.0, "celsius") == 100.0
+    assert thermal_streamer.to_display_temperature(100.0, "fahrenheit") == pytest.approx(212.0)
+
+
+def test_a_formatted_temperature_names_its_scale(thermal_streamer):
+    assert thermal_streamer.format_temperature(21.25, "celsius") == "21.2C"
+    assert thermal_streamer.format_temperature(0.0, "fahrenheit") == "32.0F"
+
+
+@pytest.mark.parametrize(("rotation", "mirrors"), ORIENTATIONS)
+def test_a_marked_pixel_lands_where_orient_point_says(thermal_streamer, flat_frame, rotation,
+                                                      mirrors):
+    """The cross-check: `orient_point` against `orient`, for every orientation on offer."""
+
+    marked = flat_frame.copy()
+    marked[17, 43] = raw_for(90.0)
+
+    (x, y), size = thermal_streamer.orient_point(
+        (43, 17), (P1_SENSOR_WIDTH, P1_SENSOR_HEIGHT), rotation, mirrors
+    )
+    oriented = thermal_streamer.orient(marked, rotation, *mirrors)
+
+    assert (oriented.shape[1], oriented.shape[0]) == size
+    assert oriented[y, x] == raw_for(90.0)
+
+
+def test_a_quarter_turn_clockwise_sends_the_top_left_pixel_to_the_top_right(thermal_streamer):
+    (x, y), size = thermal_streamer.orient_point((0, 0), (160, 120), 90, (False, False))
+
+    assert size == (120, 160)
+    assert (x, y) == (119, 0)
+
+
+def test_statistics_report_the_temperatures_in_the_frame(thermal_streamer, flat_frame):
+    frame = flat_frame.copy()
+    frame[10, 20] = raw_for(80.0)
+    frame[100, 30] = raw_for(5.0)
+
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
+
+    assert stats.maximum_celsius == pytest.approx(80.0, abs=0.05)
+    assert stats.minimum_celsius == pytest.approx(5.0, abs=0.05)
+    assert stats.average_celsius == pytest.approx(30.0, abs=0.05)
+    assert stats.hotspot == (20, 10)
+    assert stats.coldspot == (30, 100)
+
+
+def test_statistics_report_the_centre_pixel(thermal_streamer, flat_frame):
+    frame = flat_frame.copy()
+    frame[P1_SENSOR_HEIGHT // 2, P1_SENSOR_WIDTH // 2] = raw_for(55.0)
+
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
+
+    assert stats.centre_celsius == pytest.approx(55.0, abs=0.05)
+
+
+def test_the_colorbar_ends_are_the_display_bounds_not_the_scene_extremes(thermal_streamer,
+                                                                        flat_frame):
+    """The bar explains the colour mapping, so it has to be labelled with what was mapped."""
+
+    frame = flat_frame.copy()
+    frame[0, 0] = raw_for(200.0)
+    bounds = (float(raw_for(20.0)), float(raw_for(40.0)))
+
+    stats = thermal_streamer.frame_statistics(frame, bounds, 0, (False, False), 1.0)
+
+    assert stats.range_low_celsius == pytest.approx(20.0, abs=0.05)
+    assert stats.range_high_celsius == pytest.approx(40.0, abs=0.05)
+    assert stats.maximum_celsius == pytest.approx(200.0, abs=0.05)
+
+
+def test_the_stats_payload_converts_every_temperature_it_carries(thermal_streamer, flat_frame):
+    stats = thermal_streamer.frame_statistics(flat_frame, (0.0, 1.0), 0, (False, False), 1.0)
+
+    payload = stats.as_dict("fahrenheit")
+
+    assert payload["units"] == "fahrenheit"
+    assert payload["average"] == pytest.approx(86.0, abs=0.1)
+    assert payload["width"] == P1_SENSOR_WIDTH
+
+
+def test_the_stats_payload_carries_marker_pixels_a_client_can_place(thermal_streamer, flat_frame):
+    frame = flat_frame.copy()
+    frame[7, 9] = raw_for(70.0)
+
+    payload = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0).as_dict(
+        "celsius"
+    )
+
+    assert payload["hotspot"] == {"x": 9, "y": 7}
+    assert payload["height"] == P1_SENSOR_HEIGHT
+
+
+def test_the_overlay_raises_the_encode_until_text_fits(thermal_streamer):
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=True) == 2
+    assert thermal_streamer.encode_upscale((256, 192), 1, readout_enabled=True) == 2
+
+
+def test_a_rotated_frame_is_not_scaled_further_than_an_upright_one(thermal_streamer):
+    """Measuring the width would triple a portrait frame for no more legibility than doubling it."""
+
+    assert thermal_streamer.encode_upscale((120, 160), 1, readout_enabled=True) == 2
+
+
+def test_the_overlay_never_lowers_an_upscale_someone_asked_for(thermal_streamer):
+    assert thermal_streamer.encode_upscale((160, 120), 4, readout_enabled=True) == 4
+
+
+def test_without_the_overlay_the_encode_is_left_exactly_as_asked(thermal_streamer):
+    """The 43% of a core F-27 bought back stays bought for anyone who turns the readout off."""
+
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=False) == 1
+
+
+def test_a_frame_with_the_overlay_is_still_a_jpeg(thermal_streamer, palettes):
+    renderer = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], thermal_streamer.RenderSettings()
+    )
+
+    rendered = renderer.render_frame(thermal_frame())
+
+    assert rendered.jpeg[:2] == b"\xff\xd8"
+    assert rendered.jpeg[-2:] == b"\xff\xd9"
+
+
+def test_a_rendered_frame_carries_the_statistics_of_the_frame_it_encoded(thermal_streamer,
+                                                                        palettes):
+    renderer = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], thermal_streamer.RenderSettings(emissivity=1.0)
+    )
+
+    rendered = renderer.render_frame(thermal_frame(celsius_low=24.0, celsius_high=40.0))
+
+    assert rendered.stats.minimum_celsius == pytest.approx(24.0, abs=0.5)
+    assert rendered.stats.maximum_celsius == pytest.approx(40.0, abs=0.5)
+
+
+def test_the_overlay_actually_marks_the_picture(thermal_streamer, palettes):
+    """Same frame, same encode size, overlay the only difference: the pixels must differ."""
+
+    frame = thermal_frame()
+    settings = thermal_streamer.RenderSettings
+    plain = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"],
+        settings(upscale=2, colorbar=False, reticle=False, hotspot=False, coldspot=False),
+    )
+    marked = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"],
+        settings(upscale=2, colorbar=True, reticle=True, hotspot=True, coldspot=True),
+    )
+
+    plain_pixels = np.asarray(Image.open(io.BytesIO(plain.render_jpeg(frame))))
+    marked_pixels = np.asarray(Image.open(io.BytesIO(marked.render_jpeg(frame))))
+
+    assert plain_pixels.shape == marked_pixels.shape
+    assert not np.array_equal(plain_pixels, marked_pixels)
+
+
+def test_the_overlay_survives_a_frame_whose_hotspot_is_in_the_corner(thermal_streamer, palettes,
+                                                                    flat_frame):
+    """A label beside a corner marker would run off the picture if nothing clamped it."""
+
+    frame = flat_frame.copy()
+    frame[-1, -1] = raw_for(120.0)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"])
+
+    assert renderer.render_frame(frame).jpeg[:2] == b"\xff\xd8"
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+def test_the_overlay_survives_every_rotation(thermal_streamer, palettes, rotation):
+    settings = thermal_streamer.RenderSettings(rotation=rotation, flip_horizontal=True)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings)
+
+    rendered = renderer.render_frame(thermal_frame())
+    size = Image.open(io.BytesIO(rendered.jpeg)).size
+
+    assert size[0] == rendered.stats.width * thermal_streamer.encode_upscale(
+        (rendered.stats.width, rendered.stats.height), 1, readout_enabled=True
+    )
+
+
+def test_a_font_is_available_at_whatever_size_is_asked_for(thermal_streamer):
+    assert thermal_streamer.overlay_font(14) is not None
+
+
+def test_the_posted_form_can_turn_the_readout_off_and_change_its_units(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings(
+        colorbar=True, reticle=True, hotspot=True, coldspot=True, units="celsius"
+    )
+
+    _, settings = thermal_streamer.settings_from_form(
+        {"units": ["fahrenheit"]}, palettes, current
+    )
+
+    assert settings.colorbar is False
+    assert settings.reticle is False
+    assert settings.hotspot is False
+    assert settings.coldspot is False
+    assert settings.units == "fahrenheit"
+
+
+def test_an_unknown_unit_leaves_the_setting_alone(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings(units="fahrenheit")
+
+    _, settings = thermal_streamer.settings_from_form(
+        {"units": ["kelvin"], "colorbar": ["on"], "markers": ["on"]}, palettes, current
+    )
+
+    assert settings.units == "fahrenheit"
+    assert settings.colorbar is True
+
+
+def test_a_glyph_is_rendered_once_and_reused(thermal_streamer):
+    """Not an optimisation detail: uncached, the readout costs more than the JPEG under it."""
+
+    first = thermal_streamer.glyph_tile("7", 14, (255, 255, 255))
+
+    assert thermal_streamer.glyph_tile("7", 14, (255, 255, 255)) is first
+
+
+def test_a_glyph_is_not_shared_between_colours(thermal_streamer):
+    white = thermal_streamer.glyph_tile("7", 14, (255, 255, 255))
+    red = thermal_streamer.glyph_tile("7", 14, (255, 0, 0))
+
+    assert white is not red
+
+
+def test_a_label_is_as_wide_as_the_font_says_its_string_is(thermal_streamer):
+    """Summing per-character advances has to agree with measuring the whole string."""
+
+    font = thermal_streamer.overlay_font(14)
+
+    assert thermal_streamer.label_width("213.7C", 14) == pytest.approx(
+        font.getlength("213.7C"), abs=1.0
+    )
+
+
+def test_a_marker_near_the_colorbar_labels_itself_on_its_other_side(thermal_streamer):
+    """The hardware defect this fixes: a corner hotspot's label landed on the colorbar's own."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((225, 300), 7, "31.3C", style)
+
+    assert left < 225
+    assert left + thermal_streamer.label_width("31.3C", style.pixel_height) <= style.content_right
+
+
+def test_a_marker_with_room_labels_itself_on_the_right(thermal_streamer):
+    style = thermal_streamer.overlay_style((320, 240))
+
+    left, _ = thermal_streamer.marker_label_position((60, 100), 9, "31.3C", style)
+
+    assert left > 60
+
+
+def test_a_marker_label_never_starts_off_the_left_edge(thermal_streamer):
+    """A cramped picture must not push a flipped label to a negative position."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((4, 10), 7, "31.3C", style)
+
+    assert left >= 0
+
+
+def test_the_colorbar_box_leaves_room_for_content_beside_it(thermal_streamer):
+    style = thermal_streamer.overlay_style((320, 240))
+    bar_left, _, bar_width, _ = style.bar_box
+
+    assert style.content_right < bar_left
+    assert bar_left + bar_width <= 320
+
+
+class Measured:
+    """Just enough of FrameStats for the bar, which only reads four numbers off it."""
+
+    def __init__(self, minimum, maximum, low, high):
+        self.minimum_celsius = minimum
+        self.maximum_celsius = maximum
+        self.range_low_celsius = low
+        self.range_high_celsius = high
+
+
+def test_the_ruler_spans_the_scene_rather_than_the_display_range(thermal_streamer):
+    """The change of 0.14.0, and the reason for it: a ruler must agree with the markers.
+
+    Before this the ends were the auto-ranged bounds, so a ruler topped 25.3 sat beside a marker
+    reading 30.0 and read as a contradiction. Hardware produced exactly that, twice, to two
+    different people looking at it.
+    """
+
+    axis = thermal_streamer.bar_axis(Measured(19.6, 30.0, 21.7, 25.3))
+
+    assert axis == (19.6, 30.0)
+
+
+def test_a_flat_scene_falls_back_to_the_display_range(thermal_streamer):
+    """A scene with no span of its own would otherwise give the bar no height at all."""
+
+    axis = thermal_streamer.bar_axis(Measured(25.0, 25.0, 24.0, 26.0))
+
+    assert axis == (24.0, 26.0)
+
+
+def test_the_top_of_the_ruler_is_the_hottest_pixel(thermal_streamer):
+    assert thermal_streamer.bar_row(30.0, (20.0, 30.0), 101) == 0
+
+
+def test_the_bottom_of_the_ruler_is_the_coldest(thermal_streamer):
+    assert thermal_streamer.bar_row(20.0, (20.0, 30.0), 101) == 100
+
+
+def test_a_temperature_halfway_up_lands_halfway_up(thermal_streamer):
+    assert thermal_streamer.bar_row(25.0, (20.0, 30.0), 101) == 50
+
+
+def test_a_collapsed_axis_does_not_divide_by_zero(thermal_streamer):
+    assert thermal_streamer.bar_row(25.0, (25.0, 25.0), 100) == 50
+
+
+def test_the_gradient_is_flat_where_the_picture_is_flat(thermal_streamer, palettes):
+    """Above the auto-ranged part the picture is one colour, and so is the ruler. That is the point.
+
+    The bands are not decoration: a pixel hotter than the display range is drawn in the top colour,
+    so colour carries no information up there, and a ruler that pretended otherwise would be lying
+    about what the picture means.
+    """
+
+    stats = Measured(10.0, 50.0, 20.0, 30.0)
+    ramp = thermal_streamer.bar_gradient(palettes["ironbow"], (10.0, 50.0), stats, 101)
+
+    assert np.array_equal(ramp[0], ramp[5])
+    assert np.array_equal(ramp[-1], ramp[-5])
+    assert not np.array_equal(ramp[0], ramp[-1])
+
+
+def test_the_gradient_varies_across_the_ranged_part(thermal_streamer, palettes):
+    stats = Measured(10.0, 50.0, 20.0, 30.0)
+    ramp = thermal_streamer.bar_gradient(palettes["ironbow"], (10.0, 50.0), stats, 101)
+
+    middle = [ramp[row][0].tolist() for row in (52, 60, 68)]
+
+    assert len({tuple(colour) for colour in middle}) == 3
+
+
+def test_the_reserved_column_is_wider_than_the_bar(thermal_streamer):
+    """It has to clear the bar's labels, which are right-aligned and several times its width."""
+
+    style = thermal_streamer.overlay_style((320, 240))
+    bar_left, _, bar_width, _ = style.bar_box
+
+    assert style.content_right < bar_left
+    assert 320 - style.content_right > bar_width
+
+
+def test_a_label_for_a_marker_inside_the_reserved_column_is_pulled_clear_of_it(thermal_streamer):
+    """Flipping alone was not enough when the marker itself sits in the reserved column."""
+
+    style = thermal_streamer.overlay_style((240, 320))
+
+    left, _ = thermal_streamer.marker_label_position((236, 300), 7, "31.3C", style)
+
+    assert left + thermal_streamer.label_width("31.3C", style.pixel_height) <= style.content_right
+
+
+def rendered_pixels(thermal_streamer, palettes, **flags):
+    import io
+
+    from PIL import Image
+
+    settings = thermal_streamer.RenderSettings(upscale=2, **flags)
+    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings)
+    return np.asarray(Image.open(io.BytesIO(renderer.render_jpeg(thermal_frame()))))
+
+
+def test_the_ruler_and_the_markers_are_separate_switches(thermal_streamer, palettes):
+    """One switch could not say "ruler but no numbers over the picture", which people want."""
+
+    bare = rendered_pixels(
+        thermal_streamer, palettes, colorbar=False, reticle=False, hotspot=False, coldspot=False
+    )
+    ruler_only = rendered_pixels(
+        thermal_streamer, palettes, colorbar=True, reticle=False, hotspot=False, coldspot=False
+    )
+    markers_only = rendered_pixels(
+        thermal_streamer, palettes, colorbar=False, reticle=True, hotspot=True, coldspot=True
+    )
+
+    assert not np.array_equal(bare, ruler_only)
+    assert not np.array_equal(bare, markers_only)
+    assert not np.array_equal(ruler_only, markers_only)
+
+
+def test_the_ruler_stays_out_of_the_middle_of_the_picture(thermal_streamer, palettes):
+    """The ruler lives in its reserved column, so turning it on alone must not touch the image."""
+
+    bare = rendered_pixels(
+        thermal_streamer, palettes, colorbar=False, reticle=False, hotspot=False, coldspot=False
+    )
+    ruler_only = rendered_pixels(
+        thermal_streamer, palettes, colorbar=True, reticle=False, hotspot=False, coldspot=False
+    )
+    style = thermal_streamer.overlay_style((bare.shape[1], bare.shape[0]))
+
+    assert np.array_equal(bare[:, : style.content_right], ruler_only[:, : style.content_right])
+
+
+def test_either_surface_alone_still_buys_the_bigger_encode(thermal_streamer):
+    """Both draw text, so either one on needs the pixels for it."""
+
+    off = {"colorbar": False, "reticle": False, "hotspot": False, "coldspot": False}
+    for switch in off:
+        assert thermal_streamer.RenderSettings(**{**off, switch: True}).readout is True
+
+
+def test_both_off_is_no_readout_at_all(thermal_streamer):
+    """And therefore exactly the cost the plugin had before there was one."""
+
+    settings = thermal_streamer.RenderSettings(
+        colorbar=False, reticle=False, hotspot=False, coldspot=False
+    )
+
+    assert settings.readout is False
+    assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=settings.readout) == 1
+
+
+def test_with_the_ruler_off_the_markers_get_the_whole_width(thermal_streamer):
+    """Otherwise a hotspot on the right flips its label away from a column holding nothing."""
+
+    with_ruler = thermal_streamer.overlay_style((320, 240), True)
+    without = thermal_streamer.overlay_style((320, 240), False)
+
+    assert without.content_right > with_ruler.content_right
+    assert without.content_right == 320 - without.margin
+
+
+MARKER_SWITCHES = ["reticle", "hotspot", "coldspot"]
+
+
+def only(switch: str) -> dict:
+    """Every readout surface off except the one named."""
+
+    off = dict.fromkeys(["colorbar", *MARKER_SWITCHES], False)
+    return {**off, switch: True}
+
+
+@pytest.mark.parametrize("switch", ["colorbar", *MARKER_SWITCHES])
+def test_each_surface_draws_something_on_its_own(thermal_streamer, palettes, switch):
+    bare = rendered_pixels(thermal_streamer, palettes, **only("colorbar"), upscale_only=False) \
+        if False else rendered_pixels(
+            thermal_streamer, palettes, colorbar=False, reticle=False, hotspot=False,
+            coldspot=False,
+        )
+
+    assert not np.array_equal(bare, rendered_pixels(thermal_streamer, palettes, **only(switch)))
+
+
+@pytest.mark.parametrize("switch", MARKER_SWITCHES)
+def test_each_marker_draws_something_the_others_do_not(thermal_streamer, palettes, switch):
+    """Three switches that all did the same thing would be three ways to say one thing."""
+
+    mine = rendered_pixels(thermal_streamer, palettes, **only(switch))
+
+    for other in MARKER_SWITCHES:
+        if other != switch:
+            assert not np.array_equal(mine, rendered_pixels(thermal_streamer, palettes,
+                                                            **only(other)))
+
+
+def test_the_coldspot_is_marked_at_the_coldest_pixel(thermal_streamer, flat_frame):
+    frame = flat_frame.copy()
+    frame[90, 30] = raw_for(-5.0)
+
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
+
+    assert stats.coldspot == (30, 90)
+    assert stats.minimum_celsius == pytest.approx(-5.0, abs=0.05)
+
+
+def test_the_two_extremes_are_told_apart_by_colour(thermal_streamer):
+    """A blue cross and a red cross, because a scene often has both near each other."""
+
+    assert thermal_streamer.COLDSPOT_RGB != thermal_streamer.HOTSPOT_RGB
+    assert thermal_streamer.COLDSPOT_RGB[2] > thermal_streamer.COLDSPOT_RGB[0]
+    assert thermal_streamer.HOTSPOT_RGB[0] > thermal_streamer.HOTSPOT_RGB[2]
+
+
+def test_the_ruler_ticks_only_the_extremes_being_marked(thermal_streamer, palettes):
+    """Switching a marker off takes its tick with it, so the two never disagree."""
+
+    both = rendered_pixels(thermal_streamer, palettes, colorbar=True, reticle=False,
+                           hotspot=True, coldspot=True)
+    hot_only = rendered_pixels(thermal_streamer, palettes, colorbar=True, reticle=False,
+                               hotspot=True, coldspot=False)
+
+    assert not np.array_equal(both, hot_only)
+
+
+def test_two_markers_close_together_do_not_write_over_each_other(thermal_streamer, flat_frame):
+    """Seen on hardware: a hotspot near the centre wrote "21.2" and "70.9" over each other."""
+
+    frame = flat_frame.copy()
+    centre_y, centre_x = P1_SENSOR_HEIGHT // 2, P1_SENSOR_WIDTH // 2
+    frame[centre_y + 2, centre_x + 3] = raw_for(90.0)
+    stats = thermal_streamer.frame_statistics(frame, (0.0, 1.0), 0, (False, False), 1.0)
+    overlay = thermal_streamer.Overlay(
+        thermal_streamer.build_palettes()["ironbow"], stats, "celsius"
+    )
+    style = thermal_streamer.overlay_style((320, 240), True)
+
+    placed = []
+    for marker in thermal_streamer.markers_for(overlay):
+        text = thermal_streamer.format_temperature(marker.celsius, "celsius")
+        arm = max(int(320 * marker.arm_fraction), 3)
+        scale = 320 / stats.width
+        anchor = (int((marker.spot[0] + 0.5) * scale), int((marker.spot[1] + 0.5) * scale))
+        left, top = thermal_streamer.place_label(anchor, arm, text, style, placed)
+        width = thermal_streamer.label_width(text, style.pixel_height)
+        placed.append((left, top, left + width, top + style.line_height))
+
+    for index, rect in enumerate(placed):
+        for other in placed[index + 1:]:
+            assert not thermal_streamer.overlapping(rect, other), (rect, other)
+
+
+def test_a_lone_marker_still_labels_itself_beside_the_cross(thermal_streamer):
+    """The collision handling must not move a label that had no reason to move."""
+
+    style = thermal_streamer.overlay_style((320, 240), True)
+
+    alone = thermal_streamer.place_label((80, 120), 9, "42.0C", style, [])
+    first_choice = thermal_streamer.label_candidates((80, 120), 9, "42.0C", style)[0]
+
+    assert alone == first_choice
+
+
+def test_a_label_with_nowhere_clear_to_go_is_still_drawn(thermal_streamer):
+    """A number in a crowded spot beats no number: the cross already says where."""
+
+    style = thermal_streamer.overlay_style((320, 240), True)
+    everywhere = [(0.0, 0.0, 320.0, 240.0)]
+
+    assert thermal_streamer.place_label((80, 120), 9, "42.0C", style, everywhere) is not None
