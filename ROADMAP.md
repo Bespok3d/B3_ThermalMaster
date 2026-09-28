@@ -2033,17 +2033,31 @@ picture it is showing, and the plugin's own count of frames published.
 
 **The pieces.**
 
-1. **`/stats` says how many frames the plugin has published and how long ago the last one was.**
-   Two fields, `frame` (the publication count `LatestFrame` already keeps) and `frame_age_seconds`.
-   This is what separates a dead stream from a camera that stopped: in the first the count moves
-   and the picture does not, in the second neither does.
+1. **A new `/health` says how many frames the plugin has published and how long ago the last one
+   was.** Three fields: `frame` (the publication count `LatestFrame` already keeps),
+   `frame_age_seconds`, and `streaming`, whether the switch is on. This is what separates a dead
+   stream from a camera that stopped: in the first the count moves and the picture does not, in
+   the second neither does.
+
+   A route of its own rather than two more fields on `/stats`, agreed on 2026-09-28 after reading
+   the code. `/stats` answers 503 whenever the last frame carries no measurements, which is always
+   the case while the "Stream off" placeholder is showing, so the watchdog would read the camera
+   being switched off as the printer not answering. And `/stats` wakes the capture and waits up to
+   half a second for a fresh frame on every call, which is right for a client that wants the
+   numbers and pointless work for one that only wants to know whether frames are flowing.
+   `/health` always answers 200 and never waits.
+
+   It does say that somebody is watching, as the stream does on every part. Without that, a page
+   whose stream died would stop being counted as a viewer, the capture would idle after its minute,
+   the count would stop, and the watchdog would blame the camera for what is its own dead stream
+   and never restart it. A hidden page does not ask, so the capture still idles behind it.
 
 2. **The viewer samples its own picture.** Every two seconds it draws the displayed frame into a
    32 by 24 canvas and compares it with the last sample. The picture is same origin, so reading it
    back is allowed. The cost is one tiny draw every two seconds. It remembers when the picture last
    changed.
 
-3. **The viewer asks the plugin, on the same beat.** It fetches `stats`, relative like every other
+3. **The viewer asks the plugin, on the same beat.** It fetches `health`, relative like every other
    URL the page emits, and only while the page is visible: a hidden tab needs no watchdog, and
    becoming visible triggers a check at once.
 
@@ -2074,8 +2088,9 @@ picture it is showing, and the plugin's own count of frames published.
 
 **Tests.**
 
-- `/stats` includes `frame` and `frame_age_seconds`, the count moves with each publish, and the
-  age is the time since the last one.
+- `/health` answers 200 with `frame`, `frame_age_seconds` and `streaming`, before any frame and
+  while the placeholder shows; the count moves with each publish, and the age is the time since
+  the last one. It notes interest and does not wait for a frame.
 - `stream.mjpg?n=7` routes to the stream handler.
 - The rendered page has the watchdog's timings substituted, like the recorder's, and the restart
   URL is relative (the existing no absolute paths test should catch it if not).
@@ -2088,6 +2103,29 @@ already requires Node for the shared detectors, and `test_page_scripts.py` runs 
 over both pages' scripts, which catches the syntax errors a script inside a Python string invites.
 The behaviour is left to the hardware round, as the viewer's has been so far. Revisit if the viewer
 gains a second piece of logic worth testing on its own.
+
+**Added after the first hardware clips, 2026-09-28.** Two recordings of wifi drops showed the line
+appearing 2.4 s and about 3 s after the freeze, and clearing on the same frame the picture moved
+again, with no "reconnecting" in between. Three changes came out of them:
+
+- **The page asks at once when the browser reports its network is back** (the `online` event),
+  instead of waiting out the back-off, which could add up to ten seconds to a recovery.
+- **Rec is offered only over a moving camera picture.** A clip's size is fixed when it starts, and
+  one started over the "Stream off" placeholder kept the placeholder's 320 by 240 for the whole
+  clip, squashing the camera's 240 by 320 into it. The button is disabled while the switch is off
+  and until the picture has moved since, which is what tells the camera from the still
+  placeholder. A running recording is never disabled, because its button is how it stops.
+- **Switching the camera off ends a recording and saves it**, whether from this page or, as
+  `health` reports it, from anywhere else. A stream that has merely stopped keeps recording,
+  because a clip across an outage is how F-74 was caught.
+- **`scripts/check-in-browser.py` publishes a picture that changes**, a small grey block in one
+  corner cycling through seven shades, with the temperatures untouched. It republished one JPEG,
+  which the watchdog rightly takes for a dead stream.
+
+**Decided not to fix:** a recording made inside Fluidd is lost when Fluidd rebuilds its panel. The
+page ends the recording on `pagehide`, but the browser discards the page before the clip is
+written. Saving it in pieces as it records would fix that, and is not worth it: record from the
+viewer opened on its own.
 
 **Hardware round.**
 
@@ -2106,6 +2144,54 @@ Repeat F-74's tests with 0.26.0 and write down the results:
 
 `CHANGELOG.md` 0.26.0; the plugin README's troubleshooting note gains a sentence on the badge; F-74
 gains its confirmation paragraph; section 9's list of what is left gains this phase until it ships.
+
+### Phase 9: a thermal timelapse, one frame per layer. An idea, for after Phase 8.
+
+The printer's own camera makes a timelapse of each print. A thermal one would show something that
+one cannot: heat spreading through the part and the bed layer by layer, and where it cools first.
+Sketched on 2026-09-28 and not started; nothing here is built.
+
+**Decided so far.**
+
+- **Layer changes come from Moonraker, not from reading the G-code.** Klipper keeps
+  `print_stats.info.current_layer` and `total_layer` when the slicer's layer change G-code sets
+  them, and on the U1 with Snapmaker Orca it does. Queried on 2026-09-28 at
+  `/printer/objects/query?print_stats`: `null` and `null` with the printer on standby; then, on a
+  150 layer cube, `0` of 150 as the print started, `25` about six minutes later and `45` after
+  another two and a half, with `state` reading `printing` throughout. Parsing the file would only
+  repeat what Klipper already knows. The plugin asks Moonraker, on the printer, about once a second
+  while the feature is on.
+- **Nothing to press.** With the timelapse switched on in the settings, the plugin wakes the capture
+  itself when the layer number changes, exactly as a request for a picture does, and keeps that
+  frame. Between layers the capture idles as it does now (Phase 7g), so the cost is one wake per
+  layer.
+- **The temperatures are kept, not the JPEGs.** A P1 frame is 160 by 120 two byte values, 38.4 KB,
+  so the 150 layer cube is about 5.8 MB; a P3 frame is 98.3 KB. Kept raw, every frame can be rendered
+  at the end with one range for the whole print, where frames rendered live would each carry their
+  own and the clip would flicker in brightness; and the finished timelapse can still be read for
+  temperatures.
+- **Encoded on the printer once the print has finished**, when it can spare the processor. The
+  U1 has `/usr/bin/ffmpeg`, and Rockchip's hardware video library (`librockchip_mpp.so`, with
+  `mpp_info_test`), found on 2026-09-28. Whether this ffmpeg can reach the hardware encoder is not
+  known yet. Failing both, an MJPEG AVI is simple enough to write from Python.
+- **Parking is the slicer's business.** The U1 parks the head for its timelapse only when the
+  slicer is told to, so the plugin cannot count on it. The first version takes its frame at the
+  layer change as it is.
+
+**Open questions.**
+
+1. Which encoders this ffmpeg has, `ffmpeg -hide_banner -encoders | grep -i -E "rkmpp|264|mjpeg"`,
+   and what encoding a clip costs, measured on the printer.
+2. How the frame's moment relates to the layer change. `current_layer` is set by the slicer's
+   layer change G-code, so the head may be anywhere; with parking on, whether waiting for the
+   toolhead position Moonraker reports to reach the park is worth it.
+3. Where the printer's own timelapses are kept, so these can sit beside them or be found the same
+   way, and how the settings page offers a finished one.
+4. How much to keep, and what clears it: frames for the last few prints, and finished clips.
+5. What a cancelled print, a plugin restart or a camera unplug mid-print leaves behind. Probably:
+   keep what was gathered and encode that.
+6. Which range to render with: the whole print's measured extremes, or the display range the user
+   has set (Phase 7f).
 
 ## 8. Alternatives considered and rejected
 
@@ -2146,8 +2232,19 @@ What is left, in the order it is worth doing:
 - **The adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
   adapter, holding the hub still, and see whether the adapter drops again. It matters more now that
   the printer is off wifi, since an adapter drop would take it off the network entirely.
+  **Run on 2026-09-28: it dropped again.** The camera, on `3-1.3.4`, was unplugged at 3460.2 s
+  since boot and plugged back in; as it re-enumerated at 3465.7 s the adapter, `3-1.3.3`,
+  disconnected (3465.3 s), came back as a new `eth0` (3468.5 s) and had link at 3471.9 s, so the
+  printer was off the network for about 6.6 s. The camera was streaming again at 3472.3 s. The
+  hub's supply is 5 V 1 A against the 2.4 A it accepts, so the cause is taken to be electrical, as
+  F-72 suspected; retest with a 2.4 A supply. `carrier_changes` read 2 before and after, which
+  proves nothing here: the interface is unregistered and registered anew, so its counters start
+  again. The camera also logs `error -71` while enumerating, at boot and on replug, which fits a
+  marginal supply as well.
 - **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
   release workflow and simply is not set; the decision is whether private testing is over.
+- **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
+  layer count, kept as temperatures and encoded on the printer after the print. After Phase 8.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted
@@ -2429,8 +2526,8 @@ Moonraker's default `target_fps`, as recorded beside F-55; the stream has run at
 since the tile became an iframe of the viewer in 0.16.0.
 
 **F-74. A network break freezes the picture for good, and only Fluidd ever brought it back.**
-Found on 2026-09-27, while chasing a brief slicer disconnect at the start of a print. Not fixed;
-Phase 7i is the plan.
+Found on 2026-09-27, while chasing a brief slicer disconnect at the start of a print. Fixed in
+0.26.0 by Phase 7i, confirmed on hardware on 2026-09-28; the results close this entry.
 
 What it looked like: a clip recorded in the viewer during the print's start froze 33.8 seconds in
 and stayed frozen to its end, 66.7 seconds. Measured frame by frame, a live thermal stream is never
@@ -2485,6 +2582,41 @@ What it taught about diagnosing this plugin:
   slept.** Of 57 such closes on the wired address over 2026-09-24 and 25, 48 began within 9 seconds
   of macOS going to sleep and one during a wifi roam. Seven more fall in the hours F-72's loop was
   running, and one is unexplained.
+
+**Confirmed fixed on 2026-09-28**, with 0.26.0 on the printer and three clips recorded in the
+viewer, each measured frame by frame for when the picture stopped and started and when the line
+showed:
+
+| Test | Result |
+|---|---|
+| Laptop wifi off 30 s, tile in Fluidd, recording started over "Stream off" | Froze at 12.5 s into the clip; "printer not answering since 14:27:08" 2.4 s later; picture back and line gone on the same frame at 58.3 s, 45.8 s after the freeze. No "Stream off" line at the clip's start. |
+| Laptop wifi off more than 4 minutes, viewer on its own | Froze at about 3 s; the line at about 6 s; back, line gone on the same frame, at about 261.5 s. |
+| Laptop wifi off about 90 s, tile in Fluidd | Came back. Fluidd rebuilt its panel, which also lost the recording, so there is no clip. |
+| Camera unplugged and replugged, viewer on its own | Froze at the unplug (13:11:25.9 UTC); "printer not answering since 15:11:34" at 15:11:34.1; back at 15:11:50.2. See below. |
+| Rec with the camera switched off | Greyed out. |
+| Recording across an outage | The line is in the clip, every time. |
+
+Neither wifi clip ever showed "reconnecting": each time the first answer from the printer and a
+moving picture arrived together.
+
+The unplug did not test what it set out to. Replugging the camera took the ethernet adapter off
+the bus again (section 9, the adapter drop test): off at 13:11:31.0, link back at 13:11:37.7, the
+camera streaming at 13:11:38.1, all in UTC, with the clip in local time, two hours ahead. The camera
+line needs its count stalled for 4 to 6 s and the network went 5.1 s after the unplug, so the
+printer stopped answering first and "no frames from the camera" never had its moment. That line
+is covered by the browser check against a stand-in camera, and the hardware test waits for the
+larger hub supply.
+
+It did show two things to improve in the watchdog:
+
+- **Recovery lagged the network by 12.5 s**, link back at 15:11:37.7 and picture at 15:11:50.2.
+  That fits the back-off: with the laptop's own network up there is no `online` event, and the
+  timings match an ask sent just as the link returned failing at its 4 s timeout, then the next
+  one waiting 8 s. Asking an
+  unreachable printer every 2 s costs the printer nothing, so the back-off buys nothing.
+- **"Since" is when a question gave up, not when it was asked.** The line said 15:11:34, the moment
+  the first unanswered ask timed out; the network went at about 15:11:31. The time an unanswered
+  ask was sent is the better "since".
 
 ## 10. Reports owed elsewhere
 

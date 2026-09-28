@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 Mauker and the Bespok3d contributors
 # SPDX-License-Identifier: Apache-2.0
-"""The HTTP surface: the stream, the snapshot, the statistics, the settings and the page.
+"""The HTTP surface: the stream, the snapshot, the statistics, the settings and the pages.
 
 Clients we do not control decorate these URLs, so the query string is discarded before the lookup
 and the match on what is left is exact, never a prefix.
@@ -16,7 +16,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, cast
 from urllib.parse import parse_qs, urlparse
 
-from .camera import LOCK_RANGE_ACTION, SHUTTER_ACTION, SHUTTER_FIELD, SHUTTER_PENDING
+from .camera import (
+    LOCK_RANGE_ACTION,
+    SHUTTER_ACTION,
+    SHUTTER_FIELD,
+    SHUTTER_PENDING,
+    streaming_wanted,
+)
 from .cost import ProcessCost, describe_cost
 from .page import describe_device, render_control_page
 from .palettes import build_palettes
@@ -67,6 +73,7 @@ ROUTES = {
     "/stream.mjpg": "serve_stream",
     "/settings": "serve_settings",
     "/stats": "serve_stats",
+    "/health": "serve_health",
     "/frame.bin": "serve_thermal_frame",
     "/view": "serve_viewer_page",
     "/": "serve_control_page",
@@ -176,6 +183,14 @@ class LatestFrame:
                 if remaining <= 0:
                     return
                 self._updated.wait(remaining)
+
+    def frame_age(self) -> float | None:
+        """Seconds since the last publication, or None before there was one."""
+
+        with self._updated:
+            if self._published_count == 0:
+                return None
+            return time.monotonic() - self._published_at
 
     def _fresh_enough(self, within: float = FRESH_ENOUGH_SECONDS) -> bool:
         return self._jpeg is not None and time.monotonic() - self._published_at <= within
@@ -380,6 +395,31 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         if self.device is not None:
             payload["device"] = self.device.status()
         self.send_json(payload)
+
+    def serve_health(self) -> None:
+        """Whether frames are flowing, for the viewer's watchdog (Phase 7i, F-74).
+
+        Separate from `/stats` for two reasons. `/stats` answers 503 whenever the last frame
+        carries no measurements, which is always the case while the "Stream off" placeholder is
+        showing, and the watchdog must not read the camera being switched off as the printer not
+        answering. And `/stats` waits for a fresh frame, which is right for somebody who wants the
+        numbers and pointless for somebody who only wants to know whether there are any.
+
+        It does note interest, as every part of the stream does. A page whose stream has died is
+        still somebody watching: without this the capture would idle under it after a minute, the
+        count would stop, and the watchdog would blame the camera for its own dead stream instead
+        of reopening it. A hidden page does not ask, so the capture still idles behind that.
+        """
+
+        self.frames.note_interest()
+        age = self.frames.frame_age()
+        self.send_json(
+            {
+                "frame": self.frames.published_count,
+                "frame_age_seconds": None if age is None else round(age, 3),
+                "streaming": streaming_wanted(self.device),
+            }
+        )
 
     def settings_payload(self, settings_store: SettingsStore) -> dict:
         """The settings, plus one sentence on what the camera is doing and whether to ask again.

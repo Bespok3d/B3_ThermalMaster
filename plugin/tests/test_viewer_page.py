@@ -130,8 +130,62 @@ def test_the_script_has_no_placeholders_left_in_it(thermal_streamer):
 
     for placeholder in ("POLL_MS", "LINGER_MS", "MIN_REGION_PX", "REGION_KEY_NAME",
                         "MAX_ZOOM_VALUE", "ZOOM_STEP_VALUE", "RECORD_FPS_VALUE",
-                        "RECORD_LIMIT_MS"):
+                        "RECORD_LIMIT_MS", "MAX_SPOTS_VALUE", "WATCH_MS", "STALE_MS",
+                        "RESTART_MS", "SILENT_MAX_MS", "ASK_TIMEOUT_MS"):
         assert placeholder not in page, placeholder
+
+
+def test_the_watchdog_asks_and_reopens_by_relative_urls(thermal_streamer):
+    """The rule above, for the two URLs the script builds rather than the page declares.
+
+    The attribute check cannot see these: one is a fetch and the other is assigned to the picture
+    when its stream has died (Phase 7i).
+    """
+
+    page = thermal_streamer.render_viewer_page(None)
+
+    assert 'fetch("health"' in page
+    assert 'feed.src = "stream.mjpg?n="' in page
+    assert '"/health' not in page
+    assert '"/stream.mjpg' not in page
+
+
+def test_the_watchdog_timings_come_from_python(thermal_streamer):
+    page = thermal_streamer.render_viewer_page(None)
+
+    assert f"var WATCH = {thermal_streamer.VIEWER_WATCH_MILLISECONDS};" in page
+    assert f"var STALE = {thermal_streamer.VIEWER_STALE_MILLISECONDS};" in page
+    assert f"var RESTART_GAP = {thermal_streamer.VIEWER_RESTART_MILLISECONDS};" in page
+
+
+def test_a_saved_picture_carries_the_watchdog_line(thermal_streamer):
+    """A clip must never pass a frozen stretch off as a still scene, which is what F-74 was."""
+
+    assert "paintStale(pen, width, height);" in keepsake(thermal_streamer.render_viewer_page(None))
+
+
+def test_the_watchdog_asks_at_once_when_the_network_returns(thermal_streamer):
+    """Rather than waiting out a back-off that only keeps the picture frozen (2026-09-28)."""
+
+    assert 'window.addEventListener("online"' in thermal_streamer.render_viewer_page(None)
+
+
+def test_recording_is_offered_only_over_a_moving_camera_picture(thermal_streamer):
+    """A clip's size is fixed when it starts, and one started over "Stream off" kept its shape."""
+
+    page = thermal_streamer.render_viewer_page(None)
+    body = page.split("function showRecordable()", 1)[1].split("\n  }", 1)[0]
+
+    assert "streaming" in body
+    assert "watch.pictureChangedAt" in body
+    assert "if (recorder)" in body
+
+
+def test_switching_the_camera_off_ends_a_recording(thermal_streamer):
+    page = thermal_streamer.render_viewer_page(None)
+    body = page.split("function showRecordable()", 1)[1].split("\n  }", 1)[0]
+
+    assert "stopRecording()" in body.split("if (recorder)", 1)[1].split("return;", 1)[0]
 
 
 def keepsake(page: str) -> str:

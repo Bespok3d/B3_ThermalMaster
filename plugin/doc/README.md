@@ -17,6 +17,8 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Temperatures: `/thermal/stats`
 - Interactive viewer: `/thermal/view`
 - Every pixel's temperature: `/thermal/frame.bin`
+- Whether frames are flowing: `/thermal/health`, the frame count, the age of the last frame, and
+  whether the camera is switched on
 - Settings and camera state: `/thermal/settings`, which also accepts a JSON POST to change
   individual settings without disturbing the rest
 
@@ -170,6 +172,13 @@ on ethernet does not turn its wifi off: it keeps joining, being refused and tryi
 attempt can briefly interrupt the picture on its way to you. Turn the wifi off, or make the printer
 forget the network, on the printer itself. The plugin is not involved; the camera keeps capturing
 throughout.
+
+**If a line appears across the top of the viewer's picture,** the viewer has noticed that its
+picture stopped changing. It reconnects by itself when the camera is still sending frames, and says
+"reconnecting" if that takes more than a few seconds. "Printer not answering" means the browser
+cannot reach the printer at all, and "no frames from the camera" means the plugin has stopped
+receiving them, so check the camera's cable and the plugin's log. The line clears itself once the
+picture moves again, and it is drawn into any picture or clip saved while it shows.
 
 **The plugin's log** is at `/userdata/bespok3d/var/log/thermal-master.log`, and is the first thing
 worth sending with a report. Each line reads like this:

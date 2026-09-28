@@ -41,6 +41,22 @@ VIEWER_RECORD_FPS = 12
 # A recording is held in memory until it is stopped, so it cannot be left running all afternoon by
 # a tab nobody is looking at. Ten minutes at this frame rate is a few tens of megabytes.
 VIEWER_RECORD_LIMIT_MILLISECONDS = 600000
+# The watchdog (Phase 7i, F-74). An <img> showing a stream says nothing when the stream ends, so
+# the page looks for itself: on this beat, and only while it is visible, it samples its own picture
+# and asks the plugin how many frames it has published.
+VIEWER_WATCH_MILLISECONDS = 2000
+# How long the picture may stay unchanged before the page calls its stream dead. At 25 frames a
+# second this is 75 frames, and the quietest stretch measured in F-74's clip changed in 88% of
+# them. Agreed on 2026-09-28; raise it if it proves too eager.
+VIEWER_STALE_MILLISECONDS = 3000
+# At most one restart of the stream in this long, whatever asked for it.
+VIEWER_RESTART_MILLISECONDS = 5000
+# How far apart the questions get while the printer is not answering: doubling from the beat
+# above, up to this.
+VIEWER_SILENT_MAX_MILLISECONDS = 10000
+# How long one question may take before it counts as unanswered. A dropped network does not fail a
+# request, it leaves it hanging, and a watchdog waiting on it has stopped watching.
+VIEWER_ASK_TIMEOUT_MILLISECONDS = 4000
 
 VIEWER_PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -142,6 +158,13 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
                letter-spacing: 0.04em; }}
   .reading {{ font-size: 1.05em; }}
   .offline {{ color: #d8752a; }}
+  /* The watchdog's line over the picture (Phase 7i). The orange the pointer readout uses when the
+     plugin does not answer, on a dark band so it reads over a hot scene, and never in the way of
+     the pointer. */
+  .stale {{ position: absolute; left: 0; right: 0; top: 0; padding: 0.2rem 0.5rem;
+            background: rgba(13, 15, 18, 0.8); color: #d8752a; font-size: 0.78rem;
+            pointer-events: none; }}
+  .stale[hidden] {{ display: none; }}
   .group {{ display: flex; gap: 0.6rem; align-items: baseline; }}
   .group.idle {{ opacity: 0.45; }}
   .hint {{ color: #6c727c; font-size: 0.75em; }}
@@ -154,6 +177,7 @@ VIEWER_PAGE_TEMPLATE = """<!doctype html>
     <div class="stage">
       <img id="feed" src="stream.mjpg" alt="Live thermal view"{picture_shape}>
       <canvas id="surface"></canvas>
+      <div class="stale" id="stale" role="status" hidden></div>
     </div>
     <div class="panel-tools tools">
       <button type="button" id="zoom-out" title="Zoom out">-</button>
@@ -780,6 +804,7 @@ VIEWER_SCRIPT = """
     streamButton.title = streaming ? "Stop the camera and release it"
                                    : "Start the camera again";
     streamButton.setAttribute("data-streaming", streaming ? "true" : "false");
+    showRecordable();
   }
 
   function pushStream(next) {
@@ -812,6 +837,7 @@ VIEWER_SCRIPT = """
   // the still and the recording, so a saved frame and a saved clip cannot disagree.
   function paintKeepsake(pen, width, height) {
     pen.drawImage(feed, 0, 0, width, height);
+    paintStale(pen, width, height);
     if (!region || !frame) { return; }
     var scaleX = width / frame.width;
     var scaleY = height / frame.height;
@@ -914,7 +940,31 @@ VIEWER_SCRIPT = """
   function showRecording(running) {
     recordButton.setAttribute("aria-pressed", running ? "true" : "false");
     recordButton.textContent = running ? "Stop " + elapsed() : "Rec";
-    recordButton.title = running ? "Stop recording and save the clip" : "Record video";
+    recordButton.title = "Stop recording and save the clip";
+    showRecordable();
+  }
+
+  // Offered only while the camera's own picture is on screen and moving. A clip's size is fixed
+  // when it starts, so one started over the "Stream off" placeholder kept the placeholder's shape
+  // for the whole clip and squashed the camera into it when it came on (2026-09-28). Moving is
+  // what tells the camera from the placeholder, which is still, so pressing Start does not offer
+  // a recording until the camera's first frames are actually showing. A running recording is
+  // never disabled: its button is how it stops.
+  //
+  // And switching the camera off ends one, and saves it: what follows is the placeholder squashed
+  // into the camera's shape, which is nothing anybody wanted recorded. Only the switch does this,
+  // from this page or from anywhere else, as `health` reports it. A stream that has merely
+  // stopped keeps recording, because a clip across an outage is how F-74 was caught.
+  function showRecordable() {
+    if (recorder) {
+      if (!streaming || !watch.streaming) { stopRecording(); }
+      recordButton.disabled = false;
+      return;
+    }
+    var live = streaming && watch.streaming && Date.now() - watch.pictureChangedAt < STALE;
+    recordButton.disabled = !recordable || !live;
+    recordButton.title = !recordable ? "This browser cannot record video"
+      : live ? "Record video" : "Nothing to record until the camera's picture is showing";
   }
 
   function startRecording() {
@@ -966,11 +1016,198 @@ VIEWER_SCRIPT = """
   // A clip nobody stops is a clip nobody gets, so leaving the page ends it rather than dropping it.
   window.addEventListener("pagehide", stopRecording);
 
-  (function () {
-    if (canRecord()) { return; }
-    recordButton.disabled = true;
-    recordButton.title = "This browser cannot record video";
-  })();
+  var recordable = canRecord();
+
+  // The watchdog (Phase 7i, F-74). The picture is an <img> of a never ending response, and an
+  // <img> says nothing when that response ends: it keeps the last frame, and the page looks live
+  // over a picture that stopped. So the page looks for itself, at two things: its own picture,
+  // sampled small, and the plugin's count of frames published, from `health`. A picture that has
+  // stopped while the count moves is this page's stream, and reopening it is the cure. A count
+  // that has stopped is the camera, and reopening the stream would fix nothing.
+  var WATCH = WATCH_MS;
+  var STALE = STALE_MS;
+  var RESTART_GAP = RESTART_MS;
+  var SILENT_MAX = SILENT_MAX_MS;
+  var ASK_TIMEOUT = ASK_TIMEOUT_MS;
+  var staleOut = document.getElementById("stale");
+  var staleText = null;
+  var sampler = document.createElement("canvas");
+  sampler.width = 32;
+  sampler.height = 24;
+  var samplerPen = sampler.getContext("2d", { willReadFrequently: true });
+  var lastSample = null;
+  var restarts = 0;
+  var watchTimer = null;
+  var watchDelay = WATCH;
+  var looking = false;
+  // What the page knows, in wall clock milliseconds, because the badge tells the time.
+  var watch = {
+    pictureChangedAt: Date.now(),
+    answered: true,
+    silentSince: 0,
+    streaming: true,
+    // The plugin's count, or null until it has answered since the last gap. Forgotten across a
+    // gap rather than kept: the capture idles while nothing can reach it, and a count compared
+    // across the gap would blame the camera for that.
+    count: null,
+    countChangedAt: 0,
+    restartedAt: 0,
+    // The first restart since the picture last changed, which is what "reconnecting" counts from.
+    firstRestartAt: 0
+  };
+
+  function clock(time) {
+    var at = new Date(time);
+    function two(value) { return String(value).padStart(2, "0"); }
+    return two(at.getHours()) + ":" + two(at.getMinutes()) + ":" + two(at.getSeconds());
+  }
+
+  // The whole decision, in one place and with no page in it: what the page knows and the time
+  // in, what to do out. `restart` is whether to reopen the stream now, `badge` the line to show,
+  // or null for none. ROADMAP Phase 7i has it as a table.
+  function decide(known, now) {
+    if (!known.answered) {
+      return { restart: false, badge: "printer not answering since " + clock(known.silentSince) };
+    }
+    // The placeholder is meant to be still.
+    if (!known.streaming) { return { restart: false, badge: null }; }
+    if (now - known.pictureChangedAt < STALE) { return { restart: false, badge: null }; }
+    var since = clock(known.pictureChangedAt);
+    if (now - known.countChangedAt >= STALE) {
+      return { restart: false, badge: "no frames from the camera since " + since };
+    }
+    var attempting = known.firstRestartAt > known.pictureChangedAt;
+    var badge = attempting && now - known.firstRestartAt >= STALE
+      ? "reconnecting, no new picture since " + since : null;
+    return { restart: now - known.restartedAt >= RESTART_GAP, badge: badge };
+  }
+
+  // Whether the picture on screen has changed since the last look. Drawn small, because all this
+  // needs to know is whether anything moved, and a frozen stream is the same bytes exactly. The
+  // stream is same origin, so reading it back is allowed.
+  function samplePicture(now) {
+    if (!feed.naturalWidth) { return; }
+    var data;
+    try {
+      samplerPen.drawImage(feed, 0, 0, sampler.width, sampler.height);
+      data = samplerPen.getImageData(0, 0, sampler.width, sampler.height).data;
+    } catch (unreadable) {
+      return;
+    }
+    var changed = lastSample === null || data.length !== lastSample.length;
+    for (var index = 0; !changed && index < data.length; index += 1) {
+      if (data[index] !== lastSample[index]) { changed = true; }
+    }
+    if (changed) { watch.pictureChangedAt = now; }
+    lastSample = data;
+  }
+
+  function heard(health, now) {
+    if (watch.count === null || health.frame !== watch.count) { watch.countChangedAt = now; }
+    watch.count = health.frame;
+    watch.answered = true;
+    watch.streaming = health.streaming !== false;
+  }
+
+  function unheard(now) {
+    if (watch.answered) { watch.silentSince = now; }
+    watch.answered = false;
+    watch.count = null;
+  }
+
+  function showStale(text) {
+    staleText = text;
+    staleOut.textContent = text || "";
+    staleOut.hidden = !text;
+  }
+
+  // A new URL is what makes the browser open a new request. The plugin drops the query string
+  // before it looks the path up, so this reaches the same stream.
+  function restartStream(now) {
+    if (!(watch.firstRestartAt > watch.pictureChangedAt)) { watch.firstRestartAt = now; }
+    watch.restartedAt = now;
+    restarts += 1;
+    feed.src = "stream.mjpg?n=" + restarts;
+  }
+
+  function act(now) {
+    var verdict = decide(watch, now);
+    if (verdict.restart) { restartStream(now); }
+    showStale(verdict.badge);
+    showRecordable();
+  }
+
+  function schedule(delay) {
+    if (watchTimer !== null || document.hidden) { return; }
+    watchTimer = setTimeout(look, delay);
+  }
+
+  function look() {
+    watchTimer = null;
+    if (looking || document.hidden) { return; }
+    looking = true;
+    samplePicture(Date.now());
+    var control = typeof AbortController === "undefined" ? null : new AbortController();
+    var giveUp = control === null ? null
+      : setTimeout(function () { control.abort(); }, ASK_TIMEOUT);
+    fetch("health", { cache: "no-store", signal: control === null ? undefined : control.signal })
+      .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
+      .then(function (health) {
+        heard(health, Date.now());
+        watchDelay = WATCH;
+      })
+      .catch(function () {
+        unheard(Date.now());
+        watchDelay = Math.min(SILENT_MAX, watchDelay * 2);
+      })
+      .then(function () {
+        if (giveUp !== null) { clearTimeout(giveUp); }
+        looking = false;
+        act(Date.now());
+        schedule(watchDelay);
+      });
+  }
+
+  // A hidden page needs no watchdog and asks nothing, so the capture can idle behind it. Coming
+  // back starts afresh: the picture gets its full allowance before it is called stale, because a
+  // browser need not have painted a hidden page's picture at all, and the count is taken again.
+  document.addEventListener("visibilitychange", function () {
+    if (watchTimer !== null) { clearTimeout(watchTimer); watchTimer = null; }
+    if (document.hidden) { return; }
+    watch.pictureChangedAt = Date.now();
+    lastSample = null;
+    watch.count = null;
+    look();
+  });
+
+  // The browser says when its network comes back, and waiting out the back-off after that only
+  // keeps the picture frozen for nothing: up to ten seconds of it, after a laptop's wifi returned
+  // (2026-09-28). So the page asks at once, on the normal beat again.
+  window.addEventListener("online", function () {
+    if (watchTimer !== null) { clearTimeout(watchTimer); watchTimer = null; }
+    watchDelay = WATCH;
+    look();
+  });
+
+  // A stream that fails outright says so, and is reopened at once, within the same limit. Not
+  // while the printer is not answering, when reopening could only fail again.
+  feed.addEventListener("error", function () {
+    var now = Date.now();
+    if (watch.answered && now - watch.restartedAt >= RESTART_GAP) { restartStream(now); }
+  });
+
+  // The watchdog's line, burned into a saved picture or a clip while it shows, so a recording can
+  // never pass a frozen stretch off as a still scene. That confusion took F-74 an afternoon.
+  function paintStale(pen, width, height) {
+    if (!staleText) { return; }
+    var size = Math.max(9, Math.round(height / 20));
+    pen.font = "600 " + size + "px system-ui, sans-serif";
+    pen.textBaseline = "top";
+    pen.fillStyle = "rgba(13,15,18,0.8)";
+    pen.fillRect(0, 0, width, Math.round(size * 1.5));
+    pen.fillStyle = "#d8752a";
+    pen.fillText(staleText, 4, Math.round(size * 0.25), width - 8);
+  }
 
   // The unit, the spots and the switch all belong to the plugin rather than to this page, so they
   // are asked for rather than assumed.
@@ -1024,6 +1261,8 @@ VIEWER_SCRIPT = """
   })(0);
 
   if (region) { start(); }
+  // Last, once everything it looks at exists.
+  look();
 })();
 """
 
@@ -1049,6 +1288,11 @@ def render_viewer_page(shape: tuple[int, int] | None = None) -> str:
         .replace("RECORD_FPS_VALUE", str(VIEWER_RECORD_FPS))
         .replace("RECORD_LIMIT_MS", str(VIEWER_RECORD_LIMIT_MILLISECONDS))
         .replace("MAX_SPOTS_VALUE", str(MAX_SPOTS))
+        .replace("WATCH_MS", str(VIEWER_WATCH_MILLISECONDS))
+        .replace("STALE_MS", str(VIEWER_STALE_MILLISECONDS))
+        .replace("RESTART_MS", str(VIEWER_RESTART_MILLISECONDS))
+        .replace("SILENT_MAX_MS", str(VIEWER_SILENT_MAX_MILLISECONDS))
+        .replace("ASK_TIMEOUT_MS", str(VIEWER_ASK_TIMEOUT_MILLISECONDS))
     )
     picture_shape = (
         f' data-width="{shape[0]}" data-height="{shape[1]}"' if shape else ""

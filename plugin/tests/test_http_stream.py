@@ -323,6 +323,111 @@ def test_the_statistics_endpoint_serves_what_the_last_frame_measured(thermal_str
     connection.close()
 
 
+def health_of(server) -> tuple[int, dict]:
+    connection = connect_to(server)
+    try:
+        connection.request("GET", "/health")
+        response = connection.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        connection.close()
+
+
+def test_health_answers_before_any_frame(thermal_streamer):
+    """The watchdog asks from the first moment, and "nothing yet" is an answer, not an error."""
+
+    server = thermal_streamer.ThermalServer(("127.0.0.1", 0), thermal_streamer.LatestFrame())
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        status, payload = health_of(server)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert status == 200
+    assert payload == {"frame": 0, "frame_age_seconds": None, "streaming": True}
+
+
+def test_health_answers_where_the_statistics_do_not(serving):
+    """A frame without measurements, which is what the "Stream off" placeholder is.
+
+    `/stats` answers 503 to it, and a watchdog reading that would take the camera being switched
+    off for the printer not answering.
+    """
+
+    server, _ = serving
+
+    status, payload = health_of(server)
+
+    assert status == 200
+    assert payload["frame"] == 1
+
+
+def test_health_counts_every_publication_and_says_how_old_the_last_is(serving):
+    server, frame_store = serving
+    frame_store.publish(FAKE_JPEG)
+    frame_store.publish(FAKE_JPEG)
+
+    _, payload = health_of(server)
+
+    assert payload["frame"] == 3
+    assert 0 <= payload["frame_age_seconds"] < 1.0
+
+
+def test_health_does_not_wait_for_a_fresh_frame(thermal_streamer, serving):
+    """The fixture's frame goes stale, and nothing will publish another.
+
+    `/stats` would wait out its half second wake here; the watchdog only wants to know what there
+    is.
+    """
+
+    server, _ = serving
+    time.sleep(thermal_streamer.FRESH_ENOUGH_SECONDS + 0.05)
+
+    started = time.monotonic()
+    status, _ = health_of(server)
+
+    assert status == 200
+    assert time.monotonic() - started < 0.25
+
+
+def test_asking_for_health_counts_as_watching(thermal_streamer, serving):
+    """A page whose stream died is still somebody watching.
+
+    Without this the capture would idle under it, the count would stop, and the watchdog would
+    blame the camera for its own dead stream instead of reopening it.
+    """
+
+    server, frame_store = serving
+    assert frame_store.wanted() is False
+
+    health_of(server)
+
+    assert frame_store.wanted() is True
+
+
+def test_health_says_when_the_camera_is_switched_off(thermal_streamer):
+    """The placeholder is meant to be still, and the watchdog must know not to act on it."""
+
+    import dataclasses
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    store.update_camera(dataclasses.replace(thermal_streamer.CameraSettings(), streaming=False))
+    device = thermal_streamer.DeviceController(store)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store,
+        thermal_streamer.build_palettes(), device,
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        _, payload = health_of(server)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert payload["streaming"] is False
+
+
 def posting(connection, body: str) -> int:
     connection.request(
         "POST", "/settings", body,

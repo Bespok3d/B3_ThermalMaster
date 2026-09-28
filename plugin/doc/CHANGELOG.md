@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.26.0
+
+- **The viewer notices when its picture stops, and brings it back.** A dropped network connection
+  used to leave the viewer showing its last frame for good, looking live, until the page was
+  reloaded. The viewer now checks its own picture every two seconds while it is on screen, and if
+  the picture has stopped changing for three seconds while the camera is still sending frames, it
+  reconnects by itself.
+- **When it cannot fix it, it says so.** A line across the top of the picture says what is wrong
+  and since when: the printer not answering, the camera not sending frames, or a reconnection
+  still under way. It goes away by itself once the picture moves again. With the camera switched
+  off, nothing is shown, since the picture is meant to be still.
+- **Saved pictures and recordings carry that line**, so a clip can never pass off a frozen stretch
+  as a still scene.
+- **It comes back sooner after a network drop.** When the laptop's network returns, the viewer
+  asks the printer at once instead of waiting for its next scheduled check.
+- **Recording waits for the camera.** The Rec button is greyed out while the camera is switched off,
+  and after pressing Start until the camera's picture is actually showing. A recording started over
+  the "Stream off" picture used to keep that picture's size for the whole clip and squash the
+  camera into it.
+- **Switching the camera off ends a recording and saves it**, from the viewer or from anywhere
+  else. A picture that has merely stopped does not: the recording carries on through the outage,
+  with the line showing what happened.
+- A new `/thermal/health` says how many frames the plugin has sent and how long ago the last one
+  was, which is what the viewer asks.
+
 ## 0.25.2
 
 - **The plugin's log says when each thing happened.** Every line now starts with the time in UTC,

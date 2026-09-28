@@ -68,6 +68,20 @@ def test_the_viewer_has_its_own_path(thermal_streamer):
     assert thermal_streamer.resolve_route("/view") == "serve_viewer_page"
 
 
+def test_the_watchdog_has_its_own_path(thermal_streamer):
+    assert thermal_streamer.resolve_route("/health") == "serve_health"
+
+
+def test_a_restarted_stream_still_routes_to_the_stream(thermal_streamer):
+    """The viewer reopens a dead stream under a new URL, and the new URL must be the same stream.
+
+    A changing query string is what makes a browser open a new request rather than reuse the one
+    that ended (Phase 7i, F-74).
+    """
+
+    assert thermal_streamer.resolve_route("/stream.mjpg?n=7") == "serve_stream"
+
+
 def test_neither_accepts_a_post(thermal_streamer):
     assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
 

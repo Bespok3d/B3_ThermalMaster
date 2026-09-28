@@ -90,6 +90,20 @@ def ramp_frame(streamer):
     return ((celsius + 273.15) * 64).astype("uint16")
 
 
+def corner_marked(jpeg: bytes, shade: int) -> bytes:
+    """The same picture with a small grey block of this shade in its top left corner."""
+
+    import io
+
+    from PIL import Image
+
+    picture = Image.open(io.BytesIO(jpeg)).convert("RGB")
+    picture.paste((shade, shade, shade), (0, 0, 24, 24))
+    out = io.BytesIO()
+    picture.save(out, format="JPEG", quality=90)
+    return out.getvalue()
+
+
 def serve(streamer):
     store = streamer.SettingsStore("ironbow", streamer.RenderSettings(), None)
     device = streamer.DeviceController(store)
@@ -102,10 +116,21 @@ def serve(streamer):
     # Republished on a timer, because a real camera does. A server that publishes once looks the
     # same to most of these checks and is not the same at all to an <img> showing a multipart
     # stream, which needs parts arriving before it will decode one and report a size.
+    #
+    # And never the same picture twice running, because a real camera never sends one: the
+    # viewer's watchdog takes a picture that has not changed for three seconds for a dead stream
+    # and reopens it (Phase 7i). Only the JPEG varies, a small block in one corner, so every
+    # temperature these checks read stays exactly what it was. Seven versions rather than two:
+    # the watchdog samples every two seconds, twenty publications apart, and with an even count
+    # it would land on the same version every time.
+    variants = [corner_marked(rendered.jpeg, shade) for shade in range(0, 7 * 30, 30)]
+
     def keep_streaming() -> None:
+        count = 0
         while True:
             time.sleep(0.1)
-            frames.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+            frames.publish(variants[count % len(variants)], rendered.stats, rendered.thermal)
+            count += 1
 
     threading.Thread(target=keep_streaming, daemon=True).start()
     server = streamer.ThermalServer(
