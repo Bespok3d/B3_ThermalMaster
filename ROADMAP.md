@@ -2065,7 +2065,7 @@ picture it is showing, and the plugin's own count of frames published.
 
    | Plugin answers | Plugin's count | Picture | Conclusion | Action |
    |---|---|---|---|---|
-   | no | | | printer not reachable | badge "printer not answering since HH:MM:SS"; keep asking, backing off to 10 s |
+   | no | | | printer not reachable | badge "printer not answering since HH:MM:SS"; keep asking every 2 s (0.26.0 backed off to 10 s; see F-74) |
    | yes, stream off | | | the placeholder is meant to be still | nothing |
    | yes | moving | changed within 3 s | healthy | clear any badge |
    | yes | moving | unchanged for 3 s | this page's stream is dead | restart it; badge "reconnecting" if it is still stale 3 s later |
@@ -2171,17 +2171,21 @@ Sketched on 2026-09-28 and not started; nothing here is built.
   own and the clip would flicker in brightness; and the finished timelapse can still be read for
   temperatures.
 - **Encoded on the printer once the print has finished**, when it can spare the processor. The
-  U1 has `/usr/bin/ffmpeg`, and Rockchip's hardware video library (`librockchip_mpp.so`, with
-  `mpp_info_test`), found on 2026-09-28. Whether this ffmpeg can reach the hardware encoder is not
-  known yet. Failing both, an MJPEG AVI is simple enough to write from Python.
+  U1 has `/usr/bin/ffmpeg`, with H.264 encoders in software and through V4L2, and Rockchip's
+  hardware video library (`librockchip_mpp.so`, with `mpp_info_test`), found on 2026-09-28. Failing
+  those, an MJPEG AVI is simple enough to write from Python.
 - **Parking is the slicer's business.** The U1 parks the head for its timelapse only when the
   slicer is told to, so the plugin cannot count on it. The first version takes its frame at the
   layer change as it is.
 
 **Open questions.**
 
-1. Which encoders this ffmpeg has, `ffmpeg -hide_banner -encoders | grep -i -E "rkmpp|264|mjpeg"`,
-   and what encoding a clip costs, measured on the printer.
+1. Which encoder to use, and what a clip costs, measured on the printer. Asked on 2026-09-28, this
+   ffmpeg offers `libx264` and `libx264rgb` (software H.264), `h264_v4l2m2m` (H.264 through the
+   kernel's V4L2 memory to memory interface, which is how a hardware encoder would be reached;
+   whether one answers on the U1 is not known) and `mjpeg`. No `rkmpp` encoder, so ffmpeg does not
+   talk to Rockchip's library directly. To try: `h264_v4l2m2m` first, `libx264` with a fast preset
+   as the fallback, both timed on a clip of the cube's 150 frames.
 2. How the frame's moment relates to the layer change. `current_layer` is set by the slicer's
    layer change G-code, so the head may be anywhere; with parking on, whether waiting for the
    toolhead position Moonraker reports to reach the park is worth it.
@@ -2241,6 +2245,15 @@ What is left, in the order it is worth doing:
   proves nothing here: the interface is unregistered and registered anew, so its counters start
   again. The camera also logs `error -71` while enumerating, at boot and on replug, which fits a
   marginal supply as well.
+  **Retested the same day with a 5 V 2.4 A supply: it still drops, for less time.** The camera was
+  unplugged at 14:05:10.4 UTC and plugged back in; the adapter's `eth0` was unregistered at 219.2 s
+  since boot (14:05:47.8), registered again at 220.6 s and had link at 223.9 s (14:05:52.6), 4.7 s
+  from gone to link against 6.6 s on the 1 A supply. The camera was streaming at 14:05:58.5. The
+  maintainer saw no drop from outside, so a drop this short is easy to miss without the kernel log.
+  A larger supply is therefore not the whole answer. Left to try: the adapter on its own port of
+  the printer rather than on the camera's hub, or a hub that switches its ports individually.
+  Replugging the camera is rare, so this is a nuisance rather than a defect, and the viewer now
+  says what happened when it does.
 - **Phase 8, signing.** The `.b3` still ships unsigned. `REGISTRY_SIGNING_KEY` is wired into the
   release workflow and simply is not set; the decision is whether private testing is over.
 - **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
@@ -2612,11 +2625,42 @@ It did show two things to improve in the watchdog:
 - **Recovery lagged the network by 12.5 s**, link back at 15:11:37.7 and picture at 15:11:50.2.
   That fits the back-off: with the laptop's own network up there is no `online` event, and the
   timings match an ask sent just as the link returned failing at its 4 s timeout, then the next
-  one waiting 8 s. Asking an
-  unreachable printer every 2 s costs the printer nothing, so the back-off buys nothing.
+  one waiting 8 s. Asking an unreachable printer every 2 s costs the printer nothing, so the
+  back-off buys nothing.
 - **"Since" is when a question gave up, not when it was asked.** The line said 15:11:34, the moment
   the first unanswered ask timed out; the network went at about 15:11:31. The time an unanswered
   ask was sent is the better "since".
+
+Both fixed in 0.26.1: the watchdog keeps its 2 s beat while the printer is silent, and dates an
+unanswered question by when it was asked.
+
+**Retested on 2026-09-28 with 0.26.1**, camera unplugged and replugged, viewer on its own, the hub
+on a 2.4 A supply. Times are UTC; the clip reads two hours ahead.
+
+| Time | What happened |
+|---|---|
+| 14:05:10.4 | camera unplugged; the plugin logs the I/O error, the picture freezes |
+| 14:05:16.9 | "no frames from the camera since 14:05:12", 5.7 s after the freeze, and no restart |
+| 14:05:47 | the viewer's question goes unanswered |
+| 14:05:46 | the adapter's `eth0` is unregistered as the camera goes back in, and `dhcpcd` deletes 10.0.1.6 and its routes |
+| 14:05:51 | `eth0` has link again; `dhcpcd` waits 1.2 s, then asks to rebind its lease |
+| 14:05:51.7 | "printer not answering since 14:05:47", dated by when that question was asked |
+| 14:05:56 | the second request is acknowledged; three ARP probes for the address follow |
+| 14:05:58.5 | the plugin logs the camera streaming again |
+| 14:06:01 | `dhcpcd` adds 10.0.1.6 and its routes back: the printer is reachable again |
+| 14:06:03.3 | the picture moves and the line clears |
+
+Network times are from the printer's syslog, to the second, which puts the kernel's 219.2 s about
+1.5 s earlier than the plugin log's own uptime stamps do; the picture's times are the clip's, from
+the laptop's clock.
+
+The camera line is confirmed on hardware, and so is the new "since". So is the recovery: the
+picture was back 2.3 s after the printer had its address again, one beat of the watchdog and a
+restart. Almost all of the outage was the printer's own network coming back: a 4.7 s adapter drop
+became 15 s without an address, 10 s of it after the link had returned, spent rebinding a lease
+whose first request went unanswered and then probing the address three times before using it.
+Stopping the adapter drop is the cure; shortening `dhcpcd`'s return, with a static address or no
+ARP probing, would only trim it, and would change the printer's own configuration.
 
 ## 10. Reports owed elsewhere
 

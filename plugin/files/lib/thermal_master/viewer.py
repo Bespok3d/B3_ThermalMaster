@@ -51,11 +51,12 @@ VIEWER_WATCH_MILLISECONDS = 2000
 VIEWER_STALE_MILLISECONDS = 3000
 # At most one restart of the stream in this long, whatever asked for it.
 VIEWER_RESTART_MILLISECONDS = 5000
-# How far apart the questions get while the printer is not answering: doubling from the beat
-# above, up to this.
-VIEWER_SILENT_MAX_MILLISECONDS = 10000
 # How long one question may take before it counts as unanswered. A dropped network does not fail a
 # request, it leaves it hanging, and a watchdog waiting on it has stopped watching.
+#
+# The beat does not slow while the printer is silent. It did in 0.26.0, doubling to ten seconds,
+# and on 2026-09-28 that kept the picture frozen 12.5 s after the printer's network came back:
+# asking a printer that cannot be reached costs it nothing, so backing off bought nothing.
 VIEWER_ASK_TIMEOUT_MILLISECONDS = 4000
 
 VIEWER_PAGE_TEMPLATE = """<!doctype html>
@@ -1027,7 +1028,6 @@ VIEWER_SCRIPT = """
   var WATCH = WATCH_MS;
   var STALE = STALE_MS;
   var RESTART_GAP = RESTART_MS;
-  var SILENT_MAX = SILENT_MAX_MS;
   var ASK_TIMEOUT = ASK_TIMEOUT_MS;
   var staleOut = document.getElementById("stale");
   var staleText = null;
@@ -1038,7 +1038,6 @@ VIEWER_SCRIPT = """
   var lastSample = null;
   var restarts = 0;
   var watchTimer = null;
-  var watchDelay = WATCH;
   var looking = false;
   // What the page knows, in wall clock milliseconds, because the badge tells the time.
   var watch = {
@@ -1109,8 +1108,10 @@ VIEWER_SCRIPT = """
     watch.streaming = health.streaming !== false;
   }
 
-  function unheard(now) {
-    if (watch.answered) { watch.silentSince = now; }
+  // Dated when the question was asked, not when it gave up: the printer was already silent then,
+  // and a timeout is four seconds later than the truth (2026-09-28).
+  function unheard(askedAt) {
+    if (watch.answered) { watch.silentSince = askedAt; }
     watch.answered = false;
     watch.count = null;
   }
@@ -1146,7 +1147,8 @@ VIEWER_SCRIPT = """
     watchTimer = null;
     if (looking || document.hidden) { return; }
     looking = true;
-    samplePicture(Date.now());
+    var askedAt = Date.now();
+    samplePicture(askedAt);
     var control = typeof AbortController === "undefined" ? null : new AbortController();
     var giveUp = control === null ? null
       : setTimeout(function () { control.abort(); }, ASK_TIMEOUT);
@@ -1154,17 +1156,15 @@ VIEWER_SCRIPT = """
       .then(function (reply) { return reply.ok ? reply.json() : Promise.reject(reply.status); })
       .then(function (health) {
         heard(health, Date.now());
-        watchDelay = WATCH;
       })
       .catch(function () {
-        unheard(Date.now());
-        watchDelay = Math.min(SILENT_MAX, watchDelay * 2);
+        unheard(askedAt);
       })
       .then(function () {
         if (giveUp !== null) { clearTimeout(giveUp); }
         looking = false;
         act(Date.now());
-        schedule(watchDelay);
+        schedule(WATCH);
       });
   }
 
@@ -1180,12 +1180,10 @@ VIEWER_SCRIPT = """
     look();
   });
 
-  // The browser says when its network comes back, and waiting out the back-off after that only
-  // keeps the picture frozen for nothing: up to ten seconds of it, after a laptop's wifi returned
-  // (2026-09-28). So the page asks at once, on the normal beat again.
+  // The browser says when its own network comes back, and waiting for the next beat after that
+  // only keeps the picture frozen for nothing. So the page asks at once.
   window.addEventListener("online", function () {
     if (watchTimer !== null) { clearTimeout(watchTimer); watchTimer = null; }
-    watchDelay = WATCH;
     look();
   });
 
@@ -1291,7 +1289,6 @@ def render_viewer_page(shape: tuple[int, int] | None = None) -> str:
         .replace("WATCH_MS", str(VIEWER_WATCH_MILLISECONDS))
         .replace("STALE_MS", str(VIEWER_STALE_MILLISECONDS))
         .replace("RESTART_MS", str(VIEWER_RESTART_MILLISECONDS))
-        .replace("SILENT_MAX_MS", str(VIEWER_SILENT_MAX_MILLISECONDS))
         .replace("ASK_TIMEOUT_MS", str(VIEWER_ASK_TIMEOUT_MILLISECONDS))
     )
     picture_shape = (

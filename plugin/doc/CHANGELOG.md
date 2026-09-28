@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.26.1
+
+- **The viewer's picture comes back sooner after the printer drops off the network.** While the
+  printer was not answering, the viewer asked less and less often, up to every ten seconds, so the
+  picture could stay frozen that long after the printer was back. It now keeps asking every two
+  seconds, which costs the printer nothing while it cannot be reached.
+- **"Printer not answering since" gives the right time.** It showed when the viewer gave up waiting
+  for an answer, about four seconds late; it now shows when the unanswered question was asked.
+
 ## 0.26.0
 
 - **The viewer notices when its picture stops, and brings it back.** A dropped network connection

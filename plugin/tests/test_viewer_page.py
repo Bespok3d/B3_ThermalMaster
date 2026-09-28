@@ -131,7 +131,7 @@ def test_the_script_has_no_placeholders_left_in_it(thermal_streamer):
     for placeholder in ("POLL_MS", "LINGER_MS", "MIN_REGION_PX", "REGION_KEY_NAME",
                         "MAX_ZOOM_VALUE", "ZOOM_STEP_VALUE", "RECORD_FPS_VALUE",
                         "RECORD_LIMIT_MS", "MAX_SPOTS_VALUE", "WATCH_MS", "STALE_MS",
-                        "RESTART_MS", "SILENT_MAX_MS", "ASK_TIMEOUT_MS"):
+                        "RESTART_MS", "ASK_TIMEOUT_MS"):
         assert placeholder not in page, placeholder
 
 
@@ -168,6 +168,26 @@ def test_the_watchdog_asks_at_once_when_the_network_returns(thermal_streamer):
     """Rather than waiting out a back-off that only keeps the picture frozen (2026-09-28)."""
 
     assert 'window.addEventListener("online"' in thermal_streamer.render_viewer_page(None)
+
+
+def test_an_unanswered_question_is_dated_when_it_was_asked(thermal_streamer):
+    """A timeout is four seconds later than the truth, and "since" said so (2026-09-28)."""
+
+    page = thermal_streamer.render_viewer_page(None)
+
+    assert "unheard(askedAt)" in page
+    assert "unheard(Date.now())" not in page
+
+
+def test_the_watchdog_keeps_its_beat_while_the_printer_is_silent(thermal_streamer):
+    """0.26.0 doubled the gap to ten seconds, which kept the picture frozen 12.5 s after the
+    printer's network came back (2026-09-28)."""
+
+    page = thermal_streamer.render_viewer_page(None)
+    look = page.split("function look()", 1)[1].split("\n  }", 1)[0]
+
+    assert "schedule(WATCH)" in look
+    assert "SILENT_MAX" not in page
 
 
 def test_recording_is_offered_only_over_a_moving_camera_picture(thermal_streamer):
