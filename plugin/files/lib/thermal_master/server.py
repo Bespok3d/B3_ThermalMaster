@@ -117,7 +117,10 @@ class LatestFrame:
         self._published_count = 0
         self._seen_count = 0
         self._published_at = 0.0
-        self._asked_at = 0.0
+        # Never, rather than zero. The monotonic clock counts from boot, so zero reads as "asked a
+        # moment ago" for the first minute of a machine's life, and a plugin started that early
+        # rendered for nobody until the minute ran out (F-75).
+        self._asked_at = float("-inf")
         self._updated = threading.Condition()
 
     @property

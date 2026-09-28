@@ -2703,6 +2703,25 @@ The last of the round, the same afternoon: switching the camera off during a rec
 recording and saved it on its own. The 5.4 s clip moves until 5.0 s and ends on the camera's last
 frame, with no "Stream off" placeholder in it.
 
+**F-75. For the first minute after boot, a store nobody had asked anything of counted as watched.
+Fixed before 0.27.0, found by CI.** The first run of `tests.yml` on GitHub's runner, 2026-09-28,
+failed `test_asking_for_health_counts_as_watching` on its opening assertion: a fresh `LatestFrame`
+said it was wanted. It keeps the time of the last request on the monotonic clock and started it at
+zero, and that clock counts from boot. On a machine up for more than the idle minute, zero reads as
+long ago; the runner had booted less than a minute before the test ran, so zero read as a moment
+ago. The older test of the same thing, `test_a_store_nobody_has_asked_anything_of_is_not_wanted`,
+passed on the same run only because it ran later, by which time the runner was past its minute.
+Every machine the suite had run on before had been up for longer.
+
+On the printer the cost was small and real: a plugin started within a minute of boot rendered
+frames for nobody until the minute ran out. The last request now starts at minus infinity, which is
+"never" whatever the clock says, and a regression test fakes the clock at five seconds after boot.
+The time of the last published frame also starts at zero and is safe, because nothing reads it
+before a frame exists.
+
+What it taught: **a test that depends on how long the machine has been up passes everywhere it has
+always run.** A fresh CI runner is the one place it is guaranteed to be young.
+
 ## 10. Reports owed elsewhere
 
 Five defects found while building this plugin, none of which belongs to this repository. 10.1 went

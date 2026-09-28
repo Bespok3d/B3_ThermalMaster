@@ -65,6 +65,21 @@ def test_a_store_nobody_has_asked_anything_of_is_not_wanted(thermal_streamer):
     assert thermal_streamer.LatestFrame().wanted() is False
 
 
+def test_nobody_asking_is_not_wanted_in_the_first_minute_after_boot(thermal_streamer, monkeypatch):
+    """The monotonic clock counts from boot, and CI's runner had been up for less than a minute.
+
+    A store that took "never asked" to mean "asked at zero" was wanted until the clock passed its
+    idle minute, which only CI noticed, because every other machine here had been up for longer
+    (F-75).
+    """
+
+    import time
+
+    monkeypatch.setattr(time, "monotonic", lambda: 5.0)
+
+    assert thermal_streamer.LatestFrame().wanted() is False
+
+
 def test_asking_for_a_picture_makes_it_wanted(thermal_streamer):
     store = thermal_streamer.LatestFrame()
 
