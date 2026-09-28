@@ -187,7 +187,7 @@ F-49, F-50, F-51. Closed by Phase 1: F-11, F-20, F-22, F-23, F-24, F-32, F-33, F
 F-38, F-39, F-41, F-44, and the rest of F-40; F-45 keeps Apache-2.0 and now ships a per-plugin
 `doc/LICENSE`, and F-46's capability and exclusivity metadata is declared.
 
-Genuinely still open: F-5 and F-6 (signing, Phase 8), F-7 and F-8 (withdrawn, the udev file is gone),
+Genuinely still open: F-7 and F-8 (withdrawn, the udev file is gone),
 F-13 through F-18 (runtime correctness, Phase 3), F-25 through F-30 (streamer design, Phase 5), and
 F-47 (mypy, waiting on the streamer being split into an importable module).
 
@@ -303,10 +303,13 @@ check, so a hand-written name there would both fail that check and put a name wh
 expected. Revision 1 listed the placeholder as a defect; it is not. The missing piece is `author`, the
 schema's unverified display name, which every reference plugin sets (`"author": "bespoked"`) alongside
 `"publisher": "PLACEHOLDER"`. Set `"author": "Mauker"`; `publisher` becomes Mauricio's real fingerprint
-the first time the builder runs with a signing key.
+the first time the builder runs with a signing key. **Closed in 0.27.0:** the package is signed with
+the Bespok3d organisation's key rather than a personal one, so the stamped `publisher` is the
+organisation's fingerprint (Phase 8).
 
 **F-6. Packages ship unsigned.** Signing needs a GPG keypair with the private key in the
 `REGISTRY_SIGNING_KEY` secret. Until then packages install but show as unknown publisher.
+**Closed in 0.27.0**, the first release signed, with the organisation's key (Phase 8).
 
 **F-42. Repo scaffolding is missing.** No `lib_bespok3d` submodule, no `.gitmodules`, no
 `CONTRIBUTING.md`, no `tests/`, no `.github/`, no SPDX headers. Revision 3 also wanted the plugin
@@ -2145,7 +2148,7 @@ Repeat F-74's tests with 0.26.0 and write down the results:
 `CHANGELOG.md` 0.26.0; the plugin README's troubleshooting note gains a sentence on the badge; F-74
 gains its confirmation paragraph; section 9's list of what is left gains this phase until it ships.
 
-### Phase 8: signed, public, and in the Bespok3d organisation. Planned for 0.27.0.
+### Phase 8: signed, public, and in the Bespok3d organisation. Shipped in 0.27.0.
 
 Decided on 2026-09-28, once Phase 7i had been confirmed on hardware: private testing is over, and
 the plugin is published before the timelapse is built rather than after, so that what already works
@@ -2176,7 +2179,15 @@ reaches people and the timelapse ships as a release of its own.
   A user left on the default `stable` setting does not see an `rc` plugin until they reach for it.
 - **Tags are protected** before the first one is pushed: a ruleset on `plugin-*` restricting who
   creates, updates or deletes them to maintainers, because a tag is what publishes a package with
-  the organisation's signature.
+  the organisation's signature. `main` has a ruleset of its own: changes arrive by pull request,
+  and the `tests` check has to pass before one merges.
+
+**Shipped on 2026-09-28.** The first run of `tests.yml` failed, and rightly: it found F-75, a
+defect no machine the suite had run on before could show. With that fixed and merged to `main`,
+the tag `plugin-thermal-master-v0.27.0` built, tested, signed and published the release
+`thermal-master-v0.27.0`, and `Bespok3d/main-index` gained `lists/B3_ThermalMaster.json`, listed as
+"Thermal Master" under the organisation's fingerprint. In the Bespok3d app the plugin appeared, and
+installed and ran on the maintainer's printer once the right version was selected in the app.
 
 ### Phase 9: a thermal timelapse, one frame per layer. An idea, for after Phase 8.
 
@@ -2260,9 +2271,10 @@ assembles a package.
 
 ## 9. Where this stands
 
-**2026-09-28, at 0.26.1.** Phases 0 through 7i are done and every one of them has been confirmed on
-the maintainer's printer with a P1 attached. The gate is green, the work is committed on `dev`, and
-the plugin is in daily use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
+**2026-09-28, at 0.27.0.** Phases 0 through 8 are done and every one of them has been confirmed on
+the maintainer's printer with a P1 attached. The plugin is public at `Bespok3d/B3_ThermalMaster`,
+signed with the organisation's key, listed in the Bespok3d app as a release candidate, and in daily
+use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
 an interactive viewer, holds a display range, measures spots and regions, records clips, switches
 itself off, and reports what it costs.
 
@@ -2290,8 +2302,8 @@ What is left, in the order it is worth doing:
   port of its own. Replugging the camera is rare, the drop costs about 15 s on the network, and the
   viewer now says what happened and recovers by itself. A hub that switches its ports individually
   might avoid it, and is not worth buying for this.
-- **Phase 8, signed and public**, planned for 0.27.0 in section 7: the repository is now
-  `Bespok3d/B3_ThermalMaster`, signed with the organisation's key, published as `rc`.
+- **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
+  only the channel changed.
 - **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
   layer count, kept as temperatures and encoded on the printer after the print. After Phase 8.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
@@ -2721,6 +2733,21 @@ before a frame exists.
 
 What it taught: **a test that depends on how long the machine has been up passes everywhere it has
 always run.** A fresh CI runner is the one place it is guaranteed to be young.
+
+**F-76. The first release's page in the Bespok3d app had no documentation and no changelog.
+Worked around in 0.27.1.** After 0.27.0 installed from the app, 2026-09-28, the plugin's page
+offered Overview, Doc, Config, Licence and Install log, with the Doc tab reading "No bundled
+documentation for this plugin yet" and no Changelog tab at all, where Bespok3d's own
+`rfid-creality` shows both. The package was not the cause: the `.b3` carries `doc/README.md` and
+`doc/CHANGELOG.md`, both in the packed manifest's `files[]`, and the release's index entry has a
+`doc_url` and a `changelog_url` that both answer 200. The difference was the dates. The builder's
+documentation says `published_at` and `updated_at` are stamped at build time and never written by
+hand; the builder at `9322144` stamped neither, so the entry carried two empty strings and the
+list's own `updated` was empty too. `rfid-creality` writes both in its source manifest, which is
+where its dates come from. 0.27.1 does the same, with a test that both are present, dated, and in
+order, and the README's release steps say to move `updated_at` with each release. To be
+reported to the Bespok3d maintainers. Whether the dates alone bring the two tabs back is confirmed
+when 0.27.1 is in the app.
 
 ## 10. Reports owed elsewhere
 
