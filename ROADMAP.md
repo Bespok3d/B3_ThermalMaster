@@ -2025,7 +2025,7 @@ secrets, and replaces "not verified on hardware yet" with the real hardware stat
 this file was carrying the same rot, claiming nothing was committed, and has been split into a
 current status and the record that follows it.
 
-### Phase 7i: the viewer notices a dead stream. Planned for 0.26.0.
+### Phase 7i: the viewer notices a dead stream. Shipped in 0.26.0, refined in 0.26.1.
 
 The stream is an `<img>` of a never ending multipart response, and an `<img>` says nothing when that
 response ends. The viewer therefore has to look for itself, and it has two things to look at: the
@@ -2223,7 +2223,7 @@ assembles a package.
 
 ## 9. Where this stands
 
-**2026-09-28, at 0.25.2.** Phases 0 through 7h are done and every one of them has been confirmed on
+**2026-09-28, at 0.26.1.** Phases 0 through 7i are done and every one of them has been confirmed on
 the maintainer's printer with a P1 attached. The gate is green, the work is committed on `dev`, and
 the plugin is in daily use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
 an interactive viewer, holds a display range, measures spots and regions, records clips, switches
@@ -2231,8 +2231,6 @@ itself off, and reports what it costs.
 
 What is left, in the order it is worth doing:
 
-- **Phase 7i, the viewer notices a dead stream**, planned for 0.26.0 in section 7. It answers F-74:
-  a network break freezes the viewer for good, and nothing in the plugin notices.
 - **The adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
   adapter, holding the hub still, and see whether the adapter drops again. It matters more now that
   the printer is off wifi, since an adapter drop would take it off the network entirely.
@@ -2661,6 +2659,10 @@ became 15 s without an address, 10 s of it after the link had returned, spent re
 whose first request went unanswered and then probing the address three times before using it.
 Stopping the adapter drop is the cure; shortening `dhcpcd`'s return, with a static address or no
 ARP probing, would only trim it, and would change the printer's own configuration.
+
+The last of the round, the same afternoon: switching the camera off during a recording ended the
+recording and saved it on its own. The 5.4 s clip moves until 5.0 s and ends on the camera's last
+frame, with no "Stream off" placeholder in it.
 
 ## 10. Reports owed elsewhere
 
