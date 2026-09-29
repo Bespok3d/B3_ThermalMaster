@@ -1,5 +1,7 @@
 # thermal-master
 
+![The viewer measuring a heated bed, with three more scenes below](plugin/doc/images/hero.jpg)
+
 This is [`Bespok3d/B3_ThermalMaster`](https://github.com/Bespok3d/B3_ThermalMaster)[^name], the
 home of the `thermal-master` plugin. It was `Mauker1/B3_ThermalMaster_P1_P3` until 2026-09-28, and
 GitHub redirects the old address.
@@ -17,7 +19,9 @@ capture path is pure Python; there is no arm64 build toolchain.
 
 It also serves an interactive viewer at `/thermal/view`: point at the picture to read the
 temperature there, drag a box to measure a region, place spot markers, save a still or record a
-clip, and hold the display range so a colour means the same thing in every frame.
+clip, and hold the display range so a colour means the same thing in every frame. The plugin's own
+documentation, [`plugin/doc/README.md`](plugin/doc/README.md), shows the six palettes and lists
+every setting, with the JSON endpoint that changes them.
 
 **What it costs the printer**, measured on the hardware with
 `scripts/measure-cpu-on-printer.sh`, as a share of one of the U1's four Cortex-A53 cores:
@@ -36,6 +40,30 @@ own share on its settings page rather than making anybody measure it.
 
 It is a worked example of a libusb-based (non-V4L2) camera plugin. For the concepts see the
 Bespok3d docs: `doc/anatomy-of-a-plugin.md`, `doc/package-format.md`.
+
+## Sponsorship
+
+Thermal Master supports this project with hardware and an affiliate arrangement. It does not fund
+it, and it does not buy any of the technical content. The performance figures above are measurements
+taken from a printer, the hardware status section still says plainly that the P3 has never been in
+front of one, and anything that stops being true about either camera gets written here whatever the
+arrangement is.
+
+### Where to buy a P1
+
+If you are buying one and want the project to benefit, buy it through the shop link below. It costs
+you nothing extra, and the discount code applies there.
+
+| | |
+| --- | --- |
+| Official shop | https://thermalmaster.com/BESPOKD |
+| Discount code | `THERMALYML01`, at that shop |
+
+Before buying a P3, read the [hardware status](#hardware-status) below. The plugin drives it from the same code path and
+the same driver model config, and it has never been in front of one.
+
+Disclosure: the shop link is an affiliate link, so the project earns a commission on purchases made
+through it, at no extra cost to you.
 
 ## Layout
 
@@ -161,34 +189,17 @@ printer, and the performance figures above and in the roadmap are measurements f
 estimates. The camera tile renders in Fluidd and Mainsail, the control page and the viewer both work
 in a dashboard tile, the settings survive a restart, and an unplug and replug recovers on its own.
 
+It has also run on a second Klipper printer, an Ender 2 Pro Max on a Raspberry Pi 4 with Debian 12,
+started by hand rather than through Bespok3d, on 2026-09-29: the same wheels the U1 package ships
+installed there, the camera connected, the viewer worked, and a replug recovered. With the viewer
+open and the pointer moving it cost 36.4% of one Cortex-A72 core against the U1's 45.7%, a
+dashboard tile 37.5% against 41.9%, nothing watching 4.1% against 4.6%, and off 0.1% against 0.0%.
+ROADMAP section 9 has the details.
+
 The **P3** is driven by the same code path, the same protocol and the same driver model config, and
 has never been in front of one. The sensor is 256x192 against the P1's 160x120, which the plugin
 reads from the driver rather than assuming. If you have a P3, it should work, and a report either
 way is welcome.
-
-## Sponsorship
-
-Thermal Master supports this project with hardware and an affiliate arrangement. It does not fund
-it, and it does not buy any of the technical content. The performance figures above are measurements
-taken from a printer, the hardware status section still says plainly that the P3 has never been in
-front of one, and anything that stops being true about either camera gets written here whatever the
-arrangement is.
-
-### Where to buy a P1
-
-If you are buying one and want the project to benefit, buy it through the shop link below. It costs
-you nothing extra, and the discount code applies there.
-
-| | |
-| --- | --- |
-| Official shop | https://thermalmaster.com/BESPOKD |
-| Discount code | `THERMALYML01`, at that shop |
-
-Before buying a P3, read the hardware status above. The plugin drives it from the same code path and
-the same driver model config, and it has never been in front of one.
-
-Disclosure: the shop link is an affiliate link, so the project earns a commission on purchases made
-through it, at no extra cost to you.
 
 `plugin/doc/README.md` is the documentation that ships inside the package and is rendered in the
 app. It is written for somebody using the plugin; this file is written for somebody opening the

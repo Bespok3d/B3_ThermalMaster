@@ -187,11 +187,11 @@ def test_the_frame_endpoint_is_proxied_and_uncacheable():
 
 
 def test_the_manifest_carries_its_publication_dates():
-    """Written by hand, because the builder does not stamp them (F-76).
+    """Both are manifest fields the plugin writes by hand, as the builder expects (F-76).
 
-    0.27.0 went out without either, the index entry carried two empty strings, and the plugin's page
-    in the Bespok3d app showed no documentation and no changelog. Bespok3d's own plugins write both
-    in source. `updated_at` moves with every release; `published_at` never does.
+    0.27.0 went out without either, because the builder's documentation says the build stamps them,
+    and its index entry carried two empty strings. Bespok3d's own plugins write both in source.
+    `updated_at` moves with every release; `published_at` never does.
     """
 
     date = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -199,3 +199,20 @@ def test_the_manifest_carries_its_publication_dates():
     assert date.match(MANIFEST["published_at"])
     assert date.match(MANIFEST["updated_at"])
     assert MANIFEST["published_at"] <= MANIFEST["updated_at"]
+
+
+def test_every_image_the_documentation_ships_is_one_it_shows():
+    """Everything under doc/ is packed, so a stray file there ships to every printer.
+
+    On 2026-09-29 two desktop screenshots and two clips, 2 MB between them, were sitting in
+    doc/images/ waiting to be picked through. The builder would have packed all of them.
+    """
+
+    doc = Path(__file__).resolve().parent.parent / "doc"
+    readme = (doc / "README.md").read_text()
+    shown = set(re.findall(r"!\[[^\]]*\]\((images/[^)]+)\)", readme))
+    shipped = {
+        f"images/{path.name}" for path in (doc / "images").iterdir() if path.name != ".DS_Store"
+    }
+
+    assert shipped == shown
