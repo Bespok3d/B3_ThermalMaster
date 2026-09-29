@@ -40,10 +40,11 @@ from .temperature import (
     VALID_UNITS,
     FrameStats,
 )
+from .timelapse import VALID_TIMELAPSE_RANGES, TimelapseSettings, clamped_keep
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
 # was given rather than a common base, or every caller loses its type.
-_Settings = TypeVar("_Settings", RenderSettings, CameraSettings)
+_Settings = TypeVar("_Settings", RenderSettings, CameraSettings, TimelapseSettings)
 
 
 # Each entry is a setting that was split, and the settings that replaced it, oldest first. Applied
@@ -190,6 +191,7 @@ class SettingsStore:
         self._palette_name = palette_name
         self._settings = settings
         self._camera = camera
+        self._timelapse = TimelapseSettings()
         self._state_file = state_file
         self._revision = 0
         self._camera_revision = 0
@@ -206,6 +208,15 @@ class SettingsStore:
         with self._lock:
             return (self._camera_revision, self._camera)
 
+    def timelapse_snapshot(self) -> TimelapseSettings:
+        with self._lock:
+            return self._timelapse
+
+    def update_timelapse(self, timelapse: TimelapseSettings) -> None:
+        with self._lock:
+            self._timelapse = timelapse
+        self._save()
+
     def update(self, palette_name: str, settings: RenderSettings) -> None:
         with self._lock:
             self._palette_name = palette_name
@@ -220,13 +231,24 @@ class SettingsStore:
         self._save()
 
     def as_dict(self) -> dict:
+        """Every setting a page may be shown. The Moonraker key is not one of them."""
+
         _, palette_name, settings = self.snapshot()
         _, camera = self.camera_snapshot()
         return {
             "palette": palette_name,
             **dataclasses.asdict(settings),
             **dataclasses.asdict(camera),
+            **self.timelapse_snapshot().public(),
         }
+
+    def saved_dict(self) -> dict:
+        """What goes in the file: the page's settings, with the key instead of whether it is set."""
+
+        saved = self.as_dict()
+        del saved["moonraker_api_key_set"]
+        saved["moonraker_api_key"] = self.timelapse_snapshot().moonraker_api_key
+        return saved
 
     def _load(self) -> None:
         """Restore what was saved. A missing or unreadable file just means the defaults stand."""
@@ -247,13 +269,14 @@ class SettingsStore:
             self._settings, spots=clean_spots(self._settings.spots)
         )
         self._camera = restored(self._camera, saved)
+        self._timelapse = checked_timelapse(restored(self._timelapse, saved))
 
     def _save(self) -> None:
         if self._state_file is None:
             return
         try:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            self._state_file.write_text(json.dumps(self.as_dict(), indent=2))
+            self._state_file.write_text(json.dumps(self.saved_dict(), indent=2))
         except OSError as error:
             log_line(f"could not save settings: {error}")
 
@@ -461,3 +484,85 @@ class RendererSource:
                 replacement.carry_over(self._renderer)
             self._renderer = replacement
         return self._renderer
+
+
+TimelapseCheck = Callable[[Any, TimelapseSettings], Any]
+
+
+def a_key(value: object, current: TimelapseSettings) -> str:
+    """A Moonraker API key: any string, trimmed, and an empty one forgets the saved key."""
+
+    return value.strip() if isinstance(value, str) else current.moonraker_api_key
+
+
+# Every timelapse setting a JSON body may name, with the same validators the form goes through.
+TIMELAPSE_JSON_SETTINGS: dict[str, TimelapseCheck] = {
+    "timelapse": lambda value, _current: bool(value),
+    "timelapse_keep": lambda value, current: clamped_keep(value, current.timelapse_keep),
+    "timelapse_range_mode": lambda value, current: (
+        value if value in VALID_TIMELAPSE_RANGES else current.timelapse_range_mode
+    ),
+    "timelapse_range_low_celsius": lambda value, current: posted_temperature(
+        value, current.timelapse_range_low_celsius
+    ),
+    "timelapse_range_high_celsius": lambda value, current: posted_temperature(
+        value, current.timelapse_range_high_celsius
+    ),
+    "moonraker_api_key": a_key,
+}
+
+
+def checked_timelapse(settings: TimelapseSettings) -> TimelapseSettings:
+    """A timelapse read back from the file, through the validators a posted change goes through.
+
+    Checked against the defaults rather than against itself, so a value that is not allowed falls
+    back to what it would have been, not to the same value it was.
+    """
+
+    defaults = TimelapseSettings()
+    return dataclasses.replace(
+        settings,
+        **{
+            key: check(getattr(settings, key), defaults)
+            for key, check in TIMELAPSE_JSON_SETTINGS.items()
+        },
+    )
+
+
+def timelapse_settings_from_json(payload: dict, current: TimelapseSettings) -> TimelapseSettings:
+    """Only what the body names, as for every other setting sent as JSON."""
+
+    changes = {
+        key: check(payload[key], current)
+        for key, check in TIMELAPSE_JSON_SETTINGS.items()
+        if key in payload
+    }
+    return dataclasses.replace(current, **changes)
+
+
+def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> TimelapseSettings:
+    """The Timelapse section of the settings form.
+
+    The switch is a checkbox, so absent means off, as for every other box on the form. The key is
+    the exception to "the form posts every field": a password box is never filled in from the page,
+    so an empty one means "leave it as it is", and forgetting the key is its own box.
+    """
+
+    def posted(field: str) -> str:
+        return str(form.get(field, [""])[0])
+
+    typed_key = posted("moonraker_api_key").strip()
+    forgotten = "forget_moonraker_api_key" in form
+    return dataclasses.replace(
+        timelapse_settings_from_json(
+            {
+                "timelapse_keep": posted("timelapse_keep"),
+                "timelapse_range_mode": posted("timelapse_range_mode"),
+                "timelapse_range_low_celsius": posted("timelapse_range_low_celsius"),
+                "timelapse_range_high_celsius": posted("timelapse_range_high_celsius"),
+            },
+            current,
+        ),
+        timelapse="timelapse" in form,
+        moonraker_api_key="" if forgotten else typed_key or current.moonraker_api_key,
+    )

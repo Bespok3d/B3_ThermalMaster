@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.28.0
+
+- **A thermal timelapse of every print.** Switch it on in the new Timelapse panel of the settings
+  page, and the plugin takes one frame each time the layer changes and makes a clip once the print
+  ends. The clips are listed at the bottom of the settings page, to play, download or delete. It
+  needs the slicer to send layer numbers; the documentation has the two lines to add.
+- **The colours are chosen once for the whole clip**: fixed once the print has started, the whole
+  print's coldest to hottest, two temperatures of your own, or the same as the live picture.
+- **It keeps the last 10 prints**, or the number you choose, and makes room sooner if the
+  printer's disk runs short.
+- **Nothing gathered is lost.** Cancelled prints, prints cut short by a power cut, and layers the
+  camera missed all end up in the clip.
+- **Moonraker logins are handled.** If Moonraker asks for a login, the panel says so and takes
+  Moonraker's API key, which is never shown again.
+
 ## 0.27.2
 
 - **The documentation has pictures.** A picture of the viewer and three scenes at the top, the

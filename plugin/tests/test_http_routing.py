@@ -35,9 +35,29 @@ def test_settings_are_posted_to_their_own_path(thermal_streamer):
 
 
 def test_nothing_else_accepts_a_post(thermal_streamer):
-    """A GET route is not a POST route: the stream must not be writable by accident."""
+    """A GET route is not a POST route: the stream must not be writable by accident.
 
-    assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
+    The settings, and the list of timelapses, which is where one is deleted. Nothing else.
+    """
+
+    assert set(thermal_streamer.POST_ROUTES) == {"/settings", "/timelapses"}
+
+
+def test_the_timelapses_have_their_own_paths(thermal_streamer):
+    assert thermal_streamer.resolve_route("/timelapses") == "serve_timelapses"
+    assert thermal_streamer.resolve_route("/timelapse.mp4?id=20260929-120000") == (
+        "serve_timelapse_clip"
+    )
+    assert thermal_streamer.resolve_route("/timelapse.jpg?id=20260929-120000") == (
+        "serve_timelapse_thumbnail"
+    )
+    assert thermal_streamer.POST_ROUTES["/timelapses"] == "change_timelapses"
+
+
+def test_a_clip_is_named_by_query_not_by_path(thermal_streamer):
+    """A path under the list is not a route, so no request can walk the folder by path."""
+
+    assert thermal_streamer.resolve_route("/timelapses/20260929-120000/clip.mp4") is None
 
 
 def test_an_unknown_path_has_no_route(thermal_streamer):
@@ -83,7 +103,8 @@ def test_a_restarted_stream_still_routes_to_the_stream(thermal_streamer):
 
 
 def test_neither_accepts_a_post(thermal_streamer):
-    assert set(thermal_streamer.POST_ROUTES) == {"/settings"}
+    for read_only in ("/view", "/frame.bin", "/health", "/stream.mjpg"):
+        assert read_only not in thermal_streamer.POST_ROUTES
 
 
 def test_a_client_that_leaves_mid_answer_is_not_an_error(thermal_streamer):

@@ -383,23 +383,31 @@ class ThermalRenderer:
         )
         return oriented, stats, denoised
 
+    def overlay_for(self, stats: FrameStats) -> Overlay | None:
+        """What to draw over a frame that measured this, or None with the whole readout off.
+
+        One place for the stream and the timelapse, so a clip carries the same readout the tile
+        does, switched on and off by the same boxes.
+        """
+
+        settings = self._settings
+        if not settings.readout:
+            return None
+        return Overlay(
+            self._palette,
+            stats,
+            settings.units,
+            settings.colorbar,
+            settings.reticle,
+            settings.hotspot,
+            settings.coldspot,
+            settings.fixed_range,
+        )
+
     def render_frame(self, thermal_raw: np.ndarray) -> RenderedFrame:
         image, stats, denoised = self.render_image(thermal_raw)
         settings = self._settings
-        overlay = (
-            Overlay(
-                self._palette,
-                stats,
-                settings.units,
-                settings.colorbar,
-                settings.reticle,
-                settings.hotspot,
-                settings.coldspot,
-                settings.fixed_range,
-            )
-            if settings.readout
-            else None
-        )
+        overlay = self.overlay_for(stats)
         upscale = encode_upscale(
             (image.shape[1], image.shape[0]), settings.upscale, settings.readout
         )

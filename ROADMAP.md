@@ -2189,7 +2189,7 @@ the tag `plugin-thermal-master-v0.27.0` built, tested, signed and published the 
 "Thermal Master" under the organisation's fingerprint. In the Bespok3d app the plugin appeared, and
 installed and ran on the maintainer's printer once the right version was selected in the app.
 
-### Phase 9: a thermal timelapse, one frame per layer. An idea, for after Phase 8.
+### Phase 9: a thermal timelapse, one frame per layer. Planned on 2026-09-29.
 
 The printer's own camera makes a timelapse of each print. A thermal one would show something that
 one cannot: heat spreading through the part and the bed layer by layer, and where it cools first.
@@ -2214,36 +2214,314 @@ Sketched on 2026-09-28 and not started; nothing here is built.
   at the end with one range for the whole print, where frames rendered live would each carry their
   own and the clip would flicker in brightness; and the finished timelapse can still be read for
   temperatures.
-- **Encoded on the printer once the print has finished**, when it can spare the processor. The
-  U1 has `/usr/bin/ffmpeg`, with H.264 encoders in software and through V4L2, and Rockchip's
-  hardware video library (`librockchip_mpp.so`, with `mpp_info_test`), found on 2026-09-28. Failing
-  those, an MJPEG AVI is simple enough to write from Python.
+- **Encoded on the printer once the print has finished**, when it can spare the processor, with
+  the U1's own `/usr/bin/ffmpeg` (4.4.4) and `libx264`: there is no hardware encoder ffmpeg can
+  reach (1). Settled on 2026-09-29 as a starting point, to be judged on real clips:
+  - **640 by 480, four times the P1's frame, scaled up with nearest neighbour** before encoding.
+    At the sensor's own size `yuv420p` would keep colour at 80 by 60, which smears a palette, and
+    any label drawn into the frame would be unreadable. A P3's 256 by 192 would go to 768 by 576.
+  - `-c:v libx264 -preset veryfast -pix_fmt yuv420p -movflags +faststart`, the last so a browser
+    can start playing before the file has arrived.
+  - Run under `nice -n 19` with `-threads 2`, so a print started straight after is not slowed.
+  - Scaled with PIL's nearest neighbour, not `numpy.repeat`, which was twice as slow on the U1.
+- **What a clip costs, end to end.** Measured on the U1 on 2026-09-29 with
+  `Claude outputs/bench-timelapse-render.py`, the service running and idle, on 150 made up P1
+  frames (a warm bed, a part growing on it, a 210 C nozzle crossing) rendered with a told 20 to
+  120 C range: the plugin's side is 10 ms a frame (the colour map 3.5 ms, the 4x nearest neighbour
+  scale 3.4 ms, the colour bar and hot spot label 3.2 ms), and ffmpeg took 7.3 s of processor and
+  about 5 s of wall clock for the 150, under `nice` on two threads, for a file of 82 KB, 109 KB
+  with the overlay. That is about 49 ms of ffmpeg a frame, more than the 35 ms of the encoder alone
+  in (1), the difference being the conversion from the RGB the plugin hands it. So a 1,000 layer
+  print is about a minute in all, against the firmware's three to five for its own clip. Not worth
+  optimising.
+- **The frame is taken the moment `current_layer` changes**, not after a delay or a wait for the
+  park, because some layers are over in seconds (2).
+- **How many are kept is a setting, counted in prints: "How many thermal timelapses to keep",
+  10 by default.** When a print falls off the end, its clip, its thumbnail and its kept
+  temperatures go together, so there is one number to think about. A clip deleted from Fluidd or
+  Mainsail simply stops counting. Behind it, two rules that are not settings: kept temperatures
+  (38.4 KB a layer on a P1, so about 38 MB for 1,000 layers, two and a half times that on a P3) are
+  kept only for the newest prints, enough to render a clip again with another range; and **a free
+  space floor that overrides the setting**, since the printer's free space matters more than this
+  plugin's own count: below it the oldest kept temperatures go first, then the oldest clips, and no
+  new frames are kept until there is room. Only the plugin's own files are ever deleted (4).
+- **Nothing gathered is thrown away (5).** A cancelled print keeps its frames and gets its clip:
+  timelapses are useful for diagnostics, and a failed print is the one worth looking at. After a
+  reboot or a power loss mid-print, the plugin finds kept temperatures with no clip whose print is
+  no longer running when it next starts, and makes the clip from what it has. A plugin update
+  cannot restart it mid-print, since B3 blocks updates while printing; a crash could, and then the
+  same print is still running, so it carries on adding to the same set. With the camera unplugged,
+  every layer passed without it gets the same "camera disconnected" picture the viewer shows, so
+  the clip keeps its length and shows where the camera was lost.
+- **The gain can switch itself, once per print (6).** A print starts in the gain the user has set.
+  If that is high sensitivity (-20 to 150 C) and the hottest pixel reaches 145 C, typically the
+  nozzle coming into view, the plugin switches the camera to wide range (0 to 550 C) and keeps it
+  there until the print ends, then puts the user's setting back. One way only: switching back each
+  time the nozzle left the view would make the clip jump between two looks, and wide range is
+  coarser at bed temperatures. The switch is made as soon as the crossing is seen, and the next
+  layer's frame is taken only once the picture has settled after it, so no frame in the clip is
+  one the switch disturbed; the frame that saw the crossing is kept, clipped at the ceiling. There
+  is one camera and so one gain: the live view switches with it, and the settings page says so,
+  for example "Wide range, switched for this print". Every kept frame records the gain it was
+  taken in. Not for the conversion: the camera sends 1/64 kelvin in both gains and the driver
+  converts both alike, which the bed reading the same in both confirms (below). It is kept because
+  the two gains disagree about cool things, so a reading from a clip is only understood with its
+  gain beside it. With the switch turned off, the settings page warns when the timelapse is on in
+  high sensitivity.
+- **What a gain switch does to the picture.** Measured on 2026-09-29 from a viewer recording of
+  the bed heating, fixed display range, switched from high sensitivity to wide range at about 1:55
+  and back at about 2:06, frame by frame:
+  - **To wide range:** no new picture for 0.7 s, then the picture is back at once. The readings
+    then drift for about four seconds (the coldest spot 20.2 C, then 16.9, 13.5 and 10.1), and at
+    1:59.2, after half a second of nearly still frames that looks like the camera's shutter, they
+    step and hold: the coldest spot about 11 C, the centre 19.4 C against 24.8 C before, the hot
+    spot on the bed 60.3 C against 58.4 C with the bed still heating. So wide range reads things
+    near room temperature eight to ten degrees colder than high sensitivity, and reads the hot bed
+    about the same.
+  - **Back to high sensitivity:** no new picture for 1.0 s, then within a second the readings are
+    back where they were (the coldest 17.5 C then 18.7 C, the centre 23.3 C). The recording stops
+    three seconds later, so a later shutter is not ruled out.
+  - **Repeated the same day with the bed held steady**, 20 s or more on each side of each switch.
+    It confirmed the first and explained it: **every switch is followed by the camera's own shutter
+    3.7 s later**, in both directions and in both recordings (3.74 s, 3.69 s, 3.73 s), with the
+    readings drifting until it and stepping at it. The first recording ended 3.1 s after its second
+    switch, just before that shutter. The picture froze for 0.6 s on the way back. Before, in high
+    sensitivity: the coldest spot 20.5 C, the centre 25.1 C, a spot on the frame 30.6 C, the bed's
+    hot spot 56.1 C. In wide range after the shutter: 12.1 to 14.1 C, 20.5 to 21.9 C, 28.4 to
+    29.7 C and 57.6 to 58.3 C, the cool readings still creeping up about 2 C over 20 s. Back in high
+    sensitivity after the shutter: 19.8 to 20.2 C, 24.5 to 24.9 C, 30.0 to 30.5 C and 55.3 to
+    56.0 C, within half a degree of where they started. So wide range reads room temperature six to
+    eight degrees low and the bed a degree or two high, and high sensitivity comes back exactly.
+  - **So the plugin waits 5 s after a switch** before it takes the next frame: the shutter at
+    3.7 s and a margin after it. A layer that changes sooner has its frame taken late rather than
+    disturbed. Wide range's error on cool things is one more reason for switching one way only,
+    and only when the heat calls for it; for a nozzle and a hot bed it does not matter.
+- **The colour range is a setting**: as displayed (Phase 7f), a fixed low and high of its own, or
+  the whole print's coldest to hottest. The candidate default is a range fixed once the print has
+  actually started, so the part is not washed out by what the bed and nozzle do before it; the
+  choices are compared on real clips before one is made the default. The kept temperatures make
+  the comparison cheap, since one print can be rendered every way.
 - **Parking is the slicer's business.** The U1 parks the head for its timelapse only when the
   slicer is told to, so the plugin cannot count on it. The first version takes its frame at the
   layer change as it is.
+- **It depends on no other plugin.** Bespok3d's `timelapse` plugin (`Bespok3d/fluidd-timelapse`),
+  read on 2026-09-29, takes no pictures: it is a 47 line stub of Moonraker's `timelapse` component
+  that registers a `timelapse` file root at `<printer data>/camera`, so Fluidd and Mainsail list the
+  clips the U1's firmware writes there, and answers the settings endpoints with "off, no frames".
+  So the capture, the frames and the encode are all this plugin's, and it never claims the
+  `timelapse` service, which would conflict with that plugin or with `moonraker-timelapse`.
+- **Where a finished clip goes, in two layers.** Always in the plugin's own folder, listed on the
+  settings page to play or download, which works on any Klipper printer with nothing else
+  installed. And, when Moonraker's `/server/files/roots` has a `timelapse` root, a copy there too,
+  so it appears in the Timelapse page of Fluidd and of Mainsail. Asked on 2026-09-29: the U1 has
+  one, at `/oem/printer_data/camera`, writable, from `fluidd-timelapse` (a second root, `camera`, is
+  the same folder read only); the Pi 4 printer, an Ender 2 Pro Max on mainline Klipper, has none,
+  and neither front end shows a Timelapse page there. On mainline the Timelapse page therefore needs
+  `moonraker-timelapse` installed, which becomes an optional requirement, documented as such: only
+  for the clip to show up there, not for the timelapse itself, and without its own capture turned
+  on.
+- **Named after the firmware's own clips, with `_thermal` added.** The U1 writes three files per
+  print, e.g. `Voron_Design_Cube_v7_PLA_23m7s_20260928130941.mp4`: the G-code's name, the print
+  time and the print's start in UTC; `<same>.jpg`, about 3 KB; and `<same>_cover.jpg`, about 34 KB.
+  Ours is `<same>_thermal.mp4` with `<same>_thermal.jpg`, which sorts beside the normal clip and can
+  never collide with a name the firmware writes. The plugin takes the base name from the firmware's
+  clip for the same print once it appears, rather than rebuilding it, because the firmware's naming
+  has changed: the first clip, `Dragon_Textured_PLA_20260417151828`, has no print time, and some
+  are only a number and the start. With no firmware clip to follow, on mainline or with the
+  printer's timelapse off, it builds `<G-code name>_<start UTC>_thermal`.
+- **H.264 in MP4, as the firmware writes.** The firmware's clip of the 26 second cube, probed on
+  2026-09-29: H.264 High profile, `yuv420p`, 1920 by 1080 at about 24 frames a second, two frames,
+  muxed by libavformat 58.76, so the firmware encodes with ffmpeg too. The thumbnail is 120 by 90
+  and the cover 880 by 495. Our clip is H.264 `yuv420p` in MP4, which is what the browser players in
+  both front ends open; a P1 frame is 4:3, as the thumbnail is.
+- **The thumbnail is `<same name>.jpg`, in both front ends.** Read in their sources on 2026-09-29:
+  Fluidd (`src/store/files/getters.ts`) gives every file in the `timelapse` root the `.jpg` of the
+  same base name as its thumbnail and hides every `.jpg` from the list; Mainsail
+  (`src/components/panels/Timelapse/TimelapseFilesPanel.vue`) lists only `.mp4` and `.zip`, takes the
+  same `.jpg` as the preview, and renames or deletes it with its clip. Neither reads `_cover.jpg`.
+  Both screenshots from the U1, 2026-09-29, show the firmware's clips with thumbnails. So the plugin
+  writes one `.jpg` rendered from the last frame, beside the clip.
+- **The firmware encodes after the print too, and takes minutes.** The cube started at 13:09:41
+  UTC, printed for 23m7s, and its clip was written at 13:35:40, about three minutes after the end;
+  a seven hour print's, about five. The plugin's encode waits until the firmware's clip for the same
+  print has appeared, or a few minutes have passed, so the two never share the processor.
+
+**To test once built.** A finished clip plays from the settings page on both printers; on the U1
+it appears, with its thumbnail, in the Timelapse page of Fluidd and of Mainsail; on the Pi 4, the
+same in Mainsail once `moonraker-timelapse` is installed, and only on the settings page before. The
+U1 half was tried on 2026-09-29 with the test pair from 8: both front ends listed
+`..._thermal.mp4` beside the original with its thumbnail and opened it in their player, and since
+Moonraker gave the uploaded files `rw` where the firmware's are `r`, Fluidd offered Remove for it.
+Also to test: the gain switching once and the clip showing no disturbed frame; a camera unplugged
+mid-print leaving "camera disconnected" frames and a clip of the right length; a print cut by a
+power loss getting its clip at the next start; a cancelled print getting its clip; the count and
+the free space floor each deleting the oldest print's files and nothing else.
 
 **Open questions.**
 
-1. Which encoder to use, and what a clip costs, measured on the printer. Asked on 2026-09-28, this
-   ffmpeg offers `libx264` and `libx264rgb` (software H.264), `h264_v4l2m2m` (H.264 through the
-   kernel's V4L2 memory to memory interface, which is how a hardware encoder would be reached;
-   whether one answers on the U1 is not known) and `mjpeg`. No `rkmpp` encoder, so ffmpeg does not
-   talk to Rockchip's library directly. To try: `h264_v4l2m2m` first, `libx264` with a fast preset
-   as the fallback, both timed on a clip of the cube's 150 frames.
-2. How the frame's moment relates to the layer change. `current_layer` is set by the slicer's
-   layer change G-code, so the head may be anywhere; with parking on, whether waiting for the
-   toolhead position Moonraker reports to reach the park is worth it.
-3. Where the printer's own timelapses are kept, so these can sit beside them or be found the same
-   way, and how the settings page offers a finished one.
-4. How much to keep, and what clears it: frames for the last few prints, and finished clips.
-5. What a cancelled print, a plugin restart or a camera unplug mid-print leaves behind. Probably:
-   keep what was gathered and encode that.
-6. Which range to render with: the whole print's measured extremes, or the display range the user
-   has set (Phase 7f).
-7. How this sits beside Bespok3d's own `timelapse` plugin (`Bespok3d/fluidd-timelapse`, stable in
-   the main index on 2026-09-28). If it drives Moonraker's timelapse from a camera's snapshot URL,
-   `/thermal/snapshot.jpg` may already work with it, which would give a thermal timelapse with no
-   new code; if not, whether the two should share a trigger. Look at it before building anything.
+1. Which encoder to use, and what a clip costs. **Answered on 2026-09-29: `libx264`, and a clip
+   costs seconds.** Measured on the U1, idle, with ffmpeg's `-benchmark`, encoding 150 frames of
+   `testsrc2` at 24 frames a second, the length of the 150 layer cube:
+
+   | Encoder | Size | Processor time | Wall clock | File |
+   | --- | --- | --- | --- | --- |
+   | frames only, no encode | 160x120 | 0.06 s | 0.06 s | |
+   | `libx264 ultrafast` | 160x120 | 0.30 s | 0.18 s | 232 KB |
+   | `libx264 veryfast` | 160x120 | 0.62 s | 0.26 s | 107 KB |
+   | frames only, no encode | 640x480 | 0.25 s | 0.25 s | |
+   | `libx264 ultrafast` | 640x480 | 2.16 s | 0.85 s | 1.67 MB |
+   | `libx264 veryfast` | 640x480 | 5.51 s | 1.93 s | 0.60 MB |
+
+   Net of making the frames, `veryfast` at 640 by 480 is about 35 ms of processor per frame, so a
+   1,000 layer print is about 35 s of one core, and on two threads under `nice` well under a
+   minute; the firmware takes three to five minutes over its own 1080p clip. `ultrafast` is under
+   half the time at nearly three times the file, and the time is not the scarce thing. The files
+   are an upper bound: `testsrc2` is a busy moving pattern, and a thermal scene compresses far
+   better.
+
+   `h264_v4l2m2m` failed at both sizes with "Could not find a valid device". The U1's
+   `/sys/class/video4linux` lists only the camera's capture pipeline (`rkcif`, `rkisp`, the
+   `gc2053` sensor and the MIPI receiver), no encoder. Rockchip's encoder is reachable only through
+   its own library, which this ffmpeg is not built with; binding `librockchip_mpp.so` directly is
+   not worth it for seconds of processor. The plugin's own side, turning kept temperatures into
+   frames, was measured the same day; see "What a clip costs, end to end" above.
+2. How the frame's moment relates to the layer change. **Answered on 2026-09-29: at the change,**
+   since some layers are small. With parking on in the slicer the head may still be on its way to
+   the park; that is accepted rather than waited for.
+3. Answered on 2026-09-29, see "Where a finished clip goes" and "Named after the firmware's own
+   clips" above. Left open: how the settings page lists and offers a finished clip.
+4. How much to keep, and what clears it. **Answered on 2026-09-29:** a setting, 10 prints by
+   default, with a free space floor over it; see "How many are kept" above.
+5. What a cancelled print, a restart or a camera unplug mid-print leaves behind. **Answered on
+   2026-09-29:** a clip of whatever was gathered, in every case; see "Nothing gathered is thrown
+   away" above.
+6. Which range to render with, and in which gain. **Decided on 2026-09-29.** A gain switch
+   freezes the picture for up to a second and the camera's own shutter follows 3.7 s after it,
+   measured twice, so the plugin waits 5 s after one; see "What a gain switch does to the picture"
+   above. Left to do: compare the colour ranges on real clips. See "The gain
+   can switch itself" and "The colour range is a setting" above.
+7. Answered on 2026-09-29: `fluidd-timelapse` takes no pictures, so there is nothing to share and
+   nothing to depend on; see "It depends on no other plugin" above. Separately, on mainline,
+   `moonraker-timelapse` takes its frames from a camera's snapshot URL, so it may already make a
+   rough thermal timelapse from `/thermal/snapshot.jpg`, flickering because each frame carries its
+   own range. Worth one try on the Pi 4 once it is installed there, for comparison.
+8. Whether the U1's firmware clears that folder on its own. **Answered on 2026-09-29, as far as
+   five months show: it does not.** The folder held 129 clips with 822.6 MB free, and the oldest is
+   the printer's first print, 2026-04-17 15:18:28 UTC, to the second. Matched against Moonraker's
+   226 prints by start time: 122 completed prints and 7 cancelled ones have a clip, and the 97
+   without are prints the maintainer ran with the printer's timelapse off (59 completed, 36
+   cancelled, 2 Klipper shutdowns). A test pair, the smallest firmware clip and its `.jpg` uploaded
+   through Moonraker as `Cube_PLA_26s_20260921135513_thermal.*`, came through a print with the
+   folder otherwise unchanged, and was deleted through Moonraker afterwards. That print wrote no
+   clip of its own, so a cleanup run only when the firmware writes a clip is not ruled out, nor one
+   run only when the disk is nearly full. Searching the printer for the folder's path found nothing,
+   so whatever writes the clips does not name it in plain text. Either way the plugin bounds its own
+   use of the disk (4).
+9. Whether the printer's screen lists that folder. **Answered on 2026-09-29: it has no timelapse
+   list.** The `_cover.jpg` files begin with the prints of 2026-08-17, after a firmware update, and
+   every earlier clip has none, so whatever reads them, probably Snapmaker's own app, which was not
+   checked, copes without one.
+
+**Also decided on 2026-09-29.** The camera's Off switch wins during a print: those layers get
+"camera off" frames, as an unplug gets "camera disconnected" ones. The timelapse is opt in, off
+until switched on, since it writes to disk and talks to Moonraker. Every timelapse setting lives
+on the plugin's settings page, not in Bespok3d's install configuration: they apply without a
+reinstall, and on a printer run without Bespok3d. Free space on the U1: 23 GB on `/userdata`,
+where the plugin's own folder goes, and 822 MB on `/oem`, which holds the `timelapse` root, so the
+free space floor matters for the copies there. Moonraker reports a folder's free space with its
+listing, so the plugin needs no path to check it.
+
+**Moonraker with logins forced.** Asked on the U1 on 2026-09-29, Moonraker answers the plugin
+from `127.0.0.1` without a login. Bespok3d's `moonraker-auth` plugin can change that by turning on
+`force_logins`, which as far as is known overrides trusted clients. So: when Moonraker refuses, the
+settings page says so plainly rather than recording nothing in silence, and offers a field for
+Moonraker's API key, which the plugin then sends as `X-Api-Key`. The key is kept in the settings
+file and never returned by `GET /thermal/settings`, which says only whether one is set. Whether
+Bespok3d offers plugins a supported way in is a question for its maintainer.
+
+**The build plan, in five steps, each on hardware before the next.**
+
+0. **The Pi 4 printer made ready**, since the camera is on it: ffmpeg with `libx264` installed,
+   the slicer setting Klipper's layer count (`SET_PRINT_STATS_INFO`), and Moonraker checked to
+   answer from `127.0.0.1`. The plugin keeps running there by hand, as in the validation.
+1. **Record, encode, keep, and list on the settings page (0.28.0).** A new `moonraker.py`, a small
+   client on the standard library with its address from `--moonraker-url` (default
+   `http://127.0.0.1:7125`). A new `timelapse.py`: the print tracker (state and layer in, "started",
+   "new layer" and "ended, and how" out, plain logic); the frame tap the capture loop offers every
+   frame to, which keeps one per requested layer and marks a layer missing after 3 s without one;
+   the recording, a folder per print with `meta.json` and one append only `frames.bin` whose
+   torn last record is ignored on reading; the encoder (noise reduction off, the timelapse's range,
+   the orientation at encode time, 4x nearest neighbour, the colour bar and hot spot label, a
+   "camera disconnected" or "camera off" picture for missing layers, `nice -n 19 ffmpeg -threads 2`,
+   `<name>_thermal.mp4` and a 120 by 90 `.jpg`); the retention (10 prints, temperatures for the
+   newest 2, a 200 MB floor over both); and the worker thread, which also encodes any recording
+   whose print has ended when it starts, and resumes one whose print is still running.
+   `camera.py` offers each frame; `settings.py`, `page.py` and `server.py` gain the settings (on,
+   how many to keep, the range and its low and high, the API key), a Timelapse section with the
+   high sensitivity warning and the clips to play, download or delete, and the routes
+   `GET /thermal/timelapses` and the files, served with Range so a browser can seek. `cli.py` and
+   the manifest gain `--timelapse-dir $BESPOK3D/var/thermal-master-timelapse` and the thread.
+   **Built on 2026-09-29 as 0.28.0, not yet run on hardware.** As planned, with these specifics:
+   - Modules: `timelapse.py` (the settings, `PrintTracker`, `FrameTap`), `recording.py` (the folder,
+     `frames.bin`, `Retention`), `moonraker.py`, `clip.py` (rendering and ffmpeg) and
+     `timelapse_service.py` (the two threads). The stream's overlay moved into
+     `ThermalRenderer.overlay_for`, and the "Stream off" picture into `placeholder_picture`, so the
+     clip's readout and its missing layer pictures are the tile's own.
+   - The capture loop offers every frame through `LatestFrame.offer_raw`, before the idle check;
+     the tap copies one only when a layer asked for it.
+   - Moonraker is polled every 2 s when no print is running, not 5 s: a run against a stand-in
+     Moonraker with short layers missed the first three at 5 s. Once a second while printing.
+   - One more frame is taken when the print ends, because the layer change G-code runs at the start
+     of a layer and the last layer would otherwise never be seen finished.
+   - `frames.bin` records carry a magic, the layer, the kind, the gain code, the size and the
+     time; every write is flushed with `fsync`. The clip is written to `clip.mp4.partial` and
+     moved into place; ffmpeg's messages go to a temporary file, not a pipe, so a chatty ffmpeg
+     cannot block the frames going in.
+   - The routes name a clip by query, `/thermal/timelapse.mp4?id=` and `/thermal/timelapse.jpg?id=`,
+     keeping routing exact; the id must match the folder pattern before any path is built. Clips
+     are served with `Range`, so a browser can seek. `POST /thermal/timelapses` deletes one, and
+     refuses the print being recorded or made into a clip.
+   - The settings file is checked on the way in against the defaults, so a hand edited value that
+     is not allowed falls back to the default, not to itself.
+   - Tests: the tracker and tap, the file format with a torn tail, retention in order, the
+     Moonraker client against a stand-in (answer, absence, refusal, key), the ranges, a real
+     encode counting its frames with ffprobe (skipped without ffmpeg), the service through start,
+     layers, end, missing and off cameras, switched off mid-print, left open by a power cut or a
+     crash, low disk and no layers, the settings and the key never leaving, and the HTTP routes.
+     The browser harness gained a Timelapse run: Apply posts in the background, the key box is
+     emptied and says "Saved", the key is nowhere on the page, a print name is shown as text, and
+     Delete removes the print and comes back to the list. An end to end run against a stand-in
+     Moonraker and a stand-in camera made a 640 by 480 clip of every frame taken, in 0.6 s.
+   **Tried on the Pi 4 on 2026-09-29**, the plugin started by hand with `--timelapse-dir`, gain
+   high, rotated to portrait:
+   - A 75 layer Voron cube: the panel read "layer 27 of 75, 28 frames so far" mid-print, and the
+     clip came out 480 by 640, 77 frames, 3.2 s, 649 KB. 77 is one per layer, one for the finished
+     part, and one for layer 0: Klipper sets `current_layer` to 0 when `SET_PRINT_STATS_INFO
+     TOTAL_LAYER` arrives (`print_stats.py`), which is the first line of the start G-code, so the
+     first frame is the bed before it has heated.
+   - Its "fixed once started" range was 14.5 to 54.2 C, taken from the layer 2 frame, and the bed
+     then read hotter than that for the rest of the print and drew in the end colour: a case for
+     the comparison in step 4.
+   - A print cancelled right at the start: two frames, layer 0 and the end, and a range of 18.3 to
+     22.3 C, because with no frame at layer 2 or later the range fell back to the first frame, the
+     cold bed, and the second frame drew almost entirely in the end colour. Fixed the same day,
+     before release: with no frame at layer 2 or later the range is the whole print's, with a test
+     that a layer 0 frame at 30 C and a last one at 150 C both fall inside it. Layer 0 stays: it
+     shows the bed heating up, and no longer sets the range. Confirmed on the Pi 4 the same day by
+     moving that print's clip aside and restarting the plugin, which made it again from the kept
+     temperatures: 18.3 to 43.3 C, the cold bed and the hot nozzle both readable.
+   - Cost during the print, `~/measure.sh` with the tile closed: 4.5% of one core, against 4.1% idle
+     in the validation, so the polling and the frame copies are within the noise. 35.3% with the tile
+     open, as before.
+2. **The Timelapse page in Fluidd and Mainsail.** Upload through Moonraker into the `timelapse`
+   root when there is one, named after the firmware's clip for the print (waited for up to ten
+   minutes) or `<G-code name>_<start UTC>_thermal`; retention removes only the copies it uploaded.
+   `moonraker-timelapse` documented as optional on mainline.
+3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
+   `DeviceController` that wins over the stored one without changing it; at 145 C in high
+   sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
+4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
+   and a default chosen.
 
 ## 8. Alternatives considered and rejected
 
@@ -2337,7 +2615,15 @@ What is left, in the order it is worth doing:
 - **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
   only the channel changed.
 - **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
-  layer count, kept as temperatures and encoded on the printer after the print. After Phase 8.
+  layer count, kept as temperatures and encoded on the printer after the print, depending on no
+  other plugin, and shown in the Timelapse page of Fluidd and Mainsail where Moonraker has a
+  `timelapse` root. Planned on 2026-09-29 in five steps; step 1 built as 0.28.0 the same day, to be
+  tried on the Pi 4. Every open question
+  answered or decided the same day: about a
+  minute of processor for a 1,000 layer clip, 10 prints kept under a free space floor, a clip
+  even from a cancelled or interrupted print, and a one way gain switch. Still to measure:
+  which colour range looks best on real clips. A gain switch is followed by the camera's shutter
+  3.7 s later, measured twice, so the plugin waits 5 s after one.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted
@@ -2795,13 +3081,38 @@ signed 0.27.1 keeps that record, and a fresh install from the store should clear
 What it taught: **after publishing, restart the app before believing what its plugin page says.**
 A page that reads as broken may only be stale.
 
+**F-77. The Bespok3d app's Doc tab cannot show a published plugin's images, and nothing in this
+repository can make it.** 0.27.2 added four images to `doc/README.md`, referred to as
+`images/hero.jpg` and so on. GitHub shows them; the app's Doc tab, on 2026-09-29, showed the new
+README's text with a broken image and its alt text in place of each.
+
+The package was not the cause: the `.b3` carries all four under `doc/images/`. Read in
+Bespok3d-desktop's source, three things together rule out every fix on this side:
+
+- The Doc tab fetches the README text from the release's `doc_url`, but resolves an image path only
+  through `DOC_ASSETS` (`src/renderer/src/data/catalog/shape.ts`), a table built when the app is
+  built, from the doc media of the plugins in the app's sibling `plugins/` tree. That is why
+  `camera-hw-accel`'s `images/usb_cam.png` shows and ours does not. It never opens the `.b3`.
+- The renderer's Content Security Policy (`src/renderer/index.html`) is `img-src 'self' data:`, so
+  an absolute link, to `raw.githubusercontent.com` or to a release asset, is blocked as well.
+- The Markdown renderer runs react-markdown's `defaultUrlTransform`, which removes `data:` links,
+  so an image embedded in the README is dropped too. GitHub would not show one either.
+
+The release carries only the README, the CHANGELOG, the `.b3`, `index.json` and its signature, so
+`images/hero.jpg` beside the README asset answers 404 in any case. The README keeps its relative
+paths, which are right for GitHub and for any future fix that reads them from the package. The
+report went to unlucio on 2026-09-29 (10.6).
+
+What it taught: **a published plugin's Doc tab shows text only, for now.** Check it again after each
+app release that mentions documentation.
+
 ## 10. Reports owed elsewhere
 
-Five defects found while building this plugin, none of which belongs to this repository. 10.1 went
+Six defects found while building this plugin, none of which belongs to this repository. 10.1 went
 as a comment on an issue that already exists, and 10.3 goes as a private message. 10.2 was retested
 on 2026-09-18 and is not reproducible, so it is closed rather than sent, and kept here with the
 retest that closed it. 10.4 and 10.5 went to Snapmaker on 2026-09-28, after the plugin had been a
-suspect in each.
+suspect in each. 10.6 went to unlucio on 2026-09-29.
 
 They are written up here because the finding is the expensive part and it is the part that
 evaporates: each one cost hours to diagnose, the workaround is already in this codebase, and the
@@ -3066,3 +3377,18 @@ data as an appendix, with the search patterns that find each finding in the log 
 
 **Why it is recorded here:** the slicer's disconnect arrived in the same minute as F-74's freeze and
 looked like one event with it. It is not the plugin, and it is not the network.
+
+### 10.6 Sent: the Bespok3d app's Doc tab shows no images for a published plugin
+
+**Where it went:** unlucio, by direct message, on 2026-09-29.
+
+**What it says:** the Doc tab resolves image paths only through `DOC_ASSETS`, which holds the doc
+media of the plugins built into the app, so a plugin published from its own repository shows its
+README's images as broken, though the `.b3` carries them under `doc/images/`. Absolute links are
+blocked by `img-src 'self' data:`, and `data:` images are removed by `defaultUrlTransform`, so the
+plugin has no way round it. It asked for either the Doc tab to read `doc/` images from the package,
+or the release workflow to upload `doc/images/*` with the policy allowing `/releases/download/`.
+The finding is F-77.
+
+**Until it is fixed:** nothing. The README keeps its relative paths, and the Doc tab shows alt text
+where the images go.

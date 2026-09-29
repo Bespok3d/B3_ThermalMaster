@@ -543,21 +543,33 @@ def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
     special case, and each of them says what has happened rather than showing a broken image.
     """
 
+    return placeholder_picture(STREAM_OFF_TITLE, STREAM_OFF_HINT, size)
+
+
+# Kept per title and size, because a timelapse draws the same one for every layer the camera missed.
+@functools.lru_cache(maxsize=8)
+def placeholder_picture(title: str, hint: str, size: tuple[int, int]) -> Image.Image:
+    """Two centred lines of text on the plugin's dark background: what happened, and what to do.
+
+    Shared by the "Stream off" picture and the timelapse's frames for a layer the camera missed, so
+    that a clip says what happened to its missing layers in the same voice the tile does.
+    """
+
     picture = Image.new("RGB", size, (16, 18, 22))
     style = overlay_style(size, colorbar=False)
     title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
     draw = ImageDraw.Draw(picture)
-    title_width = label_width(STREAM_OFF_TITLE, title_height)
+    title_width = label_width(title, title_height)
     draw.text(
         ((size[0] - title_width) / 2, size[1] / 2 - title_height),
-        STREAM_OFF_TITLE,
+        title,
         font=overlay_font(title_height),
         fill=OVERLAY_TEXT_RGB,
     )
-    hint_width = label_width(STREAM_OFF_HINT, style.pixel_height)
+    hint_width = label_width(hint, style.pixel_height)
     draw.text(
         ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height / 2),
-        STREAM_OFF_HINT,
+        hint,
         font=overlay_font(style.pixel_height),
         fill=(154, 160, 170),
     )

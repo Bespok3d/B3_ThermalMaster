@@ -67,6 +67,11 @@ Changes take effect immediately and are remembered across restarts.
 | Camera | Gain | `gain` | `high` for -20 to 150 C, `low` for 0 to 550 C |
 | Camera | Stop the camera, Start | `streaming` | `true`, `false` |
 | Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
+| Timelapse | Record one frame per layer | `timelapse` | `true`, `false`; off until you switch it on |
+| Timelapse | Keep | `timelapse_keep` | 1 to 100 prints, 10 by default |
+| Timelapse | Colours | `timelapse_range_mode` | `from-start`, `whole-print`, `fixed`, `as-displayed` |
+| Timelapse | From, To | `timelapse_range_low_celsius`, `timelapse_range_high_celsius` | degrees Celsius, used by `fixed` |
+| Timelapse | Moonraker key | `moonraker_api_key` | a key, or `""` to forget it; never sent back, `moonraker_api_key_set` says whether one is saved |
 
 The same settings are at `/thermal/settings`. A `GET` answers with all of them as JSON, along with a
 sentence on what the camera is doing and what the plugin is costing the printer. A `POST` with a
@@ -209,6 +214,62 @@ The P1 is the camera this has been developed and run against, on a printer, ever
 The P3 is implemented from the same driver and its own model configuration, and has never been run
 on a printer: the resolution, the model detection and the gain modes are all in place and none of
 them have met the hardware. If you have a P3, it should work, and a report either way is welcome.
+
+## Timelapse
+
+Switch it on in the Timelapse panel of the settings page, and every print gets a thermal clip: one
+frame each time the layer changes, one more for the finished part, made into a clip once the print
+has ended. The clips are listed at the bottom of the settings page, newest first, to play, download
+or delete.
+
+**The slicer has to tell Klipper the layer number.** Most do not by default. In OrcaSlicer or
+PrusaSlicer, add this as the first line of the printer's machine start G-code:
+
+```
+SET_PRINT_STATS_INFO TOTAL_LAYER=[total_layer_count]
+```
+
+and this to its layer change G-code:
+
+```
+SET_PRINT_STATS_INFO CURRENT_LAYER={layer_num + 1}
+```
+
+Without them the print is recorded with no frames, and the Timelapse panel says the slicer is not
+sending layer numbers.
+
+**Colours** are chosen once for the whole clip, because the plugin keeps the temperatures of every
+layer rather than pictures of them. "Fixed once the print has started" takes its range from the
+first frame with a layer on the bed, so what the bed and nozzle do before then does not wash the
+part out; a print that stopped before its second layer uses the whole print's range instead. "The whole print" runs from the coldest to the hottest thing in any frame. "Hold these
+temperatures" uses the two numbers in the panel, and "the same as the live picture" follows the
+Range panel above it. Everything else in the picture follows the live picture: the palette, the
+rotation, the readout and any spots.
+
+**If the nozzle is in view,** set the gain to wide range under Camera. High sensitivity reads
+nothing above 150 C, so a nozzle shows as 150 C, and the panel says so while the timelapse is on.
+
+**What is kept.** The number of prints you choose, 10 by default; older ones are deleted whole.
+The temperatures are kept only for the two newest prints, and if the printer's disk falls below
+200 MB free, the oldest temperatures go first, then the oldest clips, and no new frame is kept
+until there is room again. The plugin only ever deletes its own files, which live in
+`/userdata/bespok3d/var/thermal-master-timelapse/`, one folder per print.
+
+**Nothing gathered is thrown away.** A cancelled print gets its clip, and so does one that was cut
+short by a reboot or a power cut: the clip is made from what was recorded the next time the plugin
+starts. A layer passed with the camera unplugged gets a "Camera disconnected" frame, and one passed
+with the camera switched off a "Camera off" frame, so the clip keeps its length and shows where the
+camera was lost. Switching the timelapse off during a print keeps what was taken so far.
+
+**If Moonraker asks for a login,** for instance with Bespok3d's Moonraker Login plugin, the panel
+says so and the timelapse cannot follow the print. Paste Moonraker's API key into the Moonraker key
+box. It is kept on the printer and is never shown again, not on the page and not at
+`/thermal/settings`.
+
+**What it costs.** Nothing between layers: the camera is read anyway, and a layer change costs a
+copy of one frame. The clip is made after the print, at the lowest priority, and takes about a
+minute of the processor for a 1,000 layer print. The list is also at `/thermal/timelapses` as JSON,
+and each clip at `/thermal/timelapse.mp4?id=` with the id from that list.
 
 ## Notes
 

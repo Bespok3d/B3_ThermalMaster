@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO, cast
 from urllib.parse import parse_qs, urlparse
 
 from .camera import (
@@ -26,21 +28,28 @@ from .camera import (
 from .cost import ProcessCost, describe_cost
 from .page import describe_device, render_control_page
 from .palettes import build_palettes
+from .recording import Recording, find_recording
 from .settings import (
     camera_settings_from_form,
     camera_settings_from_json,
     locked_range,
     settings_from_form,
     settings_from_json,
+    timelapse_settings_from_form,
+    timelapse_settings_from_json,
 )
 from .temperature import DEFAULT_UNITS, encode_thermal_frame
 from .viewer import render_viewer_page
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from .camera import CameraSettings, DeviceController
     from .pipeline import RenderSettings
     from .settings import SettingsStore
     from .temperature import FrameStats, ThermalFrame
+    from .timelapse import FrameTap, TimelapseSettings
+    from .timelapse_service import TimelapseService
 
 
 DEFAULT_BIND = "127.0.0.1"
@@ -76,11 +85,50 @@ ROUTES = {
     "/health": "serve_health",
     "/frame.bin": "serve_thermal_frame",
     "/view": "serve_viewer_page",
+    "/timelapses": "serve_timelapses",
+    "/timelapse.mp4": "serve_timelapse_clip",
+    "/timelapse.jpg": "serve_timelapse_thumbnail",
     "/": "serve_control_page",
 }
 
 
-POST_ROUTES = {"/settings": "apply_settings"}
+POST_ROUTES = {"/settings": "apply_settings", "/timelapses": "change_timelapses"}
+
+
+TIMELAPSES_REDIRECT = "./#timelapses"
+
+
+# What is said when the service was started without a folder to keep timelapses in, which is how
+# it runs anywhere but under Bespok3d unless it is told otherwise.
+TIMELAPSE_UNAVAILABLE = (
+    "Timelapse is not available: the service was started without --timelapse-dir."
+)
+
+
+# A clip is sent in pieces this size, so a long one never sits whole in memory.
+FILE_CHUNK_BYTES = 64 * 1024
+
+
+# The one form of Range a browser's video player sends: a start, and optionally an end.
+BYTE_RANGE_PATTERN = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def requested_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """The first and last byte a Range header asks for, or None to send the whole file.
+
+    A browser seeking in a video asks for the part it needs, and a server that ignores the header
+    leaves it unable to seek at all. Only a single range is served; anything else gets the whole
+    file, which is what a server without range support would have sent anyway.
+    """
+
+    match = BYTE_RANGE_PATTERN.match(header or "")
+    if match is None or size == 0:
+        return None
+    first, last = match.groups()
+    if not first:
+        return (max(size - int(last), 0), size - 1) if last else None
+    start, end = int(first), min(int(last), size - 1) if last else size - 1
+    return (start, end) if start <= end else None
 
 
 # How long the plugin keeps rendering after the last request for a picture. A dashboard tile holds
@@ -110,7 +158,8 @@ class LatestFrame:
     this object and nothing else.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, tap: FrameTap | None = None) -> None:
+        self._tap = tap
         self._jpeg: bytes | None = None
         self._stats: FrameStats | None = None
         self._thermal: ThermalFrame | None = None
@@ -147,6 +196,12 @@ class LatestFrame:
 
         with self._updated:
             self._seen_count += 1
+
+    def offer_raw(self, counts: np.ndarray, gain: str | None) -> None:
+        """Every frame the camera sends, for the timelapse to take one of when a layer changes."""
+
+        if self._tap is not None:
+            self._tap.offer(counts, gain)
 
     def note_interest(self) -> None:
         """Somebody asked for a picture or for what it measured."""
@@ -261,6 +316,10 @@ def resolve_route(request_path: str) -> str | None:
 class ThermalServer(ThreadingHTTPServer):
     daemon_threads = True
 
+    # Set after construction when the service keeps timelapses, which it does only when it was
+    # given a folder to keep them in.
+    timelapses: TimelapseService | None = None
+
     def __init__(
         self,
         address: tuple[str, int],
@@ -290,6 +349,7 @@ class RequestedChanges:
     palette_name: str | None
     settings: RenderSettings
     camera: CameraSettings
+    timelapse: TimelapseSettings
     shutter: bool
     lock_range: bool
 
@@ -443,7 +503,91 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         payload["pending"] = bool(
             status is not None and status.get("shutter", {}).get("state") == SHUTTER_PENDING
         )
+        payload["timelapse_status"] = self.timelapse_status()
         return payload
+
+    def timelapse_status(self) -> str:
+        timelapses = self.thermal_server.timelapses
+        return timelapses.status_line() if timelapses is not None else TIMELAPSE_UNAVAILABLE
+
+    def timelapse_listing(self) -> dict:
+        timelapses = self.thermal_server.timelapses
+        return {
+            "status": self.timelapse_status(),
+            "timelapses": timelapses.summaries() if timelapses is not None else [],
+        }
+
+    def serve_timelapses(self) -> None:
+        """Every print's timelapse, newest first, and a sentence on what the timelapse is doing."""
+
+        self.send_json(self.timelapse_listing())
+
+    def requested_recording(self) -> Recording | None:
+        timelapses = self.thermal_server.timelapses
+        wanted = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+        return find_recording(timelapses.root, wanted) if timelapses is not None else None
+
+    def serve_timelapse_clip(self) -> None:
+        """A print's clip, which a browser can seek in, or download with `&download=1`."""
+
+        recording = self.requested_recording()
+        if recording is None or not recording.has_clip:
+            self.send_error(404, "no such clip")
+            return
+        download = "download" in parse_qs(urlparse(self.path).query)
+        self.send_file(recording.clip_path, "video/mp4", recording.clip_name if download else None)
+
+    def serve_timelapse_thumbnail(self) -> None:
+        recording = self.requested_recording()
+        if recording is None or not recording.thumbnail_path.is_file():
+            self.send_error(404, "no such thumbnail")
+            return
+        self.send_file(recording.thumbnail_path, "image/jpeg", None)
+
+    def send_file(self, path: Path, content_type: str, download_name: str | None) -> None:
+        size = path.stat().st_size
+        span = requested_range(self.headers.get("Range"), size)
+        start, end = span or (0, size - 1)
+        self.send_response(206 if span else 200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(end - start + 1))
+        self.send_header("Accept-Ranges", "bytes")
+        if span:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        if download_name:
+            self.send_header("Content-Disposition", f'attachment; filename="{download_name}"')
+        self.end_headers()
+        with path.open("rb") as source:
+            source.seek(start)
+            self.copy_bytes(source, end - start + 1)
+
+    def copy_bytes(self, source: BinaryIO, remaining: int) -> None:
+        while remaining > 0:
+            chunk = source.read(min(FILE_CHUNK_BYTES, remaining))
+            if not chunk:
+                return
+            self.wfile.write(chunk)
+            remaining -= len(chunk)
+
+    def change_timelapses(self) -> None:
+        """Delete a print's timelapse, from the settings page's button or from a JSON body."""
+
+        timelapses = self.thermal_server.timelapses
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8", "replace")
+        if "application/json" in self.headers.get("Content-Type", ""):
+            wanted = str(json.loads(body or "{}").get("delete") or "")
+        else:
+            wanted = parse_qs(body).get("delete", [""])[0]
+        if timelapses is not None and wanted:
+            timelapses.delete(wanted)
+        if "application/json" in self.headers.get("Accept", ""):
+            self.send_json(self.timelapse_listing())
+            return
+        self.send_response(303)
+        self.send_header("Location", TIMELAPSES_REDIRECT)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def serve_settings(self) -> None:
         if self.settings_store is None:
@@ -464,6 +608,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8", "replace")
         _, _, current = settings_store.snapshot()
         _, camera = settings_store.camera_snapshot()
+        timelapse = settings_store.timelapse_snapshot()
         if "application/json" in self.headers.get("Content-Type", ""):
             payload = json.loads(body or "{}")
             palette_name, settings = settings_from_json(payload, self.palettes, current)
@@ -472,6 +617,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
                 palette_name,
                 settings,
                 camera_settings_from_json(payload, camera),
+                timelapse_settings_from_json(payload, timelapse),
                 asked == SHUTTER_ACTION,
                 asked == LOCK_RANGE_ACTION,
             )
@@ -482,6 +628,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             palette_name,
             settings,
             camera_settings_from_form(form, camera),
+            timelapse_settings_from_form(form, timelapse),
             SHUTTER_ACTION in commands,
             LOCK_RANGE_ACTION in commands,
         )
@@ -504,6 +651,8 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         self.settings_store.update(asked.palette_name or current_palette, settings)
         if asked.camera != current_camera:
             self.settings_store.update_camera(asked.camera)
+        if asked.timelapse != self.settings_store.timelapse_snapshot():
+            self.settings_store.update_timelapse(asked.timelapse)
         # A button, not a setting: the capture thread picks this up between two frames.
         if self.device is not None and asked.shutter:
             self.device.request_shutter()
@@ -538,6 +687,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
                 sorted(self.palettes),
                 status,
                 describe_cost(self.cost.reading()),
+                self.timelapse_listing(),
             )
         )
 

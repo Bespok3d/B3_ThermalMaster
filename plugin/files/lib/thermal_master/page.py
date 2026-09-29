@@ -12,8 +12,12 @@ it never sees, so an absolute path is a guess about the mount point, and it has 
 
 from __future__ import annotations
 
+import html
+import time
+
 from .camera import (
     GAIN_DESCRIPTIONS,
+    GAIN_HIGH,
     SHUTTER_DONE,
     SHUTTER_FAILED,
     SHUTTER_IDLE,
@@ -24,7 +28,9 @@ from .camera import (
 )
 from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
+from .recording import BYTES_PER_MEGABYTE
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
+from .timelapse import MAX_TIMELAPSE_KEEP, MIN_TIMELAPSE_KEEP, VALID_TIMELAPSE_RANGES
 
 # What the two filters are called on the page. The names are about what a person sees rather than
 # about the algorithm: nobody choosing how their camera looks wants to be asked about bilinear
@@ -40,6 +46,32 @@ RANGE_MODE_DESCRIPTIONS = {
     "auto": "Follow the scene",
     "fixed": "Hold these temperatures",
 }
+
+
+# How the timelapse's colour range is offered, in the order it is offered.
+TIMELAPSE_RANGE_DESCRIPTIONS = {
+    "from-start": "Fixed once the print has started",
+    "whole-print": "The whole print, coldest to hottest",
+    "fixed": "Hold these temperatures",
+    "as-displayed": "The same as the live picture",
+}
+
+
+# What a finished recording's state is called in the list of timelapses.
+RECORDING_STATE_DESCRIPTIONS = {
+    "printing": "Recording now",
+    "complete": "Finished",
+    "cancelled": "Cancelled",
+    "error": "Stopped by an error",
+    "interrupted": "Interrupted, by a restart or a power cut",
+    "stopped": "Recording switched off during the print",
+}
+
+
+HIGH_SENSITIVITY_WARNING = (
+    '<p class="status">The camera is in high sensitivity, which reads nothing above 150 C, so a '
+    "nozzle in view shows as 150 C. Wide range is under Camera.</p>"
+)
 
 
 # What the switch says, and what pressing it asks for. Labelled by what it will do rather than by
@@ -91,6 +123,14 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      only way back to the camera was to reload the dashboard. */
   .back {{ display: inline-block; margin-bottom: 0.6rem; color: #9aa0aa; font-size: 0.85rem; }}
   p {{ color: #9aa0aa; font-size: 0.85rem; }}
+  input[type="password"] {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
+                            border: 1px solid #33373f; border-radius: 4px; }}
+  h2 {{ margin: 1.4rem 0 0.4rem; font-size: 1rem; font-weight: 600; }}
+  .clip {{ border: 1px solid #33373f; border-radius: 6px; margin: 0.6rem 0; padding: 0.6rem; }}
+  .clip video {{ width: 100%; border-radius: 4px; background: #000; display: block; }}
+  .clip p {{ margin: 0.4rem 0; }}
+  .clip form {{ display: inline; }}
+  .clip a {{ color: #d8752a; margin-right: 0.8rem; }}
 </style>
 </head>
 <body>
@@ -147,7 +187,34 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <p class="status" id="device-status">{device_status}</p>
       <p class="status" id="plugin-cost">{plugin_cost}</p>
     </fieldset>
+    <fieldset id="timelapse">
+      <legend>Timelapse</legend>
+      <label><input type="checkbox" name="timelapse"{timelapse}>
+             Record one frame per layer of every print</label>
+      <label><span>Keep</span>
+             <input type="number" name="timelapse_keep" min="{keep_minimum}" max="{keep_maximum}"
+                    step="1" value="{timelapse_keep}"> prints</label>
+      <label><span>Colours</span>
+             <select name="timelapse_range_mode">{timelapse_range_options}</select></label>
+      <label><span>From</span>
+             <input type="number" name="timelapse_range_low_celsius" step="0.1"
+                    value="{timelapse_low}"> C</label>
+      <label><span>To</span>
+             <input type="number" name="timelapse_range_high_celsius" step="0.1"
+                    value="{timelapse_high}"> C</label>
+      <label><span>Moonraker key</span>
+             <input type="password" name="moonraker_api_key" autocomplete="off"
+                    placeholder="{key_placeholder}"></label>
+      <label><input type="checkbox" name="forget_moonraker_api_key"> Forget the saved key</label>
+      <button type="submit">Apply</button>
+      <p class="status" id="timelapse-status">{timelapse_status}</p>
+      {gain_warning}
+    </fieldset>
   </form>
+  <section id="timelapses">
+    <h2>Timelapses</h2>
+    {timelapse_list}
+  </section>
   <p>Following the scene maps the coldest and hottest thing in view to the ends of the palette, so
      contrast is always as good as it can be and a colour means nothing in particular: it changes
      whenever the scene does, which is what makes the picture breathe when a toolhead crosses it.
@@ -183,6 +250,15 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      offered, because there are none behind a picture of words. It survives a restart, so a printer
      that reboots overnight comes back the way you left it. The same switch is in the camera
      view's toolbar.</p>
+  <p>The timelapse takes one frame each time the layer number changes, and one more when the
+     print ends, and makes them into a clip once it has. It needs the slicer to tell Klipper the
+     layer number with <code>SET_PRINT_STATS_INFO</code>; the plugin's README says what to add. It
+     keeps the temperatures rather than pictures, so the colours are chosen once for the whole
+     clip: fixed once the print has started, which keeps what the bed and nozzle did before the
+     first layer out of it, the whole print's coldest to hottest, temperatures of your own, or the
+     live picture's. The oldest prints go once there are more than the number to keep, and sooner
+     if the printer's disk runs short of space. The Moonraker key is only needed when Moonraker
+     asks for a login; it is kept on the printer and never shown again.</p>
   <p>Calibration closes the camera's internal shutter for a moment and re-levels the sensor against
      it. The camera does this by itself about every ninety seconds; the button is for when the
      picture has drifted and you would rather not wait. It costs one frame.</p>
@@ -204,6 +280,7 @@ CONTROL_SCRIPT = """<script>
   var line = document.getElementById("device-status");
   var streamSwitch = document.getElementById("stream-switch");
   var costLine = document.getElementById("plugin-cost");
+  var timelapseLine = document.getElementById("timelapse-status");
   if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
   // getAttribute, not form.action. A named control shadows a form property of the same name, so
   // form.action is only the URL as long as nothing in the form is called "action". The attribute
@@ -253,6 +330,7 @@ CONTROL_SCRIPT = """<script>
     reflect(state);
     showStream(state);
     showCost(state);
+    forgetSecrets(state);
     // A calibration is applied by the capture thread between two frames, so the answer to the post
     // itself is always "requested". Ask again a few times, briefly, for what actually happened.
     if (state.pending && polls < 8) {
@@ -282,6 +360,21 @@ CONTROL_SCRIPT = """<script>
 
   function showCost(state) {
     if (costLine && typeof state.cost === "string") { costLine.textContent = state.cost; }
+    if (timelapseLine && typeof state.timelapse_status === "string") {
+      timelapseLine.textContent = state.timelapse_status;
+    }
+  }
+
+  // The key is never sent back, so the box it was typed into is emptied once it has gone up, and
+  // the box that forgets it is unticked, rather than left to forget it again on the next Apply.
+  function forgetSecrets(state) {
+    var key = form.elements.namedItem("moonraker_api_key");
+    var forget = form.elements.namedItem("forget_moonraker_api_key");
+    if (key) {
+      key.value = "";
+      key.placeholder = state.moonraker_api_key_set ? "Saved" : "Not set";
+    }
+    if (forget) { forget.checked = false; }
   }
 
   // Asked for on its own timer, and only this line is touched with the answer. Running the whole
@@ -348,19 +441,86 @@ def describe_device(status: dict | None) -> str:
     return said.get(shutter.get("state"), "Camera state is not available.")
 
 
+def option(value: str, label: str, selected: bool) -> str:
+    return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
+
+
+def timelapse_fields(settings: dict) -> dict:
+    """The Timelapse section's placeholders, from the settings a page may be shown."""
+
+    warned = settings["timelapse"] and settings["gain"] == GAIN_HIGH
+    return {
+        "timelapse": " checked" if settings["timelapse"] else "",
+        "keep_minimum": MIN_TIMELAPSE_KEEP,
+        "keep_maximum": MAX_TIMELAPSE_KEEP,
+        "timelapse_keep": settings["timelapse_keep"],
+        "timelapse_range_options": "".join(
+            option(
+                name, TIMELAPSE_RANGE_DESCRIPTIONS[name], name == settings["timelapse_range_mode"]
+            )
+            for name in VALID_TIMELAPSE_RANGES
+        ),
+        "timelapse_low": f"{settings['timelapse_range_low_celsius']:.1f}",
+        "timelapse_high": f"{settings['timelapse_range_high_celsius']:.1f}",
+        "key_placeholder": "Saved" if settings["moonraker_api_key_set"] else "Not set",
+        "gain_warning": HIGH_SENSITIVITY_WARNING if warned else "",
+    }
+
+
+def described_size(size: int) -> str:
+    return f"{size / BYTES_PER_MEGABYTE:.1f} MB"
+
+
+def clip_entry(summary: dict) -> str:
+    """One print in the list: its clip if there is one, what it was, and what can be done to it."""
+
+    quoted = html.escape(str(summary["id"]), quote=True)
+    started = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(summary["started_at"]))
+    state = RECORDING_STATE_DESCRIPTIONS.get(summary["state"], summary["state"])
+    video = (
+        f'<video controls preload="none" poster="timelapse.jpg?id={quoted}" '
+        f'src="timelapse.mp4?id={quoted}"></video>'
+        if summary["has_clip"]
+        else ""
+    )
+    download = (
+        f'<a href="timelapse.mp4?id={quoted}&amp;download=1">Download, '
+        f"{described_size(summary['clip_bytes'])}</a>"
+        if summary["has_clip"]
+        else ""
+    )
+    error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
+    return (
+        f'<article class="clip">{video}'
+        f"<p><strong>{html.escape(str(summary['filename'] or 'A print'))}</strong>, {started}. "
+        f"{state}, {summary['frames']} frames.{error}</p>"
+        f'<div>{download}<form method="post" action="timelapses">'
+        f'<input type="hidden" name="delete" value="{quoted}">'
+        '<button type="submit">Delete</button></form></div></article>'
+    )
+
+
+def timelapse_list(timelapses: dict | None) -> str:
+    summaries = (timelapses or {}).get("timelapses") or []
+    if not summaries:
+        return "<p>No timelapses yet.</p>"
+    return "".join(clip_entry(summary) for summary in summaries)
+
+
 def render_control_page(
     settings: dict,
     palette_names: list,
     device_status: dict | None = None,
     cost: str | None = None,
+    timelapses: dict | None = None,
 ) -> str:
     """The page itself. Plain form, no JavaScript: it has to work in whatever opens it."""
 
-    def option(value: str, label: str, selected: bool) -> str:
-        return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
-
     stream_command, stream_label = STREAM_SWITCH[bool(settings["streaming"])]
     return CONTROL_PAGE_TEMPLATE.format(
+        **timelapse_fields(settings),
+        timelapse_status=html.escape((timelapses or {}).get("status") or ""),
+        timelapse_list=timelapse_list(timelapses),
         plugin_cost=cost if cost is not None else describe_cost(None),
         stream_command=stream_command,
         stream_label=stream_label,

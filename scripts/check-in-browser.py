@@ -23,6 +23,7 @@ that wrong produces a reading that is confidently, plausibly wrong.
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -136,8 +137,57 @@ def serve(streamer):
     server = streamer.ThermalServer(
         ("127.0.0.1", PORT), frames, store, streamer.build_palettes(), device
     )
+    server.timelapses = timelapse_service(streamer, store)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, store, device
+
+
+def timelapse_service(streamer, store):
+    """A timelapse with one finished print in it, and a Moonraker that is not there."""
+
+    root = Path(tempfile.mkdtemp(prefix="thermal-timelapse-"))
+    finished = streamer.Recording.create(root, 1_790_000_000.0, "0002F1", "<cube>.gcode")
+    finished.finish("complete")
+    finished.clip_path.write_bytes(b"not a real clip, only its bytes")
+    return streamer.TimelapseService(
+        streamer.TimelapseWiring(
+            root=root, client=streamer.MoonrakerClient("http://127.0.0.1:9"),
+            settings_store=store, tap=streamer.FrameTap(), streaming=lambda: True,
+            palettes=streamer.build_palettes(), ffmpeg=None,
+        )
+    )
+
+
+def run_timelapse_checks(page, store) -> list:
+    """The Timelapse section posts in the background like the rest, and never shows the key."""
+
+    navigated = {"yes": False}
+    page.on("framenavigated", lambda _frame: navigated.update(yes=True))
+    checks = []
+    page.check("input[name=timelapse]")
+    page.fill("input[name=moonraker_api_key]", "a-made-up-key")
+    page.click("fieldset#timelapse button[type=submit]")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    saved = store.timelapse_snapshot()
+    checks.append(("the switch reaches the plugin", saved.timelapse, True))
+    checks.append(("the key reaches the plugin", saved.moonraker_api_key, "a-made-up-key"))
+    checks.append(("without reloading the page", navigated["yes"], False))
+    emptied = page.input_value("input[name=moonraker_api_key]")
+    checks.append(("the key box is emptied", emptied, ""))
+    checks.append((
+        "and says a key is saved",
+        page.get_attribute("input[name=moonraker_api_key]", "placeholder"),
+        "Saved",
+    ))
+    checks.append(("the key is nowhere on the page", "a-made-up-key" in page.content(), False))
+    checks.append(("a print name is shown as text", page.locator(".clip strong").inner_text(),
+                   "<cube>.gcode"))
+    page.click(".clip button[type=submit]")
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("delete removes the print", page.locator(".clip").count(), 0))
+    checks.append(("and comes back to the list", page.url.endswith("#timelapses"), True))
+    return checks
 
 
 def run_checks(page, store, device) -> list:
@@ -830,6 +880,12 @@ def main() -> None:
         print("")
         print("control page")
         report(run_checks(page, store, device), problems)
+        timelapse_page = browser.new_page()
+        timelapse_page.on("pageerror", lambda error: problems.append(f"page error: {error}"))
+        timelapse_page.goto(f"http://127.0.0.1:{PORT}/", wait_until="domcontentloaded")
+        print("")
+        print("timelapse")
+        report(run_timelapse_checks(timelapse_page, store), problems)
 
         viewer = browser.new_page()
         viewer.on("pageerror", lambda error: problems.append(f"viewer page error: {error}"))

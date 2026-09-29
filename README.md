@@ -19,9 +19,11 @@ capture path is pure Python; there is no arm64 build toolchain.
 
 It also serves an interactive viewer at `/thermal/view`: point at the picture to read the
 temperature there, drag a box to measure a region, place spot markers, save a still or record a
-clip, and hold the display range so a colour means the same thing in every frame. The plugin's own
-documentation, [`plugin/doc/README.md`](plugin/doc/README.md), shows the six palettes and lists
-every setting, with the JSON endpoint that changes them.
+clip, and hold the display range so a colour means the same thing in every frame. And it can
+record a thermal timelapse of every print, one frame per layer, made into a clip on the printer
+once the print has ended (ROADMAP Phase 9). The plugin's own documentation,
+[`plugin/doc/README.md`](plugin/doc/README.md), shows the six palettes and lists every setting,
+with the JSON endpoint that changes them.
 
 **What it costs the printer**, measured on the hardware with
 `scripts/measure-cpu-on-printer.sh`, as a share of one of the U1's four Cortex-A53 cores:

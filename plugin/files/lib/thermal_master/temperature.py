@@ -95,6 +95,16 @@ def raw_for_celsius(celsius: float, emissivity: float = DEFAULT_EMISSIVITY) -> f
     return (low + high) / 2.0
 
 
+def celsius_for_raw(raw: float, emissivity: float = DEFAULT_EMISSIVITY) -> float:
+    """The temperature a raw count reads as, through the driver's own correction.
+
+    The direction the timelapse needs: it measures a range in counts, as the live picture does, and
+    has to hand the renderer degrees.
+    """
+
+    return float(raw_to_celsius_corrected(raw, EnvParams(emissivity=emissivity)))
+
+
 def to_display_temperature(celsius: float, units: str) -> float:
     """Celsius unless Fahrenheit was asked for. The sensor only ever speaks the one."""
 
