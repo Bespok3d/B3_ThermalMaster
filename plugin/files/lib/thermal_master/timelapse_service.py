@@ -174,6 +174,21 @@ class TimelapseService:
         self._remove(recording)
         return True
 
+    def remake(self, recording_id: str) -> bool:
+        """Make a finished print's clip again from its temperatures, with the settings of now.
+
+        For the test/color-bar branch, where one print is made into a clip with each scale in turn.
+        Queued rather than made here, since a clip is a minute of work and this is a request.
+        """
+
+        recording = find_recording(self.root, recording_id)
+        if recording is None or recording.printing or not recording.has_frames:
+            return False
+        if recording_id in self._busy():
+            return False
+        self._clips.put(recording_id)
+        return True
+
     def queue_unmade_clips(self) -> None:
         """Every finished recording that has temperatures, no clip, and no reason it cannot."""
 

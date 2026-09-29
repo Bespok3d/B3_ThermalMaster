@@ -19,6 +19,14 @@ import io
 import numpy as np
 from PIL import Image
 
+from .colour_scale import (
+    CURVE_SHAPES,
+    DEFAULT_COLOUR_SCALE,
+    MIN_SPAN_RAW_COUNTS,
+    SCALE_OPTION_A,
+    ColourMapping,
+    CurveShape,
+)
 from .geometry import orient
 from .overlay import Overlay, draw_overlay, encode_upscale, stream_off_picture
 from .palettes import PALETTE_STEPS
@@ -86,11 +94,6 @@ NORMALIZE_LOW_PERCENTILE = 2.0
 
 
 NORMALIZE_HIGH_PERCENTILE = 98.0
-
-
-# Raw sensor counts are sixty-fourths of a Kelvin, so this floor is half a degree. Without it, a
-# camera staring at a uniform surface divides by a span of zero.
-MIN_SPAN_RAW_COUNTS = 32.0
 
 
 # How fast the displayed range chases the scene, per frame. The bounds used to be recomputed from
@@ -264,6 +267,10 @@ class RenderSettings:
     # picture: a spot that existed only in one viewer would be missing from the tile, from a
     # recorded clip and from every other browser, which is most of the reasons to place one.
     spots: tuple[tuple[int, int], ...] = ()
+    # Which of the mappings in `colour_scale` the picture is drawn with. Only while the range
+    # follows the scene, or a clip has told the renderer the print's coldest and hottest: a range
+    # somebody held is the whole scale, and there is nothing for a curve to bend.
+    colour_scale: str = DEFAULT_COLOUR_SCALE
 
     @property
     def readout(self) -> bool:
@@ -291,21 +298,48 @@ class RenderSettings:
         return (self.flip_horizontal, self.flip_vertical)
 
 
+def curve_shape(
+    settings: RenderSettings, told_scene: tuple[float, float] | None
+) -> CurveShape | None:
+    """The curve the picture is drawn with, or None for the straight stretch."""
+
+    shape = CURVE_SHAPES.get(settings.colour_scale)
+    if shape is None or (settings.fixed_range and told_scene is None):
+        return None
+    return shape
+
+
+def frame_extremes(frame: np.ndarray) -> tuple[float, float]:
+    return (float(frame.min()), float(frame.max()))
+
+
 class ThermalRenderer:
     """Raw sensor frames in, colourmapped RGB out, carrying the state that spans frames.
 
     Two things have to persist between frames and so cannot live in a function: the smoothed
-    display bounds, and the previous frame the noise reduction averages against.
+    display bounds, and the previous frame the noise reduction averages against. A curve adds a
+    third, the smoothed coldest and hottest, eased like the bounds so that a nozzle crossing the
+    view does not re-map every colour in one frame.
+
+    A clip can tell it the coldest and hottest instead, `told_scene`, in raw counts, which is what
+    lets a curve run over a range that is held for the whole clip.
     """
 
     def __init__(
-        self, palette: np.ndarray, settings: RenderSettings = RenderSettings()
+        self,
+        palette: np.ndarray,
+        settings: RenderSettings = RenderSettings(),
+        told_scene: tuple[float, float] | None = None,
     ) -> None:
         self._palette = palette
         self._settings = settings
         self._bounds: tuple[float, float] | None = None
         self._previous_frame: np.ndarray | None = None
         self._told_bounds = told_bounds(settings)
+        self._told_scene = told_scene
+        self._shape = curve_shape(settings, told_scene)
+        self._scene: tuple[float, float] | None = None
+        self._mapping: ColourMapping | None = None
 
     @property
     def bounds(self) -> tuple[float, float] | None:
@@ -326,6 +360,7 @@ class ThermalRenderer:
 
         self._bounds = previous.bounds
         self._previous_frame = previous._previous_frame
+        self._scene = previous._scene
 
     def render(self, thermal_raw: np.ndarray) -> np.ndarray:
         return self.render_image(thermal_raw)[0]
@@ -366,7 +401,7 @@ class ThermalRenderer:
                     self._settings.emissivity,
                 ),
             )
-        normalized = normalize_to_bytes(denoised, *self._bounds)
+        normalized = self._palette_indices(denoised, self._bounds)
         # `take` rather than fancy indexing, for byte-identical output at a third of the cost:
         # 1.44 ms against 0.48 ms on the printer. Not on anybody's list of suspects, which is the
         # argument for timing every step rather than the ones that look expensive.
@@ -382,6 +417,18 @@ class ThermalRenderer:
             self._settings.flip_vertical,
         )
         return oriented, stats, denoised
+
+    def _palette_indices(self, frame: np.ndarray, bounds: tuple[float, float]) -> np.ndarray:
+        """The stretch, or the curve and the mapping it used, kept for the ruler."""
+
+        if self._shape is None:
+            self._mapping = None
+            return normalize_to_bytes(frame, *bounds)
+        self._scene = self._told_scene or smooth_bounds(
+            self._scene, frame_extremes(frame), self._settings.bounds_smoothing
+        )
+        self._mapping = ColourMapping(self._shape, bounds, self._scene, self._settings.emissivity)
+        return self._mapping.indices(frame)
 
     def overlay_for(self, stats: FrameStats) -> Overlay | None:
         """What to draw over a frame that measured this, or None with the whole readout off.
@@ -401,7 +448,10 @@ class ThermalRenderer:
             settings.reticle,
             settings.hotspot,
             settings.coldspot,
-            settings.fixed_range,
+            # Option A is the stretch with the ruler over the colours rather than the scene, which
+            # is what a held range already draws.
+            settings.fixed_range or settings.colour_scale == SCALE_OPTION_A,
+            self._mapping,
         )
 
     def render_frame(self, thermal_raw: np.ndarray) -> RenderedFrame:

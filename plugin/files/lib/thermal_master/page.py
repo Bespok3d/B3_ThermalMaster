@@ -26,6 +26,7 @@ from .camera import (
     STOP_STREAM_ACTION,
     VALID_GAINS,
 )
+from .colour_scale import VALID_COLOUR_SCALES
 from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
 from .recording import BYTES_PER_MEGABYTE
@@ -50,6 +51,18 @@ UPSCALE_FILTER_DESCRIPTIONS = {
 RANGE_MODE_DESCRIPTIONS = {
     "auto": "Follow the scene",
     "fixed": "Hold these temperatures",
+}
+
+
+# The mappings being compared on the test/color-bar branch, named as the study's panels are.
+COLOUR_SCALE_DESCRIPTIONS = {
+    "today": "1. Today",
+    "option-a": "2. Option A, ruler over the colours",
+    "linear": "3. Linear, whole scene",
+    "log-mild": "4. Log, mild",
+    "log-strong": "5. Log, strong",
+    "knee": "6. Knee at 85%",
+    "knee-soft": "7. Knee at 75%",
 }
 
 
@@ -159,6 +172,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     <fieldset>
       <legend>Range</legend>
       <label><span>Colours</span><select name="range_mode">{range_mode_options}</select></label>
+      <label><span>Scale (testing)</span>
+             <select name="colour_scale">{colour_scale_options}</select></label>
       <label><span>From</span>
              <input type="number" name="range_low_celsius" step="0.1"
                     value="{range_low}"> C</label>
@@ -231,6 +246,10 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      fills the two boxes from the picture in front of you, which is usually easier than guessing
      numbers. Holding also costs the printer slightly less work, since there is nothing to
      measure.</p>
+  <p>The scale is being tried out, and is not in any release. It chooses how temperatures are
+     spread over the palette while the colours follow the scene, and in timelapse clips made with
+     the print's own range. Holding temperatures ignores it. Every clip is marked with the scale it
+     was made with, and "Make the clip again" remakes one with whatever is chosen now.</p>
   <p>Enlarging is how the picture is made bigger before the readout is drawn on it, which only
      happens while some part of the readout is switched on. Smooth blends the sensor's pixels;
      sharp leaves them as squares and is about a sixth less work for the printer per frame. Which
@@ -525,14 +544,16 @@ def clip_entry(summary: dict) -> str:
     )
     # Not offered while the print is still being recorded: the service would refuse it, and a
     # button that does nothing is worse than none.
-    delete = (
-        ""
-        if summary["state"] == "printing"
-        else f'<form method="post" action="timelapses">'
-        f'<input type="hidden" name="delete" value="{quoted}">'
-        '<button type="submit">Delete</button></form>'
+    printing = summary["state"] == "printing"
+    delete = "" if printing else clip_button("delete", quoted, "Delete")
+    remake = (
+        clip_button("remake", quoted, "Make the clip again")
+        if summary["has_frames"] and not printing
+        else ""
     )
     error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
+    if summary.get("scale"):
+        error += f" Scale: {html.escape(str(summary['scale']))}."
     if summary.get("published_as"):
         error += " Also on the Timelapse page."
     elif summary.get("publish_error"):
@@ -541,7 +562,15 @@ def clip_entry(summary: dict) -> str:
         f'<article class="clip">{video}'
         f"<p><strong>{html.escape(str(summary['filename'] or 'A print'))}</strong>, {started}. "
         f"{state}, {summary['frames']} frames.{error}</p>"
-        f"<div>{download}{delete}</div></article>"
+        f"<div>{download}{remake}{delete}</div></article>"
+    )
+
+
+def clip_button(field: str, quoted: str, label: str) -> str:
+    return (
+        f'<form method="post" action="timelapses">'
+        f'<input type="hidden" name="{field}" value="{quoted}">'
+        f'<button type="submit">{label}</button></form>'
     )
 
 
@@ -590,6 +619,10 @@ def render_control_page(
         range_mode_options="".join(
             option(name, RANGE_MODE_DESCRIPTIONS[name], name == settings["range_mode"])
             for name in VALID_RANGE_MODES
+        ),
+        colour_scale_options="".join(
+            option(name, COLOUR_SCALE_DESCRIPTIONS[name], name == settings["colour_scale"])
+            for name in VALID_COLOUR_SCALES
         ),
         range_low=f"{settings['range_low_celsius']:.1f}",
         range_high=f"{settings['range_high_celsius']:.1f}",

@@ -18,6 +18,7 @@ import functools
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from .colour_scale import ColourMapping
 from .geometry import orient_point  # noqa: F401 - re-exported for the package facade
 from .palettes import PALETTE_STEPS
 from .temperature import FrameStats, format_temperature
@@ -112,6 +113,9 @@ class Overlay:
     # Whether the display range was told rather than measured. The bar is drawn differently for
     # the two: see `bar_axis` and the triangles in `draw_colorbar`.
     fixed_range: bool = False
+    # The curve the picture was drawn with, when it was not the straight stretch. The ruler then
+    # shows the whole palette evenly and says with ticks which temperatures its rows are.
+    mapping: ColourMapping | None = None
 
 
 @functools.lru_cache(maxsize=8)
@@ -350,20 +354,30 @@ def marks_bottom(overlay: Overlay, axis: tuple[float, float]) -> bool:
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
     """The ruler down the right edge, spanning the scene and labelled with its ends."""
 
-    width = image.size[0]
-    left, top, bar_width, bar_height = style.bar_box
-    stats = overlay.stats
-    axis = bar_axis(stats, overlay.fixed_range)
-    ramp = bar_gradient(overlay.palette, axis, stats, bar_height)
-    bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
-    image.paste(bar.resize((bar_width, bar_height), Image.Resampling.NEAREST), (left, top))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle(
-        (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
-    )
+    axis = bar_axis(overlay.stats, overlay.fixed_range)
+    paste_bar(image, bar_gradient(overlay.palette, axis, overlay.stats, style.bar_box[3]), style)
     # No tick where the auto-ranging stops: the gradient already draws that boundary, since above
     # it the bar is flat and below it the colour varies. A line on top of an edge that is already
     # visible is one moving thing too many, and it read as noise on hardware.
+    draw_bar_ends(image, overlay, style, axis)
+
+
+def paste_bar(image: Image.Image, ramp: np.ndarray, style: OverlayStyle) -> None:
+    left, top, bar_width, bar_height = style.bar_box
+    bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
+    image.paste(bar.resize((bar_width, bar_height), Image.Resampling.NEAREST), (left, top))
+    ImageDraw.Draw(image).rectangle(
+        (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
+    )
+
+
+def draw_bar_ends(
+    image: Image.Image, overlay: Overlay, style: OverlayStyle, axis: tuple[float, float]
+) -> None:
+    """The triangles and the two numbers, at the ends of whichever ruler was drawn."""
+
+    width = image.size[0]
+    top, bar_height = style.bar_box[1], style.bar_box[3]
     for at_top, shown, colour in (
         (True, marks_top(overlay, axis), HOTSPOT_RGB),
         (False, marks_bottom(overlay, axis), COLDSPOT_RGB),
@@ -379,6 +393,50 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
                hottest, style, HOTSPOT_RGB)
     draw_label(image, (right - label_width(coldest, style.pixel_height), top + bar_height + 1),
                coldest, style, COLDSPOT_RGB)
+
+
+def curved_gradient(palette: np.ndarray, height: int) -> np.ndarray:
+    """The whole palette, hottest at the top, one row per step of it rather than per degree."""
+
+    rows = np.linspace(PALETTE_STEPS - 1, 0, max(height, 1)).astype(np.uint8)
+    gradient: np.ndarray = palette[rows].reshape(-1, 1, 3)
+    return gradient
+
+
+def draw_curved_colorbar(
+    image: Image.Image, overlay: Overlay, style: OverlayStyle, mapping: ColourMapping
+) -> list[_Rectangle]:
+    """The ruler for a curve: evenly coloured, with a tick saying where the curve bends.
+
+    Rows here are steps of the palette, not degrees, so the middle of the bar is not the middle
+    temperature. The tick says what it is instead, as the labels of a log axis do. Its label's
+    rectangle is handed back, so the markers keep their numbers off it.
+    """
+
+    paste_bar(image, curved_gradient(overlay.palette, style.bar_box[3]), style)
+    draw_bar_ends(image, overlay, style, (mapping.celsius_at(0.0), mapping.celsius_at(1.0)))
+    return [
+        draw_tick(image, fraction, mapping.celsius_at(fraction), overlay.units, style)
+        for fraction in mapping.ticks
+    ]
+
+
+def draw_tick(
+    image: Image.Image, fraction: float, celsius: float, units: str, style: OverlayStyle
+) -> _Rectangle:
+    """A short line off the left of the bar at this share of the palette, and its temperature."""
+
+    left, top, _, bar_height = style.bar_box
+    row = top + int(round((1.0 - fraction) * (bar_height - 1)))
+    arm = max(style.margin, 3)
+    draw = ImageDraw.Draw(image)
+    draw.line((left - arm, row + 1, left - 1, row + 1), fill=OVERLAY_SHADOW_RGB)
+    draw.line((left - arm, row, left - 1, row), fill=OVERLAY_TEXT_RGB)
+    text = format_temperature(celsius, units)
+    width = label_width(text, style.pixel_height)
+    position = (left - arm - 2 - width, row - style.line_height / 2)
+    draw_label(image, position, text, style)
+    return (position[0], position[1], position[0] + width, position[1] + style.line_height)
 
 
 def overlapping(one: _Rectangle, other: _Rectangle) -> bool:
@@ -513,10 +571,13 @@ def markers_for(overlay: Overlay) -> list[Marker]:
 
 def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
     style = overlay_style(image.size, overlay.colorbar)
-    if overlay.colorbar:
-        draw_colorbar(image, overlay, style)
-    # Every marker in one pass, so each can see where the ones before it put their labels.
+    # Every marker in one pass, so each can see where the ones before it put their labels, and
+    # where a curved ruler put its ticks.
     placed: list[_Rectangle] = []
+    if overlay.colorbar and overlay.mapping is not None:
+        placed += draw_curved_colorbar(image, overlay, style, overlay.mapping)
+    elif overlay.colorbar:
+        draw_colorbar(image, overlay, style)
     for marker in markers_for(overlay):
         draw_marker(image, marker, overlay, style, placed)
 

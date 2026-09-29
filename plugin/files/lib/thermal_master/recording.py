@@ -312,6 +312,7 @@ class Recording:
             "error": clip.get("error"),
             "published_as": self.published[0] if self.published else None,
             "publish_error": (clip.get("published") or {}).get("error"),
+            "scale": clip.get("scale"),
         }
 
 

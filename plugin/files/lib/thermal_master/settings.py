@@ -23,6 +23,7 @@ from .camera import (
     VALID_GAINS,
     CameraSettings,
 )
+from .colour_scale import VALID_COLOUR_SCALES
 from .log import log_line
 from .pipeline import (
     FIXED_RANGE,
@@ -302,8 +303,11 @@ def settings_from_form(
     posted_units = form.get("units", [""])[0]
     posted_filter = form.get("upscale_filter", [""])[0]
     posted_mode = form.get("range_mode", [""])[0]
+    posted_scale = form.get("colour_scale", [""])[0]
     updated = dataclasses.replace(
         current,
+        colour_scale=posted_scale if posted_scale in VALID_COLOUR_SCALES
+        else current.colour_scale,
         rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
         range_mode=posted_mode if posted_mode in VALID_RANGE_MODES else current.range_mode,
         range_low_celsius=posted_temperature(
@@ -352,6 +356,7 @@ JSON_SETTINGS: dict[str, Callable[[Any, RenderSettings], Any]] = {
     "units": one_of(VALID_UNITS, "units"),
     "upscale_filter": one_of(VALID_UPSCALE_FILTERS, "upscale_filter"),
     "range_mode": one_of(VALID_RANGE_MODES, "range_mode"),
+    "colour_scale": one_of(VALID_COLOUR_SCALES, "colour_scale"),
     "range_low_celsius": a_temperature("range_low_celsius"),
     "range_high_celsius": a_temperature("range_high_celsius"),
     "emissivity": lambda value, current: clamped_emissivity(value, current.emissivity),

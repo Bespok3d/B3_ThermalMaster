@@ -579,14 +579,11 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         """Delete a print's timelapse, from the settings page's button or from a JSON body."""
 
         timelapses = self.thermal_server.timelapses
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length).decode("utf-8", "replace")
-        if "application/json" in self.headers.get("Content-Type", ""):
-            wanted = str(json.loads(body or "{}").get("delete") or "")
-        else:
-            wanted = parse_qs(body).get("delete", [""])[0]
-        if timelapses is not None and wanted:
-            timelapses.delete(wanted)
+        wanted = self.timelapse_request()
+        if timelapses is not None and wanted["delete"]:
+            timelapses.delete(wanted["delete"])
+        if timelapses is not None and wanted["remake"]:
+            timelapses.remake(wanted["remake"])
         if "application/json" in self.headers.get("Accept", ""):
             self.send_json(self.timelapse_listing())
             return
@@ -594,6 +591,17 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Location", TIMELAPSES_REDIRECT)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def timelapse_request(self) -> dict[str, str]:
+        """Which print to delete, and which to make a clip of again, from a form or JSON."""
+
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8", "replace")
+        if "application/json" in self.headers.get("Content-Type", ""):
+            asked = json.loads(body or "{}")
+            return {key: str(asked.get(key) or "") for key in ("delete", "remake")}
+        form = parse_qs(body)
+        return {key: form.get(key, [""])[0] for key in ("delete", "remake")}
 
     def serve_settings(self) -> None:
         if self.settings_store is None:

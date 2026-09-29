@@ -206,7 +206,7 @@ def run_timelapse_checks(page, store) -> list:
     checks.append(("still without reloading the page", navigated["yes"], False))
     checks.append(("a print name is shown as text", page.locator(".clip strong").inner_text(),
                    "<cube>.gcode"))
-    page.click(".clip button[type=submit]")
+    page.click(".clip form:has(input[name=delete]) button")
     page.wait_for_load_state("domcontentloaded")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("delete removes the print", page.locator(".clip").count(), 0))
@@ -241,6 +241,19 @@ def run_checks(page, store, device) -> list:
     page.click("form#controls fieldset:first-of-type button[type=submit]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("apply changes a setting", store.as_dict()["palette"], "sepia"))
+    checks.append((
+        "every colour scale is offered",
+        page.locator("select[name=colour_scale] option").count(),
+        7,
+    ))
+    page.select_option("select[name='colour_scale']", "knee")
+    page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("the colour scale reaches the plugin", store.as_dict()["colour_scale"], "knee"))
+    page.select_option("select[name='colour_scale']", "today")
+    page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("and back to today", store.as_dict()["colour_scale"], "today"))
 
     # Holding the range is the first button that changes something the form is showing, and the
     # page used to ignore the answer it got back: the plugin went to a fixed range, the page went

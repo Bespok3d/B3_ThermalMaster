@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image
 
 from .log import log_line
-from .overlay import PLACEHOLDER_RGB, draw_overlay, with_banner
+from .overlay import PLACEHOLDER_RGB, draw_label, draw_overlay, overlay_style, with_banner
 from .pipeline import FIXED_RANGE, RenderSettings, ThermalRenderer, frame_bounds, ordered_range
 from .recording import CAMERA_OFF_RECORD, LayerRecord, Recording
 from .temperature import celsius_for_raw, oriented_size
@@ -37,6 +37,7 @@ from .timelapse import (
     TIMELAPSE_RANGE_AS_DISPLAYED,
     TIMELAPSE_RANGE_FIXED,
     TIMELAPSE_RANGE_FROM_START,
+    TIMELAPSE_RANGE_WHOLE_PRINT,
     TimelapseSettings,
 )
 
@@ -83,6 +84,11 @@ CAMERA_MISSING_BANNER = "Camera disconnected, layer {layer}"
 
 
 CAMERA_OFF_BANNER = "Camera off, layer {layer}"
+
+
+# Written in the bottom left of every frame on the test/color-bar branch, so that seven downloaded
+# clips of one print cannot be told apart only by their file names.
+CLIP_SCALE_STAMP = "Scale: {scale}"
 
 
 NO_FRAMES_REASON = (
@@ -134,6 +140,36 @@ def from_start_bounds(recording: Recording) -> tuple[float, float] | None:
         (counts for layer, counts in measured_frames(recording) if layer >= FROM_START_LAYER), None
     )
     return frame_bounds(started) if started is not None else whole_print_bounds(recording)
+
+
+def print_scene(recording: Recording) -> tuple[float, float] | None:
+    """The coldest and hottest count of any frame of the print, for a curve to run over."""
+
+    extremes = [
+        (float(counts.min()), float(counts.max())) for _, counts in measured_frames(recording)
+    ]
+    if not extremes:
+        return None
+    return (min(low for low, _ in extremes), max(high for _, high in extremes))
+
+
+def clip_scene(recording: Recording, inputs: ClipInputs) -> tuple[float, float] | None:
+    """The scene a curve runs over in a clip whose range the print measured, held for the clip.
+
+    None for the other two: temperatures somebody chose are the whole scale, as they are live,
+    and a clip drawn as displayed eases its scene as the live picture does.
+    """
+
+    measured = (TIMELAPSE_RANGE_FROM_START, TIMELAPSE_RANGE_WHOLE_PRINT)
+    if inputs.timelapse.timelapse_range_mode not in measured:
+        return None
+    return print_scene(recording)
+
+
+def stamp_scale(picture: Image.Image, scale: str) -> None:
+    style = overlay_style(picture.size, colorbar=False)
+    position = (style.margin, picture.size[1] - style.line_height - style.margin)
+    draw_label(picture, position, CLIP_SCALE_STAMP.format(scale=scale), style)
 
 
 def fixed_at(live: RenderSettings, bounds: tuple[float, float]) -> RenderSettings:
@@ -225,7 +261,11 @@ class EncodedFrames:
 
 
 def feed_frames(
-    recording: Recording, renderer: ThermalRenderer, size: tuple[int, int], sink: BinaryIO
+    recording: Recording,
+    renderer: ThermalRenderer,
+    size: tuple[int, int],
+    sink: BinaryIO,
+    scale: str | None = None,
 ) -> EncodedFrames:
     """Every layer in order, a frame or the picture saying why there is none."""
 
@@ -235,7 +275,9 @@ def feed_frames(
             picture = missing_layer_picture(record, encoded.last_frame, size)
         else:
             picture = render_layer(renderer, record.counts, size)
-            encoded.last_frame = picture
+            encoded.last_frame = picture.copy()
+        if scale is not None:
+            stamp_scale(picture, scale)
         sink.write(picture.tobytes())
         encoded.count += 1
     return encoded
@@ -252,14 +294,14 @@ def encode(recording: Recording, settings: RenderSettings, inputs: ClipInputs) -
     if size is None:
         return {"error": NO_FRAMES_REASON}
     partial = recording.clip_path.with_name(recording.clip_path.name + ".partial")
-    renderer = ThermalRenderer(inputs.palette, settings)
+    renderer = ThermalRenderer(inputs.palette, settings, clip_scene(recording, inputs))
     with tempfile.TemporaryFile() as said:
         process = subprocess.Popen(
             ffmpeg_command(str(inputs.ffmpeg), size, partial), stdin=subprocess.PIPE, stderr=said
         )
         frames_in = cast("BinaryIO", process.stdin)
         try:
-            encoded = feed_frames(recording, renderer, size, frames_in)
+            encoded = feed_frames(recording, renderer, size, frames_in, settings.colour_scale)
             frames_in.close()
         except BrokenPipeError:
             encoded = EncodedFrames()
@@ -289,6 +331,8 @@ def make_clip(recording: Recording, inputs: ClipInputs) -> dict:
         return {"error": "ffmpeg is not installed on this printer, so no clip can be made."}
     started = time.monotonic()
     outcome = encode(recording, clip_render_settings(recording, inputs), inputs)
+    if not outcome.get("error"):
+        outcome["scale"] = inputs.live.colour_scale
     seconds = time.monotonic() - started
     said = outcome.get("error") or "clip made"
     log_line(f"timelapse: {recording.recording_id}: {said}, in {seconds:.1f} s")
