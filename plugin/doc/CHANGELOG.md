@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.28.1
+
+- **A test build, to choose how temperatures become colours.** A new "Scale (testing)" setting in
+  the Range panel offers seven ways of spreading the palette: today's, today's with the ruler over
+  the colours, a straight line over the whole scene, two log curves, and a knee at 85% and 75%.
+  They apply while the colours follow the scene, and in timelapse clips made with the print's own
+  range.
+- **Make the clip again.** Each print that still has its temperatures can be made into a clip
+  again, with whatever is chosen now, and each clip is marked with the scale it was made with.
+- This entry is replaced once a scale has been chosen.
+
 ## 0.28.0
 
 - **A thermal timelapse of every print.** Switch it on in the new Timelapse panel of the settings
