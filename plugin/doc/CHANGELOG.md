@@ -12,6 +12,9 @@
   printer's disk runs short.
 - **Nothing gathered is lost.** Cancelled prints, prints cut short by a power cut, and layers the
   camera missed all end up in the clip.
+- **On the Timelapse page in Fluidd and Mainsail** as well, wherever Moonraker has one: on the U1
+  beside the printer's own clip of the same print, and on mainline Klipper with
+  `moonraker-timelapse` installed.
 - **Moonraker logins are handled.** If Moonraker asks for a login, the panel says so and takes
   Moonraker's API key, which is never shown again.
 

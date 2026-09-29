@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from .clip import ClipInputs, make_clip
 from .moonraker import JobInfo, MoonrakerClient, MoonrakerRefusedError
+from .publish import Publisher
 from .recording import (
     BYTES_PER_MEGABYTE,
     CAMERA_MISSING_RECORD,
@@ -108,6 +109,9 @@ class TimelapseService:
         self._lock = threading.Lock()
         self._sentence = "Starting."
         self._encoding: str | None = None
+        self._clip_phase = ""
+        self._stopping = threading.Event()
+        self._publisher = Publisher(wiring.client, self._stopping.wait)
         self._clips: queue.Queue[str] = queue.Queue()
         self._settled = False
         self._low_disk = False
@@ -129,6 +133,7 @@ class TimelapseService:
         self.queue_unmade_clips()
         while not shutdown.is_set():
             shutdown.wait(self.step())
+        self._stopping.set()
 
     def step(self) -> float:
         """One look at the print, and how long to wait before the next one."""
@@ -154,8 +159,8 @@ class TimelapseService:
 
     def status_line(self) -> str:
         with self._lock:
-            sentence, encoding = self._sentence, self._encoding
-        return f"{sentence} Making a clip now." if encoding else sentence
+            sentence, encoding, phase = self._sentence, self._encoding, self._clip_phase
+        return f"{sentence} {phase}" if encoding else sentence
 
     def summaries(self) -> list[dict]:
         return [recording.summary() for recording in recordings(self.root)]
@@ -166,7 +171,7 @@ class TimelapseService:
         recording = find_recording(self.root, recording_id)
         if recording is None or recording_id in self._busy():
             return False
-        remove_recording(recording)
+        self._remove(recording)
         return True
 
     def queue_unmade_clips(self) -> None:
@@ -186,16 +191,46 @@ class TimelapseService:
         with self._lock:
             self._encoding = recording_id
         try:
-            outcome = make_clip(recording, self._clip_inputs())
+            outcome = self._make_and_publish(recording)
         finally:
             with self._lock:
                 self._encoding = None
         recording.note_clip(outcome)
         self.prune()
 
+    def _make_and_publish(self, recording: Recording) -> dict:
+        """The clip, and its copy on the Timelapse page when there is one to go on.
+
+        The firmware's clip is waited for first, when the printer makes them, so that the name
+        can follow it and the two encodes never run at once.
+        """
+
+        publishing = recording.has_frames and self._publisher.available()
+        base = None
+        if publishing:
+            self._set_phase("Waiting for the printer's own clip of this print before making ours.")
+            base = self._publisher.base_name(recording)
+        self._set_phase("Making a clip now.")
+        outcome = make_clip(recording, self._clip_inputs())
+        if base is not None and not outcome.get("error"):
+            outcome["published"] = self._publisher.publish(recording, base)
+        return outcome
+
+    def _set_phase(self, phase: str) -> None:
+        with self._lock:
+            self._clip_phase = phase
+
+    def _remove(self, recording: Recording) -> None:
+        """A whole print: its copies on the Timelapse page first, then its folder."""
+
+        self._publisher.unpublish(recording)
+        remove_recording(recording)
+
     def prune(self) -> None:
         keep = self._timelapse_settings().timelapse_keep
-        Retention(self.root, keep, frozenset(self._busy()), self._wiring.free).prune()
+        Retention(
+            self.root, keep, frozenset(self._busy()), self._wiring.free, self._remove
+        ).prune()
 
     def _make_clips(self, shutdown: threading.Event) -> None:
         while not shutdown.is_set():

@@ -2517,6 +2517,24 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    root when there is one, named after the firmware's clip for the print (waited for up to ten
    minutes) or `<G-code name>_<start UTC>_thermal`; retention removes only the copies it uploaded.
    `moonraker-timelapse` documented as optional on mainline.
+   **Built on 2026-09-29, into the unreleased 0.28.0, not yet run on hardware.** A new
+   `publish.py`, and `moonraker.py` gains `has_root`, `file_names`, `free_space` (from the
+   directory listing's `disk_usage`), a multipart `upload` and `delete_file`. After a print, the
+   clip thread asks whether Moonraker has a `timelapse` root; if it does, and the folder already
+   holds clips the firmware made (a name ending in fourteen digits, so `moonraker-timelapse`'s
+   `_YYYYmmdd_HHMM` names never count), it waits up to ten minutes, polling every 15 s, for the
+   one whose stamp is within 2 s of the recording's start, before encoding. The copy is named
+   `<that base>_thermal.mp4` with `_thermal.jpg`, or `<G-code name>_<start UTC>_thermal` without
+   one, and what was copied is kept in `meta.json`, so deleting a print, by hand or by `Retention`
+   (which now takes the removal as a hook), deletes those copies through Moonraker first. Nothing
+   is copied when the folder's disk would fall below the 200 MB floor, and the settings page says
+   "Also on the Timelapse page" or why not. On the Pi 4, `moonraker-timelapse` is loaded with
+   `[timelapse]` and `enabled: False` in `moonraker.conf` and its `timelapse.cfg` included, because
+   it sends Klipper `_SET_TIMELAPSE_SETUP` whenever Klipper is ready and that is an unknown
+   command without the macros. Tested with a stand-in folder for the naming, the waiting (found,
+   never found, stopped), the floor, a refusal and the removal; the client against a stand-in
+   Moonraker for each call; and end to end with a real encode uploaded to a stand-in Moonraker,
+   byte for byte the clip.
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.

@@ -36,6 +36,20 @@ class StandInClient:
     def newest_job(self):
         return self.job
 
+    # The Timelapse page's folder, which this Moonraker does not have, except where a test says.
+    timelapse_root = False
+    deleted: list = []
+
+    def has_root(self, _root):
+        return self.timelapse_root
+
+    def file_names(self, _root):
+        return []
+
+    def delete_file(self, root, name):
+        self.deleted.append((root, name))
+        return True
+
 
 class StandInTap:
     """A camera that sends a frame whenever one is asked for, unless it has gone."""
@@ -254,3 +268,20 @@ def test_a_finished_print_without_a_clip_is_queued_and_its_failure_noted(
 
     noted = thermal_streamer.Recording.open(done.folder).summary()
     assert "ffmpeg is not installed" in noted["error"]
+
+
+def test_deleting_a_print_takes_its_copies_off_the_timelapse_page(
+    thermal_streamer, service_for, tmp_path
+):
+    service, _ = service_for([])
+    StandInClient.deleted = []
+    done = thermal_streamer.Recording.create(tmp_path, STARTED, None, "cube.gcode")
+    done.finish("complete")
+    done.note_clip({"published": {"root": "timelapse",
+                                  "files": ["cube_thermal.mp4", "cube_thermal.jpg"]}})
+
+    service.delete(done.recording_id)
+
+    assert StandInClient.deleted == [
+        ("timelapse", "cube_thermal.mp4"), ("timelapse", "cube_thermal.jpg")
+    ]

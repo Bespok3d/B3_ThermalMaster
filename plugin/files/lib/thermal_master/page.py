@@ -258,7 +258,9 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      first layer out of it, the whole print's coldest to hottest, temperatures of your own, or the
      live picture's. The oldest prints go once there are more than the number to keep, and sooner
      if the printer's disk runs short of space. The Moonraker key is only needed when Moonraker
-     asks for a login; it is kept on the printer and never shown again.</p>
+     asks for a login; it is kept on the printer and never shown again. Where Moonraker has a
+     Timelapse page, as the U1 does and mainline Klipper does with moonraker-timelapse, each clip
+     is copied there too, named after the printer's own clip of the print when there is one.</p>
   <p>Calibration closes the camera's internal shutter for a moment and re-levels the sensor against
      it. The camera does this by itself about every ninety seconds; the button is for when the
      picture has drifted and you would rather not wait. It costs one frame.</p>
@@ -490,6 +492,10 @@ def clip_entry(summary: dict) -> str:
         else ""
     )
     error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
+    if summary.get("published_as"):
+        error += " Also on the Timelapse page."
+    elif summary.get("publish_error"):
+        error += f" {html.escape(summary['publish_error'])}"
     return (
         f'<article class="clip">{video}'
         f"<p><strong>{html.escape(str(summary['filename'] or 'A print'))}</strong>, {started}. "

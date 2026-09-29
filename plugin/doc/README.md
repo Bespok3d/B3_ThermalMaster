@@ -266,6 +266,17 @@ says so and the timelapse cannot follow the print. Paste Moonraker's API key int
 box. It is kept on the printer and is never shown again, not on the page and not at
 `/thermal/settings`.
 
+**On the Timelapse page of Fluidd and Mainsail too.** When Moonraker has a Timelapse page, each
+clip and its thumbnail are copied there as well, through Moonraker. The U1 has one, from Bespok3d's
+Timelapse plugin, which the firmware's own clips appear on; the thermal clip is named after the
+firmware's clip of the same print with `_thermal` added, so the two sort side by side, and the
+plugin waits up to ten minutes for the firmware to finish its clip before making its own, so the
+two never share the processor. On mainline Klipper the page comes with `moonraker-timelapse`,
+which is optional: add `[timelapse]` to `moonraker.conf`, with `enabled: False` to keep its own
+capture off, and include its `timelapse.cfg`. Without a Timelapse page the clips are on the
+settings page only. A print the plugin deletes, by hand or by the count, takes its copies there
+with it, and nothing is copied while that disk has less than 200 MB free.
+
 **What it costs.** Nothing between layers: the camera is read anyway, and a layer change costs a
 copy of one frame. The clip is made after the print, at the lowest priority, and takes about a
 minute of the processor for a 1,000 layer print. The list is also at `/thermal/timelapses` as JSON,

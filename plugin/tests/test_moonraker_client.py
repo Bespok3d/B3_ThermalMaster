@@ -59,6 +59,27 @@ class StandInMoonraker(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    received: list = []
+
+    def do_POST(self):  # noqa: N802 - the name BaseHTTPRequestHandler calls
+        body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        self.received.append((self.path, self.headers.get("Content-Type"), body))
+        self.answer({"result": {"action": "create_file"}})
+
+    def do_DELETE(self):  # noqa: N802 - the name BaseHTTPRequestHandler calls
+        self.received.append((self.path, None, b""))
+        if "missing" in self.path:
+            self.send_error(404)
+            return
+        self.answer({"result": {"action": "delete_file"}})
+
+    def answer(self, payload):
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format, *args):
         return
 
@@ -69,8 +90,15 @@ def moonraker(thermal_streamer):
         thermal_streamer.PRINT_STATS_QUERY: PRINTING_ANSWER,
         thermal_streamer.NEWEST_JOB_QUERY: NEWEST_JOB_ANSWER,
     }
+    StandInMoonraker.answers.update({
+        thermal_streamer.ROOTS_QUERY: {"result": [{"name": "gcodes"}, {"name": "timelapse"}]},
+        "/server/files/list?root=timelapse": {"result": [{"path": "cube_20260921141320.mp4"},
+                                                          {"path": "cube_20260921141320.jpg"}]},
+        "/server/files/directory?path=timelapse": {"result": {"disk_usage": {"free": 862000000}}},
+    })
     StandInMoonraker.refuse_without = None
     StandInMoonraker.keys_seen = []
+    StandInMoonraker.received = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), StandInMoonraker)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -128,3 +156,41 @@ def test_no_key_header_goes_when_none_is_set(thermal_streamer, moonraker):
     thermal_streamer.MoonrakerClient(moonraker).print_status()
 
     assert StandInMoonraker.keys_seen == [None]
+
+
+def test_the_timelapse_folder_is_found_among_the_roots(thermal_streamer, moonraker):
+    client = thermal_streamer.MoonrakerClient(moonraker)
+
+    assert client.has_root("timelapse")
+    assert not client.has_root("camera")
+
+
+def test_the_folders_files_and_free_space_are_read(thermal_streamer, moonraker):
+    client = thermal_streamer.MoonrakerClient(moonraker)
+
+    assert client.file_names("timelapse") == ["cube_20260921141320.mp4", "cube_20260921141320.jpg"]
+    assert client.free_space("timelapse") == 862000000
+
+
+def test_a_clip_is_uploaded_into_the_folder_by_name(thermal_streamer, moonraker, tmp_path):
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"\x00clip bytes\xff")
+
+    assert thermal_streamer.MoonrakerClient(moonraker).upload(
+        "timelapse", "cube thermal.mp4", source
+    )
+
+    ((path, content_type, body),) = StandInMoonraker.received
+    assert path == "/server/files/upload"
+    assert content_type.startswith("multipart/form-data; boundary=")
+    assert b'name="root"\r\n\r\ntimelapse\r\n' in body
+    assert b'filename="cube thermal.mp4"' in body
+    assert b"\x00clip bytes\xff" in body
+
+
+def test_a_file_is_deleted_by_its_quoted_path(thermal_streamer, moonraker):
+    client = thermal_streamer.MoonrakerClient(moonraker)
+
+    assert client.delete_file("timelapse", "cube thermal+1.mp4")
+    assert not client.delete_file("timelapse", "missing.mp4")
+    assert StandInMoonraker.received[0][0] == "/server/files/timelapse/cube%20thermal%2B1.mp4"

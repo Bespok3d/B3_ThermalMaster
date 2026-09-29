@@ -162,3 +162,16 @@ def test_a_print_name_is_escaped_in_the_list(thermal_streamer, settings_dict):
     assert "&lt;b&gt;cube&lt;/b&gt;" in page
     assert 'src="timelapse.mp4?id=20260921-141320"' in page
     assert "2.0 MB" in page
+
+
+def test_a_clip_on_the_timelapse_page_says_so(thermal_streamer, settings_dict):
+    listed = {"status": "On.", "timelapses": [{
+        "id": "20260921-141320", "name": "x_thermal.mp4", "filename": "cube.gcode",
+        "started_at": 1790000000.0, "state": "complete", "frames": 4, "has_clip": True,
+        "clip_bytes": 1024, "has_frames": True, "error": None,
+        "published_as": "cube_20260921141320_thermal.mp4", "publish_error": None,
+    }]}
+
+    page = thermal_streamer.render_control_page(settings_dict(), ["ironbow"], None, None, listed)
+
+    assert "Also on the Timelapse page." in page

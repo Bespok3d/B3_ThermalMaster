@@ -15,8 +15,11 @@ from __future__ import annotations
 import dataclasses
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable
+from pathlib import Path
 
 from .timelapse import PrintStatus
 
@@ -35,6 +38,13 @@ PRINT_STATS_QUERY = "/printer/objects/query?print_stats=state,filename,info"
 
 
 NEWEST_JOB_QUERY = "/server/history/list?limit=1&order=desc"
+
+
+ROOTS_QUERY = "/server/files/roots"
+
+
+# Uploading a clip of a few megabytes to the same machine takes longer than a status query.
+UPLOAD_TIMEOUT_SECONDS = 60.0
 
 
 class MoonrakerRefusedError(Exception):
@@ -93,12 +103,18 @@ class MoonrakerClient:
     def get(self, path: str) -> dict | None:
         """The decoded answer, None when Moonraker cannot be reached, or a refusal raised."""
 
-        request = urllib.request.Request(self._base_url + path)
+        return self.send(urllib.request.Request(self._base_url + path))
+
+    def send(
+        self, request: urllib.request.Request, timeout: float = MOONRAKER_TIMEOUT_SECONDS
+    ) -> dict | None:
+        """Any request, with the key when there is one, answered the way `get` describes."""
+
         key = self._api_key()
         if key:
             request.add_header("X-Api-Key", key)
         try:
-            with urllib.request.urlopen(request, timeout=MOONRAKER_TIMEOUT_SECONDS) as reply:
+            with urllib.request.urlopen(request, timeout=timeout) as reply:
                 answer = json.loads(reply.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             if error.code in REFUSED_STATUSES:
@@ -117,3 +133,60 @@ class MoonrakerClient:
 
         answer = self.get(NEWEST_JOB_QUERY)
         return parsed_newest_job(answer) if answer is not None else None
+
+    def has_root(self, root: str) -> bool:
+        """Whether Moonraker serves a folder of this name, as Fluidd and Mainsail would see it."""
+
+        answer = self.get(ROOTS_QUERY)
+        roots = (answer or {}).get("result")
+        return isinstance(roots, list) and any(
+            isinstance(entry, dict) and entry.get("name") == root for entry in roots
+        )
+
+    def file_names(self, root: str) -> list[str] | None:
+        """Every file in a root, by the path Moonraker gives it, or None without an answer."""
+
+        answer = self.get(f"/server/files/list?root={urllib.parse.quote(root)}")
+        files = (answer or {}).get("result")
+        if not isinstance(files, list):
+            return None
+        return [str(entry.get("path")) for entry in files if isinstance(entry, dict)]
+
+    def free_space(self, root: str) -> int | None:
+        """The free space on the disk a root is on, as Moonraker reports it with a listing."""
+
+        answer = self.get(f"/server/files/directory?path={urllib.parse.quote(root)}")
+        usage = (answer or {}).get("result", {}).get("disk_usage")
+        free = usage.get("free") if isinstance(usage, dict) else None
+        return int(free) if isinstance(free, (int, float)) else None
+
+    def upload(self, root: str, name: str, source: Path) -> bool:
+        """Put a file into a root through Moonraker, which then tells every page it is there."""
+
+        boundary = f"thermal-master-{uuid.uuid4().hex}"
+        body = b"".join(
+            [
+                f'--{boundary}\r\nContent-Disposition: form-data; name="root"\r\n\r\n'
+                f"{root}\r\n".encode(),
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+                f'filename="{name}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode(),
+                source.read_bytes(),
+                f"\r\n--{boundary}--\r\n".encode(),
+            ]
+        )
+        request = urllib.request.Request(
+            self._base_url + "/server/files/upload",
+            data=body,
+            method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        return self.send(request, UPLOAD_TIMEOUT_SECONDS) is not None
+
+    def delete_file(self, root: str, name: str) -> bool:
+        """Remove a file from a root; False when Moonraker would not, or it was already gone."""
+
+        quoted = urllib.parse.quote(f"{root}/{name}")
+        request = urllib.request.Request(
+            self._base_url + f"/server/files/{quoted}", method="DELETE"
+        )
+        return self.send(request) is not None

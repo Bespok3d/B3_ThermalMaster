@@ -243,12 +243,26 @@ class Recording:
         return self.clip_path.is_file()
 
     @property
-    def clip_name(self) -> str:
-        """What the clip is called when it leaves the printer: the print's name and its start."""
+    def base_name(self) -> str:
+        """The print's name and its start in UTC, the way the U1's firmware names its own clips."""
 
         stem = Path(str(self.meta.get("filename") or "print")).stem
         stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime(self.started_at))
-        return f"{stem}_{stamp}_thermal.mp4"
+        return f"{stem}_{stamp}"
+
+    @property
+    def clip_name(self) -> str:
+        """What the clip is called when it leaves the printer."""
+
+        return f"{self.base_name}_thermal.mp4"
+
+    @property
+    def published(self) -> list[str]:
+        """The copies put in Moonraker's `timelapse` folder, by name, so they can be taken out."""
+
+        clip = self.meta.get("clip") or {}
+        names = (clip.get("published") or {}).get("files") or []
+        return [str(name) for name in names]
 
     def save(self) -> None:
         write_json_atomically(self.folder / META_FILE, self.meta)
@@ -296,6 +310,8 @@ class Recording:
             "clip_bytes": self.clip_path.stat().st_size if self.has_clip else 0,
             "has_frames": self.has_frames,
             "error": clip.get("error"),
+            "published_as": self.published[0] if self.published else None,
+            "publish_error": (clip.get("published") or {}).get("error"),
         }
 
 
@@ -334,11 +350,14 @@ class Retention:
     keep: int
     busy: frozenset[str] = frozenset()
     free: Callable[[Path], int] = free_space
+    # How a whole print is removed: by default its folder, and in the service its copies in
+    # Moonraker's timelapse folder first.
+    remove: Callable[[Recording], None] = remove_recording
 
     def prune(self) -> None:
         kept = [recording for recording in recordings(self.root) if not self._busy(recording)]
         for recording in kept[self.keep:]:
-            remove_recording(recording)
+            self.remove(recording)
         for recording in kept[KEEP_TEMPERATURES_FOR:self.keep]:
             if recording.has_clip:
                 recording.drop_frames()
@@ -359,7 +378,7 @@ class Retention:
         for recording in oldest_first:
             if not self.below_floor():
                 return
-            remove_recording(recording)
+            self.remove(recording)
 
     def below_floor(self) -> bool:
         return self.free(self.root) < FREE_SPACE_FLOOR_BYTES
