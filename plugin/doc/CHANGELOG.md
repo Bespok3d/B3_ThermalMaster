@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.2
+
+- **The scale is in the clip's name**, on the Timelapse page and in a download, so the clips of one
+  print made with different scales can be told apart.
+- **Making a clip again no longer waits for the printer's own clip** when it did not come the
+  first time: it goes back under the name the first one was given.
+- **Delete and Make the clip again are not offered** while a print is waiting to be made into a
+  clip or being made into one.
+
 ## 0.28.1
 
 - **A test build, to choose how temperatures become colours.** A new "Scale (testing)" setting in

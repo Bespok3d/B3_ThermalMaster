@@ -251,10 +251,17 @@ class Recording:
         return f"{stem}_{stamp}"
 
     @property
+    def clip_scale(self) -> str | None:
+        """The colour scale the clip was made with, on the test/color-bar branch."""
+
+        scale = (self.meta.get("clip") or {}).get("scale")
+        return str(scale) if scale else None
+
+    @property
     def clip_name(self) -> str:
         """What the clip is called when it leaves the printer."""
 
-        return f"{self.base_name}_thermal.mp4"
+        return f"{self.base_name}_thermal{scale_suffix(self.clip_scale)}.mp4"
 
     @property
     def published(self) -> list[str]:
@@ -312,8 +319,14 @@ class Recording:
             "error": clip.get("error"),
             "published_as": self.published[0] if self.published else None,
             "publish_error": (clip.get("published") or {}).get("error"),
-            "scale": clip.get("scale"),
+            "scale": self.clip_scale,
         }
+
+
+def scale_suffix(scale: str | None) -> str:
+    """The scale on the end of a clip's name, so seven downloads of one print can be told apart."""
+
+    return f"_{scale}" if scale else ""
 
 
 def recordings(root: Path) -> list[Recording]:

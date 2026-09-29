@@ -136,6 +136,7 @@ def test_the_clip_and_its_thumbnail_are_copied_under_the_thermal_name(thermal_st
     assert outcome == {
         "root": "timelapse",
         "files": ["Cube_PLA_20260921141320_thermal.mp4", "Cube_PLA_20260921141320_thermal.jpg"],
+        "base": "Cube_PLA_20260921141320",
     }
     assert [(root, name) for root, name, _ in folder.uploaded] == [
         ("timelapse", "Cube_PLA_20260921141320_thermal.mp4"),

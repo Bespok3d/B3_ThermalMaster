@@ -544,14 +544,17 @@ def clip_entry(summary: dict) -> str:
     )
     # Not offered while the print is still being recorded: the service would refuse it, and a
     # button that does nothing is worse than none.
-    printing = summary["state"] == "printing"
-    delete = "" if printing else clip_button("delete", quoted, "Delete")
+    # Nor while it is waiting to be made into a clip or being made into one, for the same reason.
+    held = summary["state"] == "printing" or bool(summary.get("busy"))
+    delete = "" if held else clip_button("delete", quoted, "Delete")
     remake = (
         clip_button("remake", quoted, "Make the clip again")
-        if summary["has_frames"] and not printing
+        if summary["has_frames"] and not held
         else ""
     )
     error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
+    if summary.get("busy") and summary["state"] != "printing":
+        error += " Being made into a clip."
     if summary.get("scale"):
         error += f" Scale: {html.escape(str(summary['scale']))}."
     if summary.get("published_as"):

@@ -286,6 +286,7 @@ from .publish import (
     Publisher,
     firmware_base_for,
     firmware_clips,
+    published_base,
     stamp_seconds,
 )
 from .recording import (
@@ -318,6 +319,7 @@ from .recording import (
     read_record,
     recordings,
     remove_recording,
+    scale_suffix,
     write_json_atomically,
 )
 from .server import (
@@ -830,6 +832,7 @@ __all__ = [
     "posted_temperature",
     "print_scene",
     "process_cpu_seconds",
+    "published_base",
     "raw_for_celsius",
     "read_record",
     "recordings",
@@ -847,6 +850,7 @@ __all__ = [
     "rotate_point_clockwise",
     "run_capture_session",
     "save_thumbnail",
+    "scale_suffix",
     "settings_from_form",
     "settings_from_json",
     "smooth_bounds",

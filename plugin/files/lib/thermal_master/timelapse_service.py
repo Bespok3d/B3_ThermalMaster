@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from .clip import ClipInputs, make_clip
 from .moonraker import JobInfo, MoonrakerClient, MoonrakerRefusedError
-from .publish import Publisher
+from .publish import Publisher, published_base
 from .recording import (
     BYTES_PER_MEGABYTE,
     CAMERA_MISSING_RECORD,
@@ -38,6 +38,7 @@ from .recording import (
     free_space,
     recordings,
     remove_recording,
+    scale_suffix,
 )
 from .timelapse import (
     INTERRUPTED,
@@ -113,6 +114,9 @@ class TimelapseService:
         self._stopping = threading.Event()
         self._publisher = Publisher(wiring.client, self._stopping.wait)
         self._clips: queue.Queue[str] = queue.Queue()
+        # What is in the queue, since a queue cannot be asked. Busy for as long as it waits, so it
+        # cannot be deleted, pruned or asked for twice before its turn comes.
+        self._queued: set[str] = set()
         self._settled = False
         self._low_disk = False
         self._pruned_keep: int | None = None
@@ -163,7 +167,11 @@ class TimelapseService:
         return f"{sentence} {phase}" if encoding else sentence
 
     def summaries(self) -> list[dict]:
-        return [recording.summary() for recording in recordings(self.root)]
+        busy = self._busy()
+        return [
+            {**recording.summary(), "busy": recording.recording_id in busy}
+            for recording in recordings(self.root)
+        ]
 
     def delete(self, recording_id: str) -> bool:
         """Delete one print's timelapse, unless it is being recorded or made into a clip."""
@@ -186,7 +194,7 @@ class TimelapseService:
             return False
         if recording_id in self._busy():
             return False
-        self._clips.put(recording_id)
+        self._queue(recording_id)
         return True
 
     def queue_unmade_clips(self) -> None:
@@ -195,7 +203,7 @@ class TimelapseService:
         for recording in recordings(self.root):
             unmade = not recording.printing and recording.has_frames and not recording.has_clip
             if unmade and not (recording.meta.get("clip") or {}).get("error"):
-                self._clips.put(recording.recording_id)
+                self._queue(recording.recording_id)
 
     def make_clip_now(self, recording_id: str) -> None:
         """Make one clip on the calling thread. The clip thread's work, and a test's."""
@@ -205,6 +213,7 @@ class TimelapseService:
             return
         with self._lock:
             self._encoding = recording_id
+            self._queued.discard(recording_id)
         try:
             outcome = self._make_and_publish(recording)
         finally:
@@ -221,15 +230,24 @@ class TimelapseService:
         """
 
         publishing = recording.has_frames and self._publisher.available()
-        base = None
-        if publishing:
+        base = published_base(recording) if publishing else None
+        if publishing and base is None:
             self._set_phase("Waiting for the printer's own clip of this print before making ours.")
             base = self._publisher.base_name(recording)
         self._set_phase("Making a clip now.")
         outcome = make_clip(recording, self._clip_inputs())
         if base is not None and not outcome.get("error"):
-            outcome["published"] = self._publisher.publish(recording, base)
+            # The copies from before first: made with another scale, they have another name.
+            self._publisher.unpublish(recording)
+            outcome["published"] = self._publisher.publish(
+                recording, base, scale_suffix(outcome.get("scale"))
+            )
         return outcome
+
+    def _queue(self, recording_id: str) -> None:
+        with self._lock:
+            self._queued.add(recording_id)
+        self._clips.put(recording_id)
 
     def _set_phase(self, phase: str) -> None:
         with self._lock:
@@ -258,6 +276,7 @@ class TimelapseService:
     def _busy(self) -> set[str]:
         with self._lock:
             busy = {self._encoding} if self._encoding else set()
+            busy |= self._queued
         if self._recording is not None:
             busy.add(self._recording.recording_id)
         return busy
@@ -334,7 +353,7 @@ class TimelapseService:
         recording.finish(state)
         if self._recording is recording:
             self._recording = None
-        self._clips.put(recording.recording_id)
+        self._queue(recording.recording_id)
 
     def _newest_job(self) -> JobInfo | None:
         try:

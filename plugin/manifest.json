@@ -1,7 +1,7 @@
 {
   "name": "thermal-master",
   "title": "Thermal Master",
-  "version": "0.28.1",
+  "version": "0.28.2",
   "license": "https://github.com/Bespok3d/B3_ThermalMaster/blob/main/plugin/doc/LICENSE",
   "author": "Mauker",
   "min_daemon_version": "0.14.0",

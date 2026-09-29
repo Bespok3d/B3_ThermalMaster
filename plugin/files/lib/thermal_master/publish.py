@@ -83,6 +83,21 @@ def firmware_base_for(names: list[str], started_at: float) -> str | None:
     )
 
 
+def published_base(recording: Recording) -> str | None:
+    """The base name the print's clip went onto the Timelapse page under, if it went at all.
+
+    A clip made again goes back under the same one, rather than waiting up to ten minutes again
+    for a clip of the firmware's that did not come the first time. Older copies did not keep it,
+    so it is read back off the name of the clip when it is not there.
+    """
+
+    published = (recording.meta.get("clip") or {}).get("published") or {}
+    if published.get("base"):
+        return str(published["base"])
+    names = recording.published
+    return names[0].rpartition(THERMAL_SUFFIX)[0] or None if names else None
+
+
 class Publisher:
     """Copies clips into Moonraker's timelapse folder, and takes them out again."""
 
@@ -121,12 +136,12 @@ class Publisher:
             names = self._names()
         return found
 
-    def publish(self, recording: Recording, base: str) -> dict:
+    def publish(self, recording: Recording, base: str, suffix: str = "") -> dict:
         """Copy the clip and its thumbnail in, unless the disk they would go to is short of room."""
 
-        files = [(f"{base}{THERMAL_SUFFIX}.mp4", recording.clip_path)]
+        files = [(f"{base}{THERMAL_SUFFIX}{suffix}.mp4", recording.clip_path)]
         if recording.thumbnail_path.is_file():
-            files.append((f"{base}{THERMAL_SUFFIX}.jpg", recording.thumbnail_path))
+            files.append((f"{base}{THERMAL_SUFFIX}{suffix}.jpg", recording.thumbnail_path))
         size = sum(path.stat().st_size for _, path in files)
         try:
             free = self._client.free_space(TIMELAPSE_ROOT)
@@ -141,7 +156,7 @@ class Publisher:
         if not copied:
             return {"error": "Not copied to the Timelapse page: Moonraker did not take it."}
         log_line(f"timelapse: {recording.recording_id} is on the Timelapse page as {copied[0]}")
-        return {"root": TIMELAPSE_ROOT, "files": copied}
+        return {"root": TIMELAPSE_ROOT, "files": copied, "base": base}
 
     def unpublish(self, recording: Recording) -> None:
         """Take this print's copies out of the folder. One somebody deleted already is fine."""

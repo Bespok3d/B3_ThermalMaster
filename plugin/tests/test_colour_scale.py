@@ -255,15 +255,7 @@ def test_a_clip_frame_is_stamped_with_its_scale(thermal_streamer):
 def test_a_finished_print_with_temperatures_can_be_made_again(
     thermal_streamer, palettes, tmp_path
 ):
-    service = thermal_streamer.TimelapseService(
-        thermal_streamer.TimelapseWiring(
-            root=tmp_path, client=thermal_streamer.MoonrakerClient("http://127.0.0.1:9"),
-            settings_store=thermal_streamer.SettingsStore(
-                "ironbow", thermal_streamer.RenderSettings(), None
-            ),
-            tap=thermal_streamer.FrameTap(), streaming=lambda: True, palettes=palettes, ffmpeg=None,
-        )
-    )
+    service = service_at(thermal_streamer, tmp_path, palettes)
     with_frames = recording_with(thermal_streamer, tmp_path, [40.0])
     without = thermal_streamer.Recording.create(tmp_path, STARTED + 60, None, "empty.gcode")
     without.finish("complete")
@@ -271,6 +263,59 @@ def test_a_finished_print_with_temperatures_can_be_made_again(
     assert service.remake(with_frames.recording_id)
     assert not service.remake(without.recording_id)
     assert not service.remake("not-a-recording")
+
+
+def test_a_clip_is_named_for_its_scale(thermal_streamer, tmp_path):
+    recording = recording_with(thermal_streamer, tmp_path, [40.0])
+    unmade = recording.clip_name
+
+    recording.note_clip({"made_at": STARTED, "frames": 1, "scale": "log-mild"})
+
+    assert unmade.endswith("_thermal.mp4")
+    assert recording.clip_name == unmade.replace("_thermal.mp4", "_thermal_log-mild.mp4")
+    assert recording.summary()["scale"] == "log-mild"
+
+
+def test_a_clip_made_again_goes_back_under_the_name_it_was_given(thermal_streamer, tmp_path):
+    recording = recording_with(thermal_streamer, tmp_path, [40.0])
+    assert thermal_streamer.published_base(recording) is None
+
+    recording.note_clip({"published": {"files": ["Cube_2026_thermal_knee.mp4"]}})
+    assert thermal_streamer.published_base(recording) == "Cube_2026"
+
+    recording.note_clip({"published": {"files": ["x_thermal.mp4"], "base": "Firmware_Name"}})
+    assert thermal_streamer.published_base(recording) == "Firmware_Name"
+
+    recording.note_clip({"published": {"error": "Not copied"}})
+    assert thermal_streamer.published_base(recording) is None
+
+
+def service_at(streamer, root, palettes):
+    return streamer.TimelapseService(
+        streamer.TimelapseWiring(
+            root=root, client=streamer.MoonrakerClient("http://127.0.0.1:9"),
+            settings_store=streamer.SettingsStore("ironbow", streamer.RenderSettings(), None),
+            tap=streamer.FrameTap(), streaming=lambda: True, palettes=palettes, ffmpeg=None,
+        )
+    )
+
+
+def test_a_print_waiting_for_its_clip_is_busy_until_it_is_made(
+    thermal_streamer, palettes, tmp_path
+):
+    service = service_at(thermal_streamer, tmp_path, palettes)
+    recording = recording_with(thermal_streamer, tmp_path, [40.0])
+
+    assert service.remake(recording.recording_id)
+    (waiting,) = service.summaries()
+    assert waiting["busy"] is True
+    assert not service.remake(recording.recording_id)
+    assert not service.delete(recording.recording_id)
+
+    service.make_clip_now(recording.recording_id)
+
+    (made,) = service.summaries()
+    assert made["busy"] is False
 
 
 def clip_summary(**changes):
@@ -292,6 +337,14 @@ def test_the_list_offers_to_make_a_clip_again_only_when_it_can(thermal_streamer)
     assert "Scale: knee." in offered
     assert 'name="remake"' not in recording_now
     assert 'name="remake"' not in no_frames
+
+
+def test_the_list_offers_nothing_for_a_print_being_made_into_a_clip(thermal_streamer):
+    busy = thermal_streamer.clip_entry(clip_summary(busy=True))
+
+    assert 'name="remake"' not in busy
+    assert 'name="delete"' not in busy
+    assert "Being made into a clip." in busy
 
 
 def test_the_page_button_asks_for_a_clip_again(thermal_streamer, palettes, tmp_path):
