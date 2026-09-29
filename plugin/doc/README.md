@@ -3,6 +3,8 @@
 Watch a print thermally, in Fluidd or Mainsail, with no firmware flashing and no UVC support
 required.
 
+![The viewer measuring a heated bed, with three more scenes below](images/hero.jpg)
+
 ## What this is
 
 The Thermal Master P1 and P3 (InfiRay-OEM thermal cameras, USB `3474:45c2` and `3474:45a2`) are not
@@ -22,10 +24,25 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Settings and camera state: `/thermal/settings`, which also accepts a JSON POST to change
   individual settings without disturbing the rest
 
+## Where to buy a P1
+
+Thermal Master supports this project with hardware and an affiliate arrangement. If you are buying a
+camera and want the project to benefit, buy it through the shop link below, where the discount code
+applies:
+
+- Shop: https://thermalmaster.com/BESPOKD
+- Discount code: `THERMALYML01`, at that shop
+
+It is an affiliate link, so the project earns a commission, at no extra cost to you. It changes
+nothing about what this documentation says: the P3 still has not been tested, which is worth knowing
+before buying one.
+
 ## Setting it up
 
 Install it, pick a name for the camera, and it appears in Fluidd and Mainsail alongside your other
 cameras. There is nothing to add by hand under Settings.
+
+![The thermal camera in Fluidd's camera panel, in white hot](images/fluidd.jpg)
 
 ## The control page
 
@@ -33,6 +50,35 @@ Open `/thermal/` on the printer, or follow the plugin's link in the Bespok3d app
 view and everything there is to change: palette, rotation in quarter turns, mirroring, the
 temperature readout and its units, emissivity, sensor gain, and a button to recalibrate the sensor.
 Changes take effect immediately and are remembered across restarts.
+
+![The settings page: the Image, Range, Readout and Camera panels](images/settings.jpg)
+
+| Panel | Setting | JSON field | Values |
+| --- | --- | --- | --- |
+| Image | Palette | `palette` | `ironbow`, `rainbow`, `white-hot`, `black-hot`, `military`, `sepia` |
+| Image | Rotate | `rotation` | `0`, `90`, `180`, `270` |
+| Image | Mirror left to right, top to bottom | `flip_horizontal`, `flip_vertical` | `true`, `false` |
+| Image | Enlarging | `upscale_filter` | `smooth`, `sharp` |
+| Range | Colours | `range_mode` | `auto` follows the scene, `fixed` holds the two numbers below |
+| Range | From, To | `range_low_celsius`, `range_high_celsius` | degrees Celsius, whatever the display units |
+| Readout | Ruler, crosshair, hottest and coldest pixel | `colorbar`, `reticle`, `hotspot`, `coldspot` | `true`, `false` |
+| Readout | Units | `units` | `celsius`, `fahrenheit` |
+| Readout | Emissivity | `emissivity` | 0.05 to 1.00, 0.95 by default |
+| Camera | Gain | `gain` | `high` for -20 to 150 C, `low` for 0 to 550 C |
+| Camera | Stop the camera, Start | `streaming` | `true`, `false` |
+| Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
+
+The same settings are at `/thermal/settings`. A `GET` answers with all of them as JSON, along with a
+sentence on what the camera is doing and what the plugin is costing the printer. A `POST` with a
+JSON body changes only the fields it names and leaves the rest alone:
+
+```sh
+curl -X POST http://<printer>/thermal/settings \
+  -H "Content-Type: application/json" -d '{"palette": "rainbow", "units": "fahrenheit"}'
+```
+
+The two buttons are commands rather than settings: `{"command": "shutter"}` recalibrates the sensor,
+and `{"command": "lock-range"}` holds the range the picture is using right now.
 
 Rotation is applied here rather than in Fluidd's own camera settings, because a camera defined by a
 config file is read-only there: the panel shows "Managed by your Moonraker configuration" and greys
@@ -197,12 +243,12 @@ rendering frames; the next request wakes it. It goes on reading from the camera 
 the device stays in step and coming back costs one frame rather than a reconnect.
 
 A dashboard tile keeps the stream open, so the camera stays live for as long as the tile is on
-screen. The idling is for the hours when nothing is open at all, which on the printer this was
+screen. The idling is for the hours when nothing is open at all, which on the Snapmaker U1 this was
 written for was most of them.
 
 **Off is the deeper version of the same idea, and it is a button.** Stop, on the settings page or
 in the camera view's toolbar, releases the USB device: nothing is read, nothing is rendered, and
-the camera can be unplugged. Start brings it back. Measured on the printer with the camera off and
+the camera can be unplugged. Start brings it back. Measured on the U1 with the camera off and
 nothing open, the plugin used 0.0% of a core over half a minute, against 4.6% idling and 40.6%
 before any of this existed.
 
@@ -222,9 +268,45 @@ kernel rather than estimated, and it refreshes every few seconds while that page
 figures: what it is using now, and what it has averaged since the service started. The same
 numbers are in `/thermal/stats` under `cost`.
 
-The printer has four cores, so 100% of one core is a quarter of the machine, and the figure can
-pass 100% because the plugin has more than one thread. It reads highest on the settings page
-itself, which holds a live stream open and is therefore somebody watching.
+Both printers measured below have four cores, so 100% of one core is a quarter of the machine, and
+the figure can pass 100% because the plugin has more than one thread. It reads highest on the
+settings page itself, which holds a live stream open and is therefore somebody watching.
+
+### Measured on two printers
+
+As a share of one core, read from the kernel.
+
+| What is open | Snapmaker U1, four Cortex-A53 cores | Raspberry Pi 4, four Cortex-A72 cores |
+| --- | --- | --- |
+| Camera switched off | 0.0% | 0.1% |
+| Nothing | 4.6% | 4.1% |
+| A dashboard tile | 41.9%, in Fluidd | 37.5%, in Mainsail |
+| The viewer, pointer moving | 45.7% | 36.4% |
+
+The U1 is the printer this plugin is developed on, installed through Bespok3d, and every release is
+confirmed on it. The Raspberry Pi 4 drives an Ender 2 Pro Max; the plugin was started there by hand
+on 2026-09-29, since the Bespok3d app does not support that printer yet. Each figure is one state
+held for 30 seconds with nothing else open, "nothing" read a minute after the last page closed, as
+on the U1. Both open states cost less on the Pi because an A72 core is faster than an A53; idle and
+off cost next to nothing on either. A figure measured on one printer says little about another, so
+the settings page's line is the one to trust on yours.
+
+## Palettes
+
+![One captured frame in each of the six palettes](images/palettes.jpg)
+
+Six palettes, all showing the same temperatures: only the colours change, never the readings.
+
+- **Ironbow**, the default: black through purple, red and orange to pale yellow. The usual thermal
+  camera look, and the easiest to read at a glance.
+- **Rainbow**: dark blue through cyan, green and yellow to red. The most distinct colours, which
+  makes it the best at telling close temperatures apart, and the busiest to look at.
+- **White hot** and **black hot**: greys, hotter brighter or hotter darker. The plainest, and the
+  best for seeing shapes and edges.
+- **Military** and **sepia**: white hot tinted green or brown.
+
+Pick one on the settings page, or with `{"palette": "rainbow"}` posted to `/thermal/settings`. The
+picture above is one frame captured on a printer, rendered by the plugin in each palette.
 
 ## The display range
 
@@ -254,8 +336,8 @@ all read the sensor, not the picture, so a held range changes what you see and n
   contrast follows the scene. The range eases rather than jumping, so the picture stays steady when
   something warm passes through. It is still a relative thermal view, not a calibrated temperature
   readout: the same nozzle can be a different colour depending on what else is in frame.
-- Six palettes are available (ironbow, rainbow, white hot, black hot, military, sepia). Ironbow is
-  the default, and the control page changes it live.
+- Six palettes are available, described under [Palettes](#palettes). Ironbow is the default, and
+  the control page changes it live.
 - The streamer reconnects on its own if the camera is unplugged and replugged.
 - The camera tile updates about fifteen times a second, which is Moonraker's default polling rate
   rather than a limit of the camera. Raising `target_fps` on the `[webcam]` entry makes it smoother
@@ -276,6 +358,13 @@ and the pointer moving, 41.9% with a dashboard tile visible, 4.6% with nothing w
 with the camera switched off. The settings page reports the same figure for itself, so you do not
 have to take this table's word for it.
 
+It has also run on a second Klipper printer, an Ender 2 Pro Max driven by a Raspberry Pi 4 on
+Debian 12, started by hand rather than installed through Bespok3d, since the app does not support
+that printer yet. The camera connected on the first try, the picture and the viewer worked, and an
+unplug and replug recovered on its own. What it costs there is in the table under
+[What it costs when you are not looking](#what-it-costs-when-you-are-not-looking): 36.4% of one
+core with the viewer open, 4.1% with nothing watching.
+
 The P3 is driven by the same code path and the same protocol but has not been in front of one yet.
 
 Worth checking after an install:
@@ -287,19 +376,6 @@ Worth checking after an install:
    stream rather than a broken image.
 5. Unplug and replug the camera, and confirm the stream recovers on its own.
 6. Uninstall, and confirm the camera tile disappears and nothing is left behind.
-
-## Where to buy a P1
-
-Thermal Master supports this project with hardware and an affiliate arrangement. If you are buying a
-camera and want the project to benefit, buy it through the shop link below, where the discount code
-applies:
-
-- Shop: https://thermalmaster.com/BESPOKD
-- Discount code: `THERMALYML01`, at that shop
-
-It is an affiliate link, so the project earns a commission, at no extra cost to you. It changes
-nothing about what this documentation says: the P3 still has not been tested, which is worth knowing
-before buying one.
 
 ## Credits
 

@@ -2278,6 +2278,38 @@ use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
 an interactive viewer, holds a display range, measures spots and regions, records clips, switches
 itself off, and reports what it costs.
 
+**Validated on a second printer on 2026-09-29, without Bespok3d.** An Ender 2 Pro Max driven by a
+Raspberry Pi 4 Model B (four Cortex-A72 cores, Debian 12, Python 3.11.2, aarch64), which the
+Bespok3d adapter does not support yet, so the plugin was started by hand: `plugin/files` and
+`requirements.txt` copied over, a venv built from the very wheels the U1 package bakes, and the
+entry script run under `sudo`, listening on all addresses on port 8082, since no udev rule
+gave the user the camera. Nothing on the printer was configured. It printed
+`camera connected: P1, streaming` three seconds after starting; the viewer and the settings page
+worked from the port directly, because every URL they emit is relative; two recordings of the
+hotend heating from room temperature to 196 C are clean, with no freeze and no watchdog line.
+Unplugged, the viewer said "no frames from the camera" and the log showed the I/O
+error and retries at 3, 6 and 12 s; plugged back, it reconnected at the next retry and the picture
+returned without a reload.
+
+What it costs there was measured the same day with the U1's protocol, each state held alone for
+30 s and read from `/proc/<pid>/stat`, "nothing" a minute after the last page closed:
+
+| State | U1, Cortex-A53 | Pi 4, Cortex-A72 |
+| --- | --- | --- |
+| Camera switched off | 0.0% | 0.1% |
+| Nothing watching | 4.6% | 4.1% |
+| Dashboard tile | 41.9%, Fluidd | 37.5%, Mainsail with `target_fps` 25 |
+| Viewer, pointer moving | 45.7% | 36.4% |
+
+A first look with `top` and the viewer open, the pointer not kept moving, read 28.1 to 33.3%, and
+the settings page's own line 28.5%. On the Pi the tile read a little above the viewer, the other
+way round from the U1. A Mainsail iframe tile is the viewer's own page, and `target_fps` does not
+apply to it: measured again with `target_fps` 15, the tile read 37.8%, the same within a point. So
+the difference is within what one 30 s window varies by, or a second consumer Mainsail opened; not
+looked into. So everything below the Bespok3d layer runs unchanged on a
+second, different Klipper printer. It is still the maintainer running it, so it is not the stranger's install that
+promotion to `stable` waits for.
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
@@ -2734,20 +2766,34 @@ before a frame exists.
 What it taught: **a test that depends on how long the machine has been up passes everywhere it has
 always run.** A fresh CI runner is the one place it is guaranteed to be young.
 
-**F-76. The first release's page in the Bespok3d app had no documentation and no changelog.
-Worked around in 0.27.1.** After 0.27.0 installed from the app, 2026-09-28, the plugin's page
-offered Overview, Doc, Config, Licence and Install log, with the Doc tab reading "No bundled
-documentation for this plugin yet" and no Changelog tab at all, where Bespok3d's own
-`rfid-creality` shows both. The package was not the cause: the `.b3` carries `doc/README.md` and
-`doc/CHANGELOG.md`, both in the packed manifest's `files[]`, and the release's index entry has a
-`doc_url` and a `changelog_url` that both answer 200. The difference was the dates. The builder's
-documentation says `published_at` and `updated_at` are stamped at build time and never written by
-hand; the builder at `9322144` stamped neither, so the entry carried two empty strings and the
-list's own `updated` was empty too. `rfid-creality` writes both in its source manifest, which is
-where its dates come from. 0.27.1 does the same, with a test that both are present, dated, and in
-order, and the README's release steps say to move `updated_at` with each release. To be
-reported to the Bespok3d maintainers. Whether the dates alone bring the two tabs back is confirmed
-when 0.27.1 is in the app.
+**F-76. The first release's page in the Bespok3d app showed no documentation and no changelog,
+and the manifest had no publication dates. Two things, only one of them ours.** After 0.27.0
+installed from the app, 2026-09-28, the plugin's page offered Overview, Doc, Config, Licence and
+Install log, with the Doc tab reading "No bundled documentation for this plugin yet" and no
+Changelog or Versions tab, where Bespok3d's own `rfid-creality` shows all three.
+
+The package was not the cause: the `.b3` carries `doc/README.md` and `doc/CHANGELOG.md`, both in
+the packed manifest's `files[]`, and the release's index entry has a `doc_url` and a `changelog_url`
+that both answer 200. Compared field by field with `rfid-creality`'s entry, the one real difference
+was the dates: ours had `published_at` and `updated_at` as empty strings, and the list's `updated`
+was empty too. The builder's documentation says both are stamped at build time and are never
+written by hand, in `doc/anatomy-of-the-manifest.md` and `doc/anatomy-of-a-b3-file.md`; the builder
+at `9322144` stamped neither. unlucio confirmed on 2026-09-29 that they are manifest fields the
+plugin writes, as `rfid-creality` does, so the builder behaves as intended and its documentation is
+what is wrong. 0.27.1 writes both, with a test that they are present, dated and in order, and the
+README's release steps say to move `updated_at` with each release.
+
+The empty tabs were the app's cache. With 0.27.1 published the page still showed them empty, and
+after the app was closed and opened again it showed the README under Doc, both changelog entries
+under Changelog, and a Versions tab. So whether the dates played any part is not known: 0.27.0 may
+have shown its documentation after a restart too. The page's "Published" date read 2026-09-29, the
+day of the 0.27.1 release, against a `published_at` of 2026-09-28, so the app takes that date from
+somewhere other than the manifest field. The page also carries "Package was unsigned at install",
+because the plugin was first installed on that printer from a hand-built package; switching to the
+signed 0.27.1 keeps that record, and a fresh install from the store should clear it.
+
+What it taught: **after publishing, restart the app before believing what its plugin page says.**
+A page that reads as broken may only be stale.
 
 ## 10. Reports owed elsewhere
 

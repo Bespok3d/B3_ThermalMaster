@@ -1,10 +1,19 @@
 # Changelog
 
+## 0.27.2
+
+- **The documentation has pictures.** A picture of the viewer and three scenes at the top, the
+  camera in Fluidd, the settings page, and one captured frame in each of the six palettes.
+- **A section on the palettes**, and a table of every setting on the settings page with the JSON
+  field that changes it at `/thermal/settings`, and an example of changing one.
+- **It has run on a second printer**, a Raspberry Pi 4 Klipper printer, started by hand. The hardware
+  status section says how that went and what it cost.
+- Nothing about the plugin itself changes.
+
 ## 0.27.1
 
-- **The plugin's page in the Bespok3d app carries its dates**, when it was first published and when
-  it was last updated. 0.27.0 went out without them, and its page showed no documentation and no
-  changelog. Nothing about the plugin itself changes.
+- **The plugin's manifest carries its publication dates**, when it was first published and when it
+  was last updated, which 0.27.0 left out. Nothing about the plugin itself changes.
 
 ## 0.27.0
 
