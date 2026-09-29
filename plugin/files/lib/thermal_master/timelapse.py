@@ -93,6 +93,11 @@ class TimelapseSettings:
         return shown
 
 
+# The button that forgets the saved Moonraker key. A command, like calibrating, rather than a
+# setting: there is nothing to show a person about a key except whether one is saved.
+FORGET_KEY_ACTION = "forget-moonraker-key"
+
+
 def clamped_keep(value: object, current: int) -> int:
     """How many prints to keep, pulled into range rather than refused."""
 

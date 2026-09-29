@@ -29,9 +29,9 @@ import numpy as np
 from PIL import Image
 
 from .log import log_line
-from .overlay import draw_overlay, placeholder_picture
+from .overlay import PLACEHOLDER_RGB, draw_overlay, with_banner
 from .pipeline import FIXED_RANGE, RenderSettings, ThermalRenderer, frame_bounds, ordered_range
-from .recording import CAMERA_OFF_RECORD, Recording
+from .recording import CAMERA_OFF_RECORD, LayerRecord, Recording
 from .temperature import celsius_for_raw, oriented_size
 from .timelapse import (
     TIMELAPSE_RANGE_AS_DISPLAYED,
@@ -43,6 +43,12 @@ from .timelapse import (
 # The firmware's own clips run at about 24 frames a second, so a thermal clip beside one plays at
 # the same pace: the 150 layer cube is six seconds.
 CLIP_FRAMES_PER_SECOND = 24
+
+
+# How long the finished part stays on screen at the end. At 24 frames a second the last layer was
+# otherwise gone in a twenty-fourth of a second, before anybody had seen what was printed. ffmpeg
+# repeats the frame itself, so the recording and the frame count stay one per layer.
+HOLD_LAST_SECONDS = 2
 
 
 # The short edge the clip is scaled up to, by whole pixels. At the sensor's own size H.264 keeps
@@ -71,16 +77,12 @@ NICENESS = 19
 FROM_START_LAYER = 2
 
 
-CAMERA_MISSING_TITLE = "Camera disconnected"
+# What the band across a missed layer says. The layer is named, because the picture under it is the
+# last one taken, and a still frame that does not say which layer it is not reads as a stuck part.
+CAMERA_MISSING_BANNER = "Camera disconnected, layer {layer}"
 
 
-CAMERA_MISSING_HINT = "No picture for this layer"
-
-
-CAMERA_OFF_TITLE = "Camera off"
-
-
-CAMERA_OFF_HINT = "Switched off for this layer"
+CAMERA_OFF_BANNER = "Camera off, layer {layer}"
 
 
 NO_FRAMES_REASON = (
@@ -186,10 +188,19 @@ def render_layer(
     return picture
 
 
-def missing_layer_picture(kind: int, size: tuple[int, int]) -> Image.Image:
-    if kind == CAMERA_OFF_RECORD:
-        return placeholder_picture(CAMERA_OFF_TITLE, CAMERA_OFF_HINT, size)
-    return placeholder_picture(CAMERA_MISSING_TITLE, CAMERA_MISSING_HINT, size)
+def missing_layer_picture(
+    record: LayerRecord, last_frame: Image.Image | None, size: tuple[int, int]
+) -> Image.Image:
+    """The last picture taken, with a band across its top saying the camera missed this layer.
+
+    The last picture rather than a separate card, so the clip holds still where the camera was lost
+    instead of jumping to something else and back, as the viewer does over a frozen stream. With no
+    earlier picture, the camera was missing from the start, and the band goes on a dark frame.
+    """
+
+    wording = CAMERA_OFF_BANNER if record.kind == CAMERA_OFF_RECORD else CAMERA_MISSING_BANNER
+    underneath = last_frame if last_frame is not None else Image.new("RGB", size, PLACEHOLDER_RGB)
+    return with_banner(underneath, wording.format(layer=record.layer))
 
 
 def ffmpeg_command(ffmpeg: str, size: tuple[int, int], output: Path) -> list[str]:
@@ -197,6 +208,7 @@ def ffmpeg_command(ffmpeg: str, size: tuple[int, int], output: Path) -> list[str
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{size[0]}x{size[1]}",
         "-r", str(CLIP_FRAMES_PER_SECOND), "-i", "-",
+        "-vf", f"tpad=stop_mode=clone:stop_duration={HOLD_LAST_SECONDS}",
         "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         "-threads", str(FFMPEG_THREADS), "-movflags", "+faststart", "-f", "mp4", str(output),
     ]
@@ -220,7 +232,7 @@ def feed_frames(
     encoded = EncodedFrames()
     for record in recording.records():
         if record.counts is None:
-            picture = missing_layer_picture(record.kind, size)
+            picture = missing_layer_picture(record, encoded.last_frame, size)
         else:
             picture = render_layer(renderer, record.counts, size)
             encoded.last_frame = picture

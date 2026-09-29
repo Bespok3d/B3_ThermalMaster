@@ -2250,9 +2250,11 @@ Sketched on 2026-09-28 and not started; nothing here is built.
   reboot or a power loss mid-print, the plugin finds kept temperatures with no clip whose print is
   no longer running when it next starts, and makes the clip from what it has. A plugin update
   cannot restart it mid-print, since B3 blocks updates while printing; a crash could, and then the
-  same print is still running, so it carries on adding to the same set. With the camera unplugged,
-  every layer passed without it gets the same "camera disconnected" picture the viewer shows, so
-  the clip keeps its length and shows where the camera was lost.
+  same print is still running, so it carries on adding to the same set. With the camera unplugged
+  or switched off, every layer passed without it repeats the last picture taken with a band across
+  its top, "Camera disconnected, layer N" or "Camera off, layer N", drawn as the viewer draws its
+  line over a frozen stream, so the clip keeps its length, holds still where the camera was lost,
+  and says so (changed on 2026-09-29 from a separate card, after the Pi 4 run below).
 - **The gain can switch itself, once per print (6).** A print starts in the gain the user has set.
   If that is high sensitivity (-20 to 150 C) and the hottest pixel reaches 145 C, typically the
   nozzle coming into view, the plugin switches the camera to wide range (0 to 550 C) and keeps it
@@ -2465,8 +2467,7 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    - Modules: `timelapse.py` (the settings, `PrintTracker`, `FrameTap`), `recording.py` (the folder,
      `frames.bin`, `Retention`), `moonraker.py`, `clip.py` (rendering and ffmpeg) and
      `timelapse_service.py` (the two threads). The stream's overlay moved into
-     `ThermalRenderer.overlay_for`, and the "Stream off" picture into `placeholder_picture`, so the
-     clip's readout and its missing layer pictures are the tile's own.
+     `ThermalRenderer.overlay_for`, so the clip's readout is the tile's own.
    - The capture loop offers every frame through `LatestFrame.offer_raw`, before the idle check;
      the tap copies one only when a layer asked for it.
    - Moonraker is polled every 2 s when no print is running, not 5 s: a run against a stand-in
@@ -2535,6 +2536,60 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    never found, stopped), the floor, a refusal and the removal; the client against a stand-in
    Moonraker for each call; and end to end with a real encode uploaded to a stand-in Moonraker,
    byte for byte the clip.
+   **Tried on the Pi 4 on 2026-09-29, with `moonraker-timelapse` loaded as above:** the clip,
+   77 frames made in 2.2 s, appeared on Mainsail's Timelapse page with its thumbnail as
+   `<G-code name>_<start UTC>_thermal.mp4`, and deleting the print from the settings page took
+   it off Mainsail's page too. The same evening the rest of step 1's list: with the camera
+   unplugged mid-print the capture reconnected 48 s later and the missed layers got the "Camera
+   disconnected" picture, but its title is wider than a portrait 480 by 640 frame and was cut off
+   at both sides; the plugin stopped with Ctrl-C mid-print, the print cancelled and the plugin
+   started again made the clip of what it had in 1.1 s; and Keep set to 2 left two prints.
+   **Changed after that run, the same day:** a missed layer now repeats the last picture with a
+   band across its top naming the layer, in the viewer's colours, its text shrunk until it fits
+   the frame's width (`with_banner`, `fitted_pixel_height`), and a dark frame with the band when
+   nothing had been taken yet. "Forget the saved key" became a button, sent as the command
+   `forget-moonraker-key` like calibrating, greyed out while no key is saved; the browser harness
+   checks it greys out, comes back with a key, forgets it and greys out again without a reload.
+
+   **Tried on the U1 on 2026-09-29, installed through Bespok3d from a local build:** the log said
+   `timelapse kept in /userdata/bespok3d/var/thermal-master-timelapse`, so the manifest's argument
+   reached the service; `/usr/bin/ffmpeg` and `/usr/bin/nice` are there. A 100 layer Voron cube in
+   Snapmaker Orca with the printer's own timelapse on: the panel counted "layer 51 of 100, 52 frames
+   so far"; the plugin cost 5.9% of one core during the print with the tile closed
+   (`measure-cpu-on-printer.sh`), against 4.6% idle; after the print the panel said it was waiting
+   for the printer's own clip, then making ours; the clip, 102 frames at 480 by 640, took 6.1 s,
+   and was on Fluidd's Timelapse page as `Voron_Design_Cube_v7_PLA_12m4s_20260929190706_thermal.mp4`
+   beside the firmware's `..._20260929190706.mp4`. The recording's own start was 19:07:05 and the
+   firmware's stamp 19:07:06, so the two second tolerance was needed. Deleting the print took our
+   copies off Fluidd's page and left the firmware's. Snapmaker's phone app does not list the
+   thermal clip; not looked into. Found: the settings page's list stayed at "Recording now, 84
+   frames" after the clip was made, until the page was reloaded, and offered Delete for the print
+   being recorded, which the service refuses anyway.
+
+   **Changed after the U1 run, the same day:** the list on the settings page offers no Delete for
+   the print being recorded; it is fetched again as HTML from `/thermal/timelapses.html`, drawn by
+   the same `timelapse_list` the page is drawn with, whenever the timelapse's status line changes,
+   and swapped in unless a clip in it is playing (the browser harness checks a clip made while the
+   page is open appears without a reload); and the clip holds its last frame for 2 s, through
+   ffmpeg's `tpad=stop_mode=clone`, so the recording and the frame count stay one per layer.
+
+   **For later: Snapmaker's phone app.** Its "Time lapse camera" list shows the firmware's clips
+   by their name without the start stamp, and not the thermal one. A guess, not checked: it reads
+   names that end in the stamp, which ours do not, since `_thermal` comes after it, and it may want
+   a `_cover.jpg`. Cheap to test before any code: upload a renamed copy by hand, as the test pair
+   was, once named `<name>_thermal_<stamp>.mp4` and once with a `_cover.jpg` beside it.
+
+   **Open, to come back to:** the colour bar. On a measured range it spans the scene, and with the
+   nozzle in view (16.6 to 149.4 C on the Pi 4) most of it is the top colour, flat, because the
+   colours only change across the auto range. Proposed on 2026-09-29: A, the bar spans the range
+   where colours change, as it already does on a told range, with the triangles saying the scene
+   goes past an end and the markers still reading the extremes; or B, a broken bar keeping the
+   extremes in short caps. A is how it was before 0.14.0. A third came up the same day from a
+   friend of the maintainer's: a logarithmic mapping, so the whole scene keeps its colours but the
+   low end, the bed and the part, gets more of them than the nozzle does. Under discussion, not
+   to be built yet. It reaches the tile, the viewer, the snapshot, recordings and the timelapse
+   alike.
+
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.

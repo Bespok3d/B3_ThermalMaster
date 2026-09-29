@@ -26,7 +26,7 @@ from .camera import (
     streaming_wanted,
 )
 from .cost import ProcessCost, describe_cost
-from .page import describe_device, render_control_page
+from .page import describe_device, render_control_page, timelapse_list
 from .palettes import build_palettes
 from .recording import Recording, find_recording
 from .settings import (
@@ -86,6 +86,7 @@ ROUTES = {
     "/frame.bin": "serve_thermal_frame",
     "/view": "serve_viewer_page",
     "/timelapses": "serve_timelapses",
+    "/timelapses.html": "serve_timelapse_list",
     "/timelapse.mp4": "serve_timelapse_clip",
     "/timelapse.jpg": "serve_timelapse_thumbnail",
     "/": "serve_control_page",
@@ -521,6 +522,11 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         """Every print's timelapse, newest first, and a sentence on what the timelapse is doing."""
 
         self.send_json(self.timelapse_listing())
+
+    def serve_timelapse_list(self) -> None:
+        """The list as the settings page draws it, for the page to swap in when it changes."""
+
+        self.send_html(timelapse_list(self.timelapse_listing()))
 
     def requested_recording(self) -> Recording | None:
         timelapses = self.thermal_server.timelapses

@@ -158,12 +158,30 @@ def timelapse_service(streamer, store):
     )
 
 
+def run_timelapse_refresh_checks(page, service) -> list:
+    """A clip finished while the page is open shows up without a reload (found on the U1)."""
+
+    streamer = sys.modules["thermal_master"]
+    before = page.locator(".clip").count()
+    made = streamer.Recording.create(service.root, 1_790_003_600.0, "0002F2", "later.gcode")
+    made.finish("complete")
+    made.clip_path.write_bytes(b"another clip's bytes")
+    service._say("On. Waiting for a print to start, a clip just made.")  # noqa: SLF001
+    page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
+    return [("a finished clip appears without a reload", page.locator(".clip").count(), before + 1)]
+
+
+# The settings page asks for the status line every five seconds; a little over that.
+COST_POLL_WAIT_MILLISECONDS = 6500
+
+
 def run_timelapse_checks(page, store) -> list:
     """The Timelapse section posts in the background like the rest, and never shows the key."""
 
     navigated = {"yes": False}
     page.on("framenavigated", lambda _frame: navigated.update(yes=True))
     checks = []
+    checks.append(("forget is greyed out with no key", page.is_disabled("#forget-key"), True))
     page.check("input[name=timelapse]")
     page.fill("input[name=moonraker_api_key]", "a-made-up-key")
     page.click("fieldset#timelapse button[type=submit]")
@@ -180,6 +198,12 @@ def run_timelapse_checks(page, store) -> list:
         "Saved",
     ))
     checks.append(("the key is nowhere on the page", "a-made-up-key" in page.content(), False))
+    checks.append(("forget is offered once there is a key", page.is_disabled("#forget-key"), False))
+    page.click("#forget-key")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("forget forgets it", store.timelapse_snapshot().moonraker_api_key, ""))
+    checks.append(("and greys itself out again", page.is_disabled("#forget-key"), True))
+    checks.append(("still without reloading the page", navigated["yes"], False))
     checks.append(("a print name is shown as text", page.locator(".clip strong").inner_text(),
                    "<cube>.gcode"))
     page.click(".clip button[type=submit]")
@@ -886,6 +910,7 @@ def main() -> None:
         print("")
         print("timelapse")
         report(run_timelapse_checks(timelapse_page, store), problems)
+        report(run_timelapse_refresh_checks(timelapse_page, _server.timelapses), problems)
 
         viewer = browser.new_page()
         viewer.on("pageerror", lambda error: problems.append(f"viewer page error: {error}"))

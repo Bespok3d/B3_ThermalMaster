@@ -40,7 +40,12 @@ from .temperature import (
     VALID_UNITS,
     FrameStats,
 )
-from .timelapse import VALID_TIMELAPSE_RANGES, TimelapseSettings, clamped_keep
+from .timelapse import (
+    FORGET_KEY_ACTION,
+    VALID_TIMELAPSE_RANGES,
+    TimelapseSettings,
+    clamped_keep,
+)
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
 # was given rather than a common base, or every caller loses its type.
@@ -537,6 +542,8 @@ def timelapse_settings_from_json(payload: dict, current: TimelapseSettings) -> T
         for key, check in TIMELAPSE_JSON_SETTINGS.items()
         if key in payload
     }
+    if payload.get(SHUTTER_FIELD) == FORGET_KEY_ACTION:
+        changes["moonraker_api_key"] = ""
     return dataclasses.replace(current, **changes)
 
 
@@ -545,14 +552,14 @@ def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> Time
 
     The switch is a checkbox, so absent means off, as for every other box on the form. The key is
     the exception to "the form posts every field": a password box is never filled in from the page,
-    so an empty one means "leave it as it is", and forgetting the key is its own box.
+    so an empty one means "leave it as it is", and forgetting the key is a button of its own.
     """
 
     def posted(field: str) -> str:
         return str(form.get(field, [""])[0])
 
     typed_key = posted("moonraker_api_key").strip()
-    forgotten = "forget_moonraker_api_key" in form
+    forgotten = FORGET_KEY_ACTION in form.get(SHUTTER_FIELD, [])
     return dataclasses.replace(
         timelapse_settings_from_json(
             {

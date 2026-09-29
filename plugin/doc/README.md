@@ -219,7 +219,7 @@ them have met the hardware. If you have a P3, it should work, and a report eithe
 
 Switch it on in the Timelapse panel of the settings page, and every print gets a thermal clip: one
 frame each time the layer changes, one more for the finished part, made into a clip once the print
-has ended. The clips are listed at the bottom of the settings page, newest first, to play, download
+has ended, which holds the finished part on screen for two seconds at the end. The clips are listed at the bottom of the settings page, newest first, to play, download
 or delete.
 
 **The slicer has to tell Klipper the layer number.** Most do not by default. In OrcaSlicer or
@@ -257,14 +257,15 @@ until there is room again. The plugin only ever deletes its own files, which liv
 
 **Nothing gathered is thrown away.** A cancelled print gets its clip, and so does one that was cut
 short by a reboot or a power cut: the clip is made from what was recorded the next time the plugin
-starts. A layer passed with the camera unplugged gets a "Camera disconnected" frame, and one passed
-with the camera switched off a "Camera off" frame, so the clip keeps its length and shows where the
-camera was lost. Switching the timelapse off during a print keeps what was taken so far.
+starts. A layer passed with the camera unplugged repeats the last picture with "Camera
+disconnected" and the layer across its top, and one passed with the camera switched off says
+"Camera off" instead, so the clip keeps its length and holds still where the camera was lost.
+Switching the timelapse off during a print keeps what was taken so far.
 
 **If Moonraker asks for a login,** for instance with Bespok3d's Moonraker Login plugin, the panel
 says so and the timelapse cannot follow the print. Paste Moonraker's API key into the Moonraker key
 box. It is kept on the printer and is never shown again, not on the page and not at
-`/thermal/settings`.
+`/thermal/settings`; "Forget the saved key" removes it, and is greyed out while none is saved.
 
 **On the Timelapse page of Fluidd and Mainsail too.** When Moonraker has a Timelapse page, each
 clip and its thumbnail are copied there as well, through Moonraker. The U1 has one, from Bespok3d's

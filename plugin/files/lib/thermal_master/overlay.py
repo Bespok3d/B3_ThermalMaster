@@ -528,6 +528,11 @@ STREAM_OFF_TITLE = "Stream off"
 STREAM_OFF_HINT = "Press Start to turn the camera back on"
 
 
+# The plugin's dark background, behind the "Stream off" words and under a timelapse frame for a
+# layer missed before any was taken.
+PLACEHOLDER_RGB = (16, 18, 22)
+
+
 # The size it is drawn at. Nothing is streaming, so there is no frame to take a shape from, and
 # this is what the sensor produces doubled: big enough for the text, small enough to be honest
 # about what the camera would give.
@@ -543,37 +548,67 @@ def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
     special case, and each of them says what has happened rather than showing a broken image.
     """
 
-    return placeholder_picture(STREAM_OFF_TITLE, STREAM_OFF_HINT, size)
-
-
-# Kept per title and size, because a timelapse draws the same one for every layer the camera missed.
-@functools.lru_cache(maxsize=8)
-def placeholder_picture(title: str, hint: str, size: tuple[int, int]) -> Image.Image:
-    """Two centred lines of text on the plugin's dark background: what happened, and what to do.
-
-    Shared by the "Stream off" picture and the timelapse's frames for a layer the camera missed, so
-    that a clip says what happened to its missing layers in the same voice the tile does.
-    """
-
-    picture = Image.new("RGB", size, (16, 18, 22))
+    picture = Image.new("RGB", size, PLACEHOLDER_RGB)
     style = overlay_style(size, colorbar=False)
     title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
     draw = ImageDraw.Draw(picture)
-    title_width = label_width(title, title_height)
+    title_width = label_width(STREAM_OFF_TITLE, title_height)
     draw.text(
         ((size[0] - title_width) / 2, size[1] / 2 - title_height),
-        title,
+        STREAM_OFF_TITLE,
         font=overlay_font(title_height),
         fill=OVERLAY_TEXT_RGB,
     )
-    hint_width = label_width(hint, style.pixel_height)
+    hint_width = label_width(STREAM_OFF_HINT, style.pixel_height)
     draw.text(
         ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height / 2),
-        hint,
+        STREAM_OFF_HINT,
         font=overlay_font(style.pixel_height),
         fill=(154, 160, 170),
     )
     return picture
+
+
+# The band across the top of a picture that is not live: the viewer's watchdog line, drawn the same
+# way, so a timelapse says a layer was missed in the words and colours the viewer uses for a frozen
+# stream. A twentieth of the picture's height for the text, on a band one and a half times that.
+BANNER_FONT_DIVISOR = 20
+
+
+BANNER_BACKGROUND_RGBA = (13, 15, 18, 204)
+
+
+BANNER_TEXT_RGB = (216, 117, 42)
+
+
+BANNER_PADDING_PIXELS = 4
+
+
+def fitted_pixel_height(text: str, preferred: int, width: int) -> int:
+    """The largest text height up to the preferred one at which the text fits the width."""
+
+    pixel_height = preferred
+    while pixel_height > OVERLAY_MIN_FONT_PIXELS and label_width(text, pixel_height) > width:
+        pixel_height -= 1
+    return pixel_height
+
+
+def with_banner(picture: Image.Image, text: str) -> Image.Image:
+    """A copy of the picture with a line of text on a dark band across its top."""
+
+    width, height = picture.size
+    preferred = max(OVERLAY_MIN_FONT_PIXELS, height // BANNER_FONT_DIVISOR)
+    pixel_height = fitted_pixel_height(text, preferred, width - 2 * BANNER_PADDING_PIXELS)
+    band = Image.new("RGBA", picture.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(band)
+    draw.rectangle((0, 0, width, int(pixel_height * 1.5)), fill=BANNER_BACKGROUND_RGBA)
+    draw.text(
+        (BANNER_PADDING_PIXELS, pixel_height // 4),
+        text,
+        font=overlay_font(pixel_height),
+        fill=BANNER_TEXT_RGB,
+    )
+    return Image.alpha_composite(picture.convert("RGBA"), band).convert("RGB")
 
 
 def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:

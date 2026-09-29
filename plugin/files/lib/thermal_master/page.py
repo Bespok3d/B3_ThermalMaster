@@ -30,7 +30,12 @@ from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
 from .recording import BYTES_PER_MEGABYTE
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
-from .timelapse import MAX_TIMELAPSE_KEEP, MIN_TIMELAPSE_KEEP, VALID_TIMELAPSE_RANGES
+from .timelapse import (
+    FORGET_KEY_ACTION,
+    MAX_TIMELAPSE_KEEP,
+    MIN_TIMELAPSE_KEEP,
+    VALID_TIMELAPSE_RANGES,
+)
 
 # What the two filters are called on the page. The names are about what a person sees rather than
 # about the algorithm: nobody choosing how their camera looks wants to be asked about bilinear
@@ -114,6 +119,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
             border: 1px solid #33373f; border-radius: 4px; }}
   input[type="number"] {{ width: 6rem; padding: 0.35rem; background: #1d2026; color: inherit;
                           border: 1px solid #33373f; border-radius: 4px; }}
+  button:disabled {{ opacity: 0.4; cursor: default; }}
   button {{ margin-top: 0.8rem; margin-right: 0.5rem; padding: 0.5rem 1.1rem; border: 0;
             border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
             cursor: pointer; }}
@@ -205,15 +211,16 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><span>Moonraker key</span>
              <input type="password" name="moonraker_api_key" autocomplete="off"
                     placeholder="{key_placeholder}"></label>
-      <label><input type="checkbox" name="forget_moonraker_api_key"> Forget the saved key</label>
       <button type="submit">Apply</button>
+      <button type="submit" name="command" value="{forget_key_command}"
+              id="forget-key"{forget_disabled}>Forget the saved key</button>
       <p class="status" id="timelapse-status">{timelapse_status}</p>
       {gain_warning}
     </fieldset>
   </form>
   <section id="timelapses">
     <h2>Timelapses</h2>
-    {timelapse_list}
+    <div id="timelapse-list">{timelapse_list}</div>
   </section>
   <p>Following the scene maps the coldest and hottest thing in view to the ends of the palette, so
      contrast is always as good as it can be and a colour means nothing in particular: it changes
@@ -283,6 +290,8 @@ CONTROL_SCRIPT = """<script>
   var streamSwitch = document.getElementById("stream-switch");
   var costLine = document.getElementById("plugin-cost");
   var timelapseLine = document.getElementById("timelapse-status");
+  var timelapseList = document.getElementById("timelapse-list");
+  var listedFor = timelapseLine ? timelapseLine.textContent : "";
   if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
   // getAttribute, not form.action. A named control shadows a form property of the same name, so
   // form.action is only the URL as long as nothing in the form is called "action". The attribute
@@ -364,19 +373,40 @@ CONTROL_SCRIPT = """<script>
     if (costLine && typeof state.cost === "string") { costLine.textContent = state.cost; }
     if (timelapseLine && typeof state.timelapse_status === "string") {
       timelapseLine.textContent = state.timelapse_status;
+      if (state.timelapse_status !== listedFor) {
+        listedFor = state.timelapse_status;
+        refreshTimelapses();
+      }
     }
   }
 
+  // The list was drawn once, when the page loaded, and a clip finished while the page was open
+  // stayed "Recording now" until a reload. It is asked for again whenever the timelapse's line
+  // changes, as the same HTML the page was drawn with, and left alone while a clip is playing, so
+  // somebody watching one is not interrupted by the next.
+  function refreshTimelapses() {
+    if (!timelapseList) { return; }
+    fetch("timelapses.html", { headers: { "Accept": "text/html" } })
+      .then(function (reply) { return reply.ok ? reply.text() : Promise.reject(reply.status); })
+      .then(function (markup) {
+        var playing = Array.prototype.some.call(
+          timelapseList.querySelectorAll("video"), function (clip) { return !clip.paused; });
+        if (!playing && timelapseList.innerHTML !== markup) { timelapseList.innerHTML = markup; }
+      })
+      .catch(function () {});
+  }
+
   // The key is never sent back, so the box it was typed into is emptied once it has gone up, and
-  // the box that forgets it is unticked, rather than left to forget it again on the next Apply.
+  // the button that forgets it is only offered while there is one to forget.
   function forgetSecrets(state) {
     var key = form.elements.namedItem("moonraker_api_key");
-    var forget = form.elements.namedItem("forget_moonraker_api_key");
+    var forget = document.getElementById("forget-key");
+    var saved = !!state.moonraker_api_key_set;
     if (key) {
       key.value = "";
-      key.placeholder = state.moonraker_api_key_set ? "Saved" : "Not set";
+      key.placeholder = saved ? "Saved" : "Not set";
     }
-    if (forget) { forget.checked = false; }
+    if (forget) { forget.disabled = !saved; }
   }
 
   // Asked for on its own timer, and only this line is touched with the answer. Running the whole
@@ -465,6 +495,8 @@ def timelapse_fields(settings: dict) -> dict:
         "timelapse_low": f"{settings['timelapse_range_low_celsius']:.1f}",
         "timelapse_high": f"{settings['timelapse_range_high_celsius']:.1f}",
         "key_placeholder": "Saved" if settings["moonraker_api_key_set"] else "Not set",
+        "forget_key_command": FORGET_KEY_ACTION,
+        "forget_disabled": "" if settings["moonraker_api_key_set"] else " disabled",
         "gain_warning": HIGH_SENSITIVITY_WARNING if warned else "",
     }
 
@@ -491,6 +523,15 @@ def clip_entry(summary: dict) -> str:
         if summary["has_clip"]
         else ""
     )
+    # Not offered while the print is still being recorded: the service would refuse it, and a
+    # button that does nothing is worse than none.
+    delete = (
+        ""
+        if summary["state"] == "printing"
+        else f'<form method="post" action="timelapses">'
+        f'<input type="hidden" name="delete" value="{quoted}">'
+        '<button type="submit">Delete</button></form>'
+    )
     error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
     if summary.get("published_as"):
         error += " Also on the Timelapse page."
@@ -500,9 +541,7 @@ def clip_entry(summary: dict) -> str:
         f'<article class="clip">{video}'
         f"<p><strong>{html.escape(str(summary['filename'] or 'A print'))}</strong>, {started}. "
         f"{state}, {summary['frames']} frames.{error}</p>"
-        f'<div>{download}<form method="post" action="timelapses">'
-        f'<input type="hidden" name="delete" value="{quoted}">'
-        '<button type="submit">Delete</button></form></div></article>'
+        f"<div>{download}{delete}</div></article>"
     )
 
 

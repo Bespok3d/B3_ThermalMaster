@@ -15,6 +15,7 @@ import shutil
 import subprocess
 
 import fake_camera
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -153,7 +154,9 @@ def frames_in(clip):
 
 @needs_ffmpeg
 @pytest.mark.timeout(120)
-def test_every_layer_is_in_the_clip_a_missed_one_included(thermal_streamer, palettes, tmp_path):
+def test_every_layer_is_in_the_clip_a_missed_one_included_and_the_last_is_held(
+    thermal_streamer, palettes, tmp_path
+):
     recording = recording_of(
         thermal_streamer, tmp_path, [(1, 40.0), (2, None), (3, 50.0), (4, 55.0)]
     )
@@ -164,7 +167,8 @@ def test_every_layer_is_in_the_clip_a_missed_one_included(thermal_streamer, pale
 
     assert outcome.get("error") is None
     assert outcome["frames"] == 4
-    assert frames_in(recording.clip_path) == (640, 480, 4)
+    held = thermal_streamer.HOLD_LAST_SECONDS * thermal_streamer.CLIP_FRAMES_PER_SECOND
+    assert frames_in(recording.clip_path) == (640, 480, 4 + held)
     assert Image.open(recording.thumbnail_path).size == (120, 90)
     assert not list(tmp_path.rglob("*.partial"))
 
@@ -182,3 +186,43 @@ def test_a_clip_ffmpeg_refuses_leaves_nothing_behind(thermal_streamer, palettes,
     assert "ffmpeg could not make the clip" in outcome["error"]
     assert not recording.has_clip
     assert not list(tmp_path.rglob("*.partial"))
+
+
+def test_a_missed_layer_is_the_last_picture_with_a_band_over_its_top(
+    thermal_streamer, palettes, tmp_path
+):
+    recording = recording_of(thermal_streamer, tmp_path, [(1, 40.0), (2, None)])
+    size = thermal_streamer.picture_size(recording, 0)
+    renderer = thermal_streamer.ThermalRenderer(
+        palettes["ironbow"], thermal_streamer.RenderSettings()
+    )
+    first, missed = list(recording.records())
+    last = thermal_streamer.render_layer(renderer, first.counts, size)
+
+    picture = thermal_streamer.missing_layer_picture(missed, last, size)
+
+    band = picture.size[1] // 10
+    drawn, underneath = np.asarray(picture), np.asarray(last)
+    assert picture.size == last.size
+    assert np.array_equal(drawn[band:], underneath[band:])
+    assert not np.array_equal(drawn[: band // 2], underneath[: band // 2])
+
+
+def test_a_layer_missed_before_any_was_taken_gets_the_band_on_a_dark_frame(thermal_streamer):
+    missed = thermal_streamer.LayerRecord(0, thermal_streamer.CAMERA_MISSING_RECORD, None, STARTED)
+
+    picture = thermal_streamer.missing_layer_picture(missed, None, (480, 640))
+
+    assert picture.size == (480, 640)
+    assert picture.getpixel((240, 600)) == thermal_streamer.PLACEHOLDER_RGB
+
+
+def test_the_band_fits_a_portrait_frame(thermal_streamer):
+    """The first version drew its title wider than a 480 pixel wide frame, cut off at both ends."""
+
+    text = thermal_streamer.CAMERA_MISSING_BANNER.format(layer=1234)
+    width = 480 - 2 * thermal_streamer.BANNER_PADDING_PIXELS
+
+    fitted = thermal_streamer.fitted_pixel_height(text, 640 // 20, width)
+
+    assert thermal_streamer.label_width(text, fitted) <= width

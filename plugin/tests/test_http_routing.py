@@ -45,6 +45,7 @@ def test_nothing_else_accepts_a_post(thermal_streamer):
 
 def test_the_timelapses_have_their_own_paths(thermal_streamer):
     assert thermal_streamer.resolve_route("/timelapses") == "serve_timelapses"
+    assert thermal_streamer.resolve_route("/timelapses.html") == "serve_timelapse_list"
     assert thermal_streamer.resolve_route("/timelapse.mp4?id=20260929-120000") == (
         "serve_timelapse_clip"
     )

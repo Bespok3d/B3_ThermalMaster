@@ -118,7 +118,7 @@ def test_an_empty_key_box_leaves_the_saved_key_alone(thermal_streamer):
     typed = thermal_streamer.timelapse_settings_from_form(form(moonraker_api_key=" new-key "),
                                                           current)
     forgotten = thermal_streamer.timelapse_settings_from_form(
-        form(forget_moonraker_api_key="on"), current
+        form(command=thermal_streamer.FORGET_KEY_ACTION), current
     )
 
     assert kept.moonraker_api_key == "a-made-up-key"
@@ -175,3 +175,47 @@ def test_a_clip_on_the_timelapse_page_says_so(thermal_streamer, settings_dict):
     page = thermal_streamer.render_control_page(settings_dict(), ["ironbow"], None, None, listed)
 
     assert "Also on the Timelapse page." in page
+
+
+def test_the_forget_button_also_works_as_json(thermal_streamer):
+    current = dataclasses.replace(thermal_streamer.TimelapseSettings(),
+                                  moonraker_api_key="a-made-up-key")
+
+    updated = thermal_streamer.timelapse_settings_from_json(
+        {"command": thermal_streamer.FORGET_KEY_ACTION}, current
+    )
+
+    assert updated.moonraker_api_key == ""
+
+
+def test_the_forget_button_is_greyed_out_until_there_is_a_key(thermal_streamer, settings_dict):
+    shown = settings_dict()
+    without = thermal_streamer.render_control_page(shown, ["ironbow"])
+    with_key = thermal_streamer.render_control_page(
+        {**shown, "moonraker_api_key_set": True}, ["ironbow"]
+    )
+
+    assert 'id="forget-key" disabled>' in without
+    assert 'id="forget-key">' in with_key
+    assert 'name="forget_moonraker_api_key"' not in without
+
+
+def test_a_print_being_recorded_offers_no_delete(thermal_streamer, settings_dict):
+    recording = {
+        "id": "20260921-141320", "name": "x_thermal.mp4", "filename": "cube.gcode",
+        "started_at": 1790000000.0, "state": "printing", "frames": 84, "has_clip": False,
+        "clip_bytes": 0, "has_frames": True, "error": None,
+        "published_as": None, "publish_error": None,
+    }
+    finished = {**recording, "state": "complete", "has_clip": True}
+
+    printing_page = thermal_streamer.render_control_page(
+        settings_dict(), ["ironbow"], None, None, {"status": "", "timelapses": [recording]}
+    )
+    finished_page = thermal_streamer.render_control_page(
+        settings_dict(), ["ironbow"], None, None, {"status": "", "timelapses": [finished]}
+    )
+
+    assert "Recording now, 84 frames." in printing_page
+    assert 'name="delete"' not in printing_page
+    assert 'name="delete"' in finished_page

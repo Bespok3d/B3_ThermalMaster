@@ -177,3 +177,18 @@ def test_a_range_header_is_read_the_way_a_video_player_sends_it(thermal_streamer
     assert requested_range("bytes=2000-", 1000) is None
     assert requested_range("bytes=0-1,5-9", 1000) is None
     assert requested_range(None, 1000) is None
+
+
+def test_the_list_is_served_as_the_page_draws_it(thermal_streamer, serving, tmp_path):
+    """For the page to swap in when a clip is finished while it is open."""
+
+    server, _ = serving
+    recording = finished(thermal_streamer, tmp_path)
+
+    status, headers, body = ask(server, "GET", "/timelapses.html")
+
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert body.decode() == thermal_streamer.timelapse_list(
+        {"timelapses": [recording.summary()]}
+    )
