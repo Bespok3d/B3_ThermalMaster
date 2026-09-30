@@ -53,7 +53,7 @@ recalibrate the sensor. Changes take effect immediately and are remembered acros
 beside an option explains it: hover over it to read, or click it to keep the explanation open until
 the next click. The plugin's version is at the foot of the page.
 
-![The settings page: the Image, Range, Readout and Camera panels](images/settings.jpg)
+![The settings page on a phone: the live picture and the Image, Range and Readout panels, then the Camera and Timelapse panels](images/settings.jpg)
 
 | Panel | Setting | JSON field | Values |
 | --- | --- | --- | --- |
