@@ -82,6 +82,17 @@ class TimelapseSettings:
     timelapse_range_mode: str = DEFAULT_TIMELAPSE_RANGE
     timelapse_range_low_celsius: float = DEFAULT_TIMELAPSE_LOW_CELSIUS
     timelapse_range_high_celsius: float = DEFAULT_TIMELAPSE_HIGH_CELSIUS
+    # The readout drawn into a clip, apart from the live picture's, so a clip can come out plain
+    # while the tile keeps its numbers, or the other way round. On by default, as the live one is.
+    timelapse_colorbar: bool = True
+    timelapse_reticle: bool = True
+    timelapse_hotspot: bool = True
+    timelapse_coldspot: bool = True
+    timelapse_spots: bool = True
+    # Which colour scale a clip was made with, in its corner and in its name. Off by default: the
+    # list on the settings page always says, and a name without it sorts beside the firmware's.
+    timelapse_scale_label: bool = False
+    timelapse_scale_in_name: bool = False
     moonraker_api_key: str = ""
 
     def public(self) -> dict:
@@ -96,6 +107,28 @@ class TimelapseSettings:
 # The button that forgets the saved Moonraker key. A command, like calibrating, rather than a
 # setting: there is nothing to show a person about a key except whether one is saved.
 FORGET_KEY_ACTION = "forget-moonraker-key"
+
+
+# The button that sets the clips' readout to whatever the live picture's is.
+COPY_READOUT_ACTION = "copy-live-readout"
+
+
+# The timelapse's readout switches, and the live ones they stand in for in a clip.
+CLIP_READOUT_SWITCHES = {
+    "timelapse_colorbar": "colorbar",
+    "timelapse_reticle": "reticle",
+    "timelapse_hotspot": "hotspot",
+    "timelapse_coldspot": "coldspot",
+}
+
+
+# The switches that are plain checkboxes, on the form and in JSON.
+TIMELAPSE_SWITCHES = (
+    *CLIP_READOUT_SWITCHES,
+    "timelapse_spots",
+    "timelapse_scale_label",
+    "timelapse_scale_in_name",
+)
 
 
 def clamped_keep(value: object, current: int) -> int:
@@ -149,6 +182,9 @@ class PrintStatus:
     filename: str
     current_layer: int | None
     total_layer: int | None
+    # Whether a Snapmaker's firmware is recording its own clip of this print. None on a printer that
+    # has no such thing to say, which is every printer that is not a Snapmaker.
+    firmware_timelapse: bool | None = None
 
     @property
     def active(self) -> bool:

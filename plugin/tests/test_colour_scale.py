@@ -1,11 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 Mauker and the Bespok3d contributors
 # SPDX-License-Identifier: Apache-2.0
-"""The colour scales being compared on the test/color-bar branch.
+"""The four colour scales: the stretch, the knee, and the two logs.
 
-What matters is that each curve is the one the study drew, that the ruler and the picture ask the
-same question and so cannot disagree, that today's picture is untouched, and that a held range is
-left alone. The clip side is here too: the print's own coldest and hottest, the stamp, and making a
-clip again with another scale.
+What matters is that each curve is the one chosen on the U1, that the ruler and the picture ask
+the same question and so cannot disagree, that the stretch's picture is untouched, that the fast
+ways of drawing a curve land where the curve itself would, and that a held range keeps its
+meaning under every scale. The clip side is here too: the print's own coldest and hottest, and
+making a clip again with another scale.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from PIL import Image
 STARTED = 1_790_000_000.0
 KNEE_SHARE = 0.85
 PLAIN = {"noise_reduction_weight": 1.0, "detail_strength": 0.0}
+CURVES = ["knee", "log-mild", "log-strong"]
 
 
 def raw_for(celsius):
@@ -44,101 +46,116 @@ def mapping(streamer, scale, display=(20.0, 34.0), scene=(20.0, 190.0)):
     )
 
 
-def rendered(streamer, palettes, scale, frames, **settings):
-    renderer = streamer.ThermalRenderer(
+def renderer_for(streamer, palettes, scale, told=None, **settings):
+    return streamer.ThermalRenderer(
         palettes["ironbow"],
         streamer.RenderSettings(colour_scale=scale, **{**PLAIN, **settings}),
+        told,
     )
+
+
+def rendered(streamer, palettes, scale, frames, **settings):
+    renderer = renderer_for(streamer, palettes, scale, **settings)
     image = None
     for frame in frames:
         image = renderer.render(frame)
     return renderer, image
 
 
-def test_the_seven_scales_are_offered_and_today_is_the_default(thermal_streamer):
-    assert len(thermal_streamer.VALID_COLOUR_SCALES) == 7
-    assert thermal_streamer.RenderSettings().colour_scale == thermal_streamer.SCALE_TODAY
-    assert set(thermal_streamer.CURVE_SHAPES) == set(thermal_streamer.VALID_COLOUR_SCALES) - {
-        thermal_streamer.SCALE_TODAY, thermal_streamer.SCALE_OPTION_A
-    }
+def mapping_used(renderer, frame):
+    return renderer.overlay_for(renderer.render_image(frame)[1]).mapping
 
 
-def test_today_and_option_a_draw_the_same_picture_and_the_curves_do_not(
-    thermal_streamer, palettes
-):
-    frames = [hot_scene()]
-    _, today = rendered(thermal_streamer, palettes, "today", frames)
-    _, option_a = rendered(thermal_streamer, palettes, "option-a", frames)
-    assert np.array_equal(today, option_a)
-    for scale in thermal_streamer.CURVE_SHAPES:
-        _, curved = rendered(thermal_streamer, palettes, scale, frames)
-        assert not np.array_equal(today, curved), scale
+def test_the_four_scales_are_offered_and_the_stretch_is_the_default(thermal_streamer):
+    assert thermal_streamer.VALID_COLOUR_SCALES == ("stretch", "knee", "log-mild", "log-strong")
+    assert thermal_streamer.RenderSettings().colour_scale == "stretch"
+    assert set(thermal_streamer.CURVE_SHAPES) == set(CURVES)
 
 
-def test_option_a_draws_its_ruler_over_the_colours(thermal_streamer, palettes):
-    renderer, _ = rendered(thermal_streamer, palettes, "option-a", [hot_scene()])
-    stats = renderer.render_image(hot_scene())[1]
-
-    overlay = renderer.overlay_for(stats)
-
-    assert overlay.fixed_range is True
-    assert overlay.mapping is None
+@pytest.mark.parametrize(("saved", "read"), [
+    ("today", "stretch"), ("option-a", "stretch"), ("linear", "stretch"),
+    ("knee-soft", "stretch"), ("knee", "knee"), ("log-strong", "log-strong"), (3, "stretch"),
+])
+def test_a_scale_saved_by_a_test_build_reads_as_its_nearest(thermal_streamer, saved, read):
+    assert thermal_streamer.known_scale(saved) == read
 
 
-def test_a_curve_colours_each_pixel_as_its_mapping_says(thermal_streamer, palettes):
+def test_a_saved_file_from_a_test_build_comes_back_as_the_stretch(thermal_streamer, tmp_path):
+    saved = tmp_path / "settings.json"
+    saved.write_text('{"colour_scale": "option-a"}')
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), saved)
+
+    assert store.snapshot()[2].colour_scale == "stretch"
+
+
+def test_the_stretch_is_the_picture_it_always_was(thermal_streamer, palettes):
     frame = hot_scene()
-    renderer, image = rendered(thermal_streamer, palettes, "log-strong", [frame])
+    renderer, image = rendered(thermal_streamer, palettes, "stretch", [frame])
+    bounds = renderer.bounds
 
-    used = renderer.overlay_for(renderer.render_image(frame)[1]).mapping
+    expected = palettes["ironbow"][thermal_streamer.normalize_to_bytes(frame, *bounds)]
+
+    assert np.array_equal(image, expected)
+    assert mapping_used(renderer, frame) is None
+
+
+@pytest.mark.parametrize("scale", CURVES)
+def test_every_curve_draws_a_different_picture(thermal_streamer, palettes, scale):
+    _, stretch = rendered(thermal_streamer, palettes, "stretch", [hot_scene()])
+    _, curved = rendered(thermal_streamer, palettes, scale, [hot_scene()])
+
+    assert not np.array_equal(stretch, curved)
+
+
+@pytest.mark.parametrize("scale", CURVES)
+def test_a_curve_colours_each_pixel_as_its_mapping_says(thermal_streamer, palettes, scale):
+    frame = hot_scene()
+    renderer, image = rendered(thermal_streamer, palettes, scale, [frame])
+
+    used = mapping_used(renderer, frame)
 
     assert np.array_equal(image, palettes["ironbow"][used.indices(frame)])
 
 
-@pytest.mark.parametrize("scale", ["linear", "log-mild", "log-strong", "knee", "knee-soft"])
-def test_the_table_draws_what_the_curve_would(thermal_streamer, scale):
-    """Looked up rather than worked out, and never more than one step of the palette off."""
+@pytest.mark.parametrize("scale", CURVES)
+@pytest.mark.parametrize("scene", [(20.0, 190.0), (20.0, 21.0), (15.0, 400.0)])
+def test_the_fast_way_draws_what_the_curve_would(thermal_streamer, scale, scene):
+    """A table for the logs and the stretch below the bend for the knee: never a step away."""
 
-    curve = mapping(thermal_streamer, scale)
-    frame = hot_scene()
-    frame[0, :8] = [0, 1, int(raw_for(-40.0)), int(raw_for(19.9)), int(raw_for(34.0)),
-                    int(raw_for(189.9)), int(raw_for(400.0)), 65535]
-
-    direct = (curve.fractions(frame) * 255).astype(np.int16)
-    looked_up = curve.indices(frame).astype(np.int16)
-
-    assert looked_up.dtype == np.int16
-    assert np.abs(looked_up - direct).max() <= 1
-
-
-def test_a_narrow_scene_gets_a_table_finer_than_a_count(thermal_streamer):
-    curve = mapping(thermal_streamer, "log-strong", display=(20.0, 20.5), scene=(20.0, 21.0))
-    frame = np.linspace(raw_for(19.0), raw_for(22.0), 19_200).astype(np.uint16).reshape(120, 160)
+    curve = mapping(thermal_streamer, scale, display=(scene[0], (scene[0] + scene[1]) / 2),
+                    scene=scene)
+    frame = np.linspace(raw_for(scene[0] - 5), raw_for(scene[1] + 5), 19_200)
+    frame = frame.astype(np.uint16).reshape(120, 160)
+    frame[0, :4] = [0, 1, 65534, 65535]
 
     direct = (curve.fractions(frame) * 255).astype(np.int16)
+    fast = curve.indices(frame).astype(np.int16)
 
-    assert np.abs(curve.indices(frame).astype(np.int16) - direct).max() <= 1
+    assert np.abs(fast - direct).max() <= 1
 
 
 def test_the_knee_gives_the_stretch_its_share_of_the_palette(thermal_streamer):
     knee = mapping(thermal_streamer, "knee")
-    bend = np.array([raw_for(34.0)], dtype=np.float32)
 
-    assert knee.fractions(bend)[0] == pytest.approx(KNEE_SHARE)
-    assert knee.fractions(np.array([raw_for(190.0)], dtype=np.float32))[0] == pytest.approx(1.0)
-    assert knee.fractions(np.array([raw_for(10.0)], dtype=np.float32))[0] == 0.0
+    def share(celsius):
+        return knee.fractions(np.array([raw_for(celsius)], dtype=np.float32))[0]
+
+    assert share(34.0) == pytest.approx(KNEE_SHARE)
+    assert share(190.0) == pytest.approx(1.0)
+    assert share(10.0) == 0.0
 
 
-def test_a_log_curve_gives_the_cool_end_more_than_a_straight_line_would(thermal_streamer):
+def test_a_strong_log_gives_the_cool_end_more_than_a_gentle_one(thermal_streamer):
     cool = np.array([raw_for(34.0)], dtype=np.float32)
-    shares = {
-        scale: float(mapping(thermal_streamer, scale).fractions(cool)[0])
-        for scale in ("linear", "log-mild", "log-strong")
-    }
 
-    assert shares["linear"] < shares["log-mild"] < shares["log-strong"]
+    gentle = mapping(thermal_streamer, "log-mild").fractions(cool)[0]
+    strong = mapping(thermal_streamer, "log-strong").fractions(cool)[0]
+
+    assert (34.0 - 20.0) / (190.0 - 20.0) < gentle < strong
 
 
-@pytest.mark.parametrize("scale", ["linear", "log-mild", "log-strong", "knee", "knee-soft"])
+@pytest.mark.parametrize("scale", CURVES)
 @pytest.mark.parametrize("fraction", [0.0, 0.1, 0.5, 0.8, 0.85, 0.9, 1.0])
 def test_the_ruler_and_the_picture_agree_at_every_row(thermal_streamer, scale, fraction):
     """The count the ruler labels a row with is the count the picture draws in that row's colour."""
@@ -174,32 +191,65 @@ def test_a_curved_ruler_is_the_whole_palette_and_carries_its_tick(thermal_stream
 
 def test_the_scene_eases_rather_than_jumping(thermal_streamer, palettes):
     cool = fake_camera.thermal_frame(20.0, 34.0)
-    renderer, _ = rendered(thermal_streamer, palettes, "linear", [cool, hot_scene()])
+    renderer, _ = rendered(thermal_streamer, palettes, "log-mild", [cool, hot_scene()])
 
-    eased = renderer.overlay_for(renderer.render_image(hot_scene())[1]).mapping
+    eased = mapping_used(renderer, hot_scene())
 
     assert raw_for(34.0) < eased.scene[1] < raw_for(190.0)
 
 
-def test_a_held_range_ignores_the_curve(thermal_streamer, palettes):
-    held = {"range_mode": thermal_streamer.FIXED_RANGE}
-    _, today = rendered(thermal_streamer, palettes, "today", [hot_scene()], **held)
-    renderer, curved = rendered(thermal_streamer, palettes, "log-strong", [hot_scene()], **held)
-
-    assert np.array_equal(today, curved)
-    assert renderer.overlay_for(renderer.render_image(hot_scene())[1]).mapping is None
+def held(streamer, low=20.0, high=30.0):
+    return {"range_mode": streamer.FIXED_RANGE, "range_low_celsius": low,
+            "range_high_celsius": high, "emissivity": 1.0}
 
 
-def test_a_told_scene_holds_a_curve_under_a_held_range(thermal_streamer, palettes):
-    settings = thermal_streamer.RenderSettings(
-        colour_scale="linear", range_mode=thermal_streamer.FIXED_RANGE, **PLAIN
-    )
-    told = (raw_for(20.0), raw_for(250.0))
-    renderer = thermal_streamer.ThermalRenderer(palettes["ironbow"], settings, told)
+@pytest.mark.parametrize("scale", ["log-mild", "log-strong"])
+def test_a_log_over_a_held_range_keeps_to_the_held_temperatures(thermal_streamer, palettes, scale):
+    renderer = renderer_for(thermal_streamer, palettes, scale, **held(thermal_streamer))
 
-    used = renderer.overlay_for(renderer.render_image(hot_scene())[1]).mapping
+    used = mapping_used(renderer, hot_scene())
 
-    assert used.scene == told
+    assert used.scene == used.display
+    assert used.display == pytest.approx((raw_for(20.0), raw_for(30.0)), abs=0.5)
+
+
+def test_a_knee_over_a_held_range_reaches_past_it_to_the_hottest(thermal_streamer, palettes):
+    renderer = renderer_for(thermal_streamer, palettes, "knee", **held(thermal_streamer))
+
+    used = mapping_used(renderer, hot_scene())
+
+    assert used.display == pytest.approx((raw_for(20.0), raw_for(30.0)), abs=0.5)
+    assert used.scene[1] == pytest.approx(raw_for(190.0), abs=1)
+    assert used.celsius_at(KNEE_SHARE) == pytest.approx(30.0, abs=0.05)
+
+
+def test_the_stretch_over_a_held_range_is_unchanged(thermal_streamer, palettes):
+    renderer, image = rendered(thermal_streamer, palettes, "stretch", [hot_scene()],
+                               **held(thermal_streamer))
+    low, high = renderer.bounds
+
+    expected = palettes["ironbow"][thermal_streamer.normalize_to_bytes(hot_scene(), low, high)]
+
+    assert np.array_equal(image, expected)
+
+
+def test_a_clips_measured_range_curves_over_the_whole_print(thermal_streamer, palettes):
+    told = thermal_streamer.ToldScene(raw_for(20.0), raw_for(250.0), range_measured=True)
+    renderer = renderer_for(thermal_streamer, palettes, "log-strong", told,
+                            **held(thermal_streamer))
+
+    used = mapping_used(renderer, hot_scene())
+
+    assert used.scene == (told.coldest, told.hottest)
+
+
+def test_a_clips_held_range_keeps_a_log_to_it_and_a_knee_to_the_print(thermal_streamer, palettes):
+    told = thermal_streamer.ToldScene(raw_for(20.0), raw_for(250.0), range_measured=False)
+    log = renderer_for(thermal_streamer, palettes, "log-strong", told, **held(thermal_streamer))
+    knee = renderer_for(thermal_streamer, palettes, "knee", told, **held(thermal_streamer))
+
+    assert mapping_used(log, hot_scene()).scene == mapping_used(log, hot_scene()).display
+    assert mapping_used(knee, hot_scene()).scene[1] == told.hottest
 
 
 def test_the_form_and_json_take_a_scale_and_refuse_an_unknown_one(thermal_streamer, palettes):
@@ -210,12 +260,12 @@ def test_the_form_and_json_take_a_scale_and_refuse_an_unknown_one(thermal_stream
     )
     _, sent = thermal_streamer.settings_from_json({"colour_scale": "log-mild"}, palettes, current)
     _, refused = thermal_streamer.settings_from_json(
-        {"colour_scale": "sideways"}, palettes, current
+        {"colour_scale": "today"}, palettes, current
     )
 
     assert posted.colour_scale == "knee"
     assert sent.colour_scale == "log-mild"
-    assert refused.colour_scale == "today"
+    assert refused.colour_scale == "stretch"
 
 
 def test_the_page_offers_every_scale(thermal_streamer, palettes):
@@ -248,33 +298,94 @@ def clip_inputs(streamer, palettes, mode):
     )
 
 
-def test_a_clip_with_the_prints_own_range_curves_over_the_whole_print(
-    thermal_streamer, palettes, tmp_path
+@pytest.mark.parametrize(("mode", "measured"), [
+    ("from-start", True), ("whole-print", True), ("fixed", False),
+])
+def test_a_clip_tells_its_curve_the_whole_prints_coldest_and_hottest(
+    thermal_streamer, palettes, tmp_path, mode, measured
 ):
     recording = recording_with(thermal_streamer, tmp_path, [40.0, 180.0, 60.0])
 
-    for mode in (thermal_streamer.TIMELAPSE_RANGE_FROM_START,
-                 thermal_streamer.TIMELAPSE_RANGE_WHOLE_PRINT):
-        low, high = thermal_streamer.clip_scene(
-            recording, clip_inputs(thermal_streamer, palettes, mode)
+    told = thermal_streamer.clip_scene(recording, clip_inputs(thermal_streamer, palettes, mode))
+
+    assert told.coldest == pytest.approx(raw_for(22.0), abs=1)
+    assert told.hottest == pytest.approx(raw_for(180.0), abs=1)
+    assert told.range_measured is measured
+
+
+def test_a_clip_drawn_as_displayed_eases_its_scene_as_live_does(
+    thermal_streamer, palettes, tmp_path
+):
+    recording = recording_with(thermal_streamer, tmp_path, [40.0])
+
+    assert thermal_streamer.clip_scene(
+        recording, clip_inputs(thermal_streamer, palettes, "as-displayed")
+    ) is None
+
+
+def test_a_clip_frame_is_stamped_with_its_scale_and_the_markers_keep_off_it(
+    thermal_streamer, palettes
+):
+    frame = fake_camera.thermal_frame(20.0, 34.0)
+    frame[-1, 0] = int(raw_for(5.0))
+    renderer = renderer_for(thermal_streamer, palettes, "knee")
+    text = thermal_streamer.stamp_text("knee")
+    box = thermal_streamer.stamp_box((640, 480), text)
+
+    stamped = np.asarray(thermal_streamer.render_layer(renderer, frame, (640, 480), text))
+    plain = np.asarray(thermal_streamer.render_layer(renderer, frame, (640, 480)))
+
+    assert text == "Colour scale: Knee"
+    left, top, right, bottom = (int(value) for value in box)
+    assert not np.array_equal(stamped[top:bottom, left:right], plain[top:bottom, left:right])
+
+
+def test_the_clip_readout_is_its_own(thermal_streamer, palettes):
+    live = thermal_streamer.RenderSettings(spots=((10, 10),))
+    plain = dataclasses.replace(
+        thermal_streamer.TimelapseSettings(), timelapse_colorbar=False, timelapse_reticle=False,
+        timelapse_hotspot=False, timelapse_coldspot=False, timelapse_spots=False,
+    )
+
+    drawn = thermal_streamer.clip_readout(live, plain)
+
+    assert not drawn.readout
+    assert live.readout
+    assert thermal_streamer.clip_readout(live, thermal_streamer.TimelapseSettings()).spots == (
+        (10, 10),
+    )
+
+
+def test_copying_the_live_readout_sets_the_clips_to_it(thermal_streamer):
+    live = thermal_streamer.RenderSettings(reticle=False, hotspot=True, coldspot=False)
+
+    copied = thermal_streamer.copied_readout(thermal_streamer.TimelapseSettings(), live)
+
+    assert (copied.timelapse_colorbar, copied.timelapse_reticle) == (True, False)
+    assert (copied.timelapse_hotspot, copied.timelapse_coldspot) == (True, False)
+    assert copied.timelapse_spots is False
+
+
+def test_the_copy_button_reaches_the_clips(thermal_streamer, palettes):
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store, palettes
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        connection = http.client.HTTPConnection(*server.server_address, timeout=5.0)
+        connection.request(
+            "POST", "/settings", body='{"reticle": false, "command": "copy-live-readout"}',
+            headers={"Content-Type": "application/json"},
         )
-        assert low == pytest.approx(raw_for(22.0), abs=1)
-        assert high == pytest.approx(raw_for(180.0), abs=1)
-    for mode in (thermal_streamer.TIMELAPSE_RANGE_FIXED,
-                 thermal_streamer.TIMELAPSE_RANGE_AS_DISPLAYED):
-        assert thermal_streamer.clip_scene(
-            recording, clip_inputs(thermal_streamer, palettes, mode)
-        ) is None
+        connection.getresponse().read()
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
 
-
-def test_a_clip_frame_is_stamped_with_its_scale(thermal_streamer):
-    picture = Image.new("RGB", (640, 480))
-
-    thermal_streamer.stamp_scale(picture, "knee-soft")
-
-    corner = np.asarray(picture)[400:, :200]
-    assert corner.any()
-    assert not np.asarray(picture)[:80].any()
+    assert store.timelapse_snapshot().timelapse_reticle is False
+    assert store.timelapse_snapshot().timelapse_colorbar is True
 
 
 def test_a_finished_print_with_temperatures_can_be_made_again(
@@ -295,8 +406,13 @@ def test_a_clip_is_named_for_its_scale(thermal_streamer, tmp_path):
     unmade = recording.clip_name
 
     recording.note_clip({"made_at": STARTED, "frames": 1, "scale": "log-mild"})
+    unnamed = recording.clip_name
+    recording.note_clip(
+        {"made_at": STARTED, "frames": 1, "scale": "log-mild", "scale_in_name": True}
+    )
 
     assert unmade.endswith("_thermal.mp4")
+    assert unnamed == unmade
     assert recording.clip_name == unmade.replace("_thermal.mp4", "_thermal_log-mild.mp4")
     assert recording.summary()["scale"] == "log-mild"
 
@@ -359,7 +475,7 @@ def test_the_list_offers_to_make_a_clip_again_only_when_it_can(thermal_streamer)
     no_frames = thermal_streamer.clip_entry(clip_summary(has_frames=False))
 
     assert 'name="remake"' in offered
-    assert "Scale: knee." in offered
+    assert "Colour scale: Knee." in offered
     assert 'name="remake"' not in recording_now
     assert 'name="remake"' not in no_frames
 

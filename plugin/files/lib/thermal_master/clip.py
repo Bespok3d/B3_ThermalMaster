@@ -28,16 +28,24 @@ from typing import BinaryIO, cast
 import numpy as np
 from PIL import Image
 
+from .colour_scale import SCALE_NAMES, ToldScene
 from .log import log_line
-from .overlay import PLACEHOLDER_RGB, draw_label, draw_overlay, overlay_style, with_banner
+from .overlay import (
+    PLACEHOLDER_RGB,
+    draw_label,
+    draw_overlay,
+    label_width,
+    overlay_style,
+    with_banner,
+)
 from .pipeline import FIXED_RANGE, RenderSettings, ThermalRenderer, frame_bounds, ordered_range
 from .recording import CAMERA_OFF_RECORD, LayerRecord, Recording
 from .temperature import celsius_for_raw, oriented_size
 from .timelapse import (
+    CLIP_READOUT_SWITCHES,
     TIMELAPSE_RANGE_AS_DISPLAYED,
     TIMELAPSE_RANGE_FIXED,
     TIMELAPSE_RANGE_FROM_START,
-    TIMELAPSE_RANGE_WHOLE_PRINT,
     TimelapseSettings,
 )
 
@@ -86,9 +94,9 @@ CAMERA_MISSING_BANNER = "Camera disconnected, layer {layer}"
 CAMERA_OFF_BANNER = "Camera off, layer {layer}"
 
 
-# Written in the bottom left of every frame on the test/color-bar branch, so that seven downloaded
-# clips of one print cannot be told apart only by their file names.
-CLIP_SCALE_STAMP = "Scale: {scale}"
+# Written in the bottom left of every frame when asked for, so that clips of one print made with
+# different scales can be told apart once they have left the printer.
+CLIP_SCALE_STAMP = "Colour scale: {scale}"
 
 
 NO_FRAMES_REASON = (
@@ -153,23 +161,46 @@ def print_scene(recording: Recording) -> tuple[float, float] | None:
     return (min(low for low, _ in extremes), max(high for _, high in extremes))
 
 
-def clip_scene(recording: Recording, inputs: ClipInputs) -> tuple[float, float] | None:
-    """The scene a curve runs over in a clip whose range the print measured, held for the clip.
+def clip_scene(recording: Recording, inputs: ClipInputs) -> ToldScene | None:
+    """The whole print's coldest and hottest, for a curve to hold still over the whole clip.
 
-    None for the other two: temperatures somebody chose are the whole scale, as they are live,
-    and a clip drawn as displayed eases its scene as the live picture does.
+    None for a clip drawn as displayed, which eases its scene as the live picture does. With the
+    timelapse's own temperatures it says the range was held, so a log keeps to them.
     """
 
-    measured = (TIMELAPSE_RANGE_FROM_START, TIMELAPSE_RANGE_WHOLE_PRINT)
-    if inputs.timelapse.timelapse_range_mode not in measured:
+    mode = inputs.timelapse.timelapse_range_mode
+    extremes = print_scene(recording) if mode != TIMELAPSE_RANGE_AS_DISPLAYED else None
+    if extremes is None:
         return None
-    return print_scene(recording)
+    return ToldScene(*extremes, range_measured=mode != TIMELAPSE_RANGE_FIXED)
 
 
-def stamp_scale(picture: Image.Image, scale: str) -> None:
-    style = overlay_style(picture.size, colorbar=False)
-    position = (style.margin, picture.size[1] - style.line_height - style.margin)
-    draw_label(picture, position, CLIP_SCALE_STAMP.format(scale=scale), style)
+def stamp_box(size: tuple[int, int], text: str) -> tuple[float, float, float, float]:
+    """Where the scale's name goes, bottom left, as the rectangle the markers keep clear of."""
+
+    style = overlay_style(size, colorbar=False)
+    top = size[1] - style.line_height - style.margin
+    return (style.margin, top, style.margin + label_width(text, style.pixel_height), size[1])
+
+
+def stamp_text(scale: str) -> str:
+    return CLIP_SCALE_STAMP.format(scale=SCALE_NAMES.get(scale, scale))
+
+
+def clip_stamp(settings: RenderSettings, inputs: ClipInputs) -> str | None:
+    """What goes in the corner of every frame of this clip, if anything."""
+
+    return stamp_text(settings.colour_scale) if inputs.timelapse.timelapse_scale_label else None
+
+
+def clip_readout(live: RenderSettings, timelapse: TimelapseSettings) -> RenderSettings:
+    """The live settings with the clips' own readout switches in place of the live ones."""
+
+    return dataclasses.replace(
+        live,
+        spots=live.spots if timelapse.timelapse_spots else (),
+        **{field: getattr(timelapse, switch) for switch, field in CLIP_READOUT_SWITCHES.items()},
+    )
 
 
 def fixed_at(live: RenderSettings, bounds: tuple[float, float]) -> RenderSettings:
@@ -182,9 +213,11 @@ def fixed_at(live: RenderSettings, bounds: tuple[float, float]) -> RenderSetting
 
 
 def clip_render_settings(recording: Recording, inputs: ClipInputs) -> RenderSettings:
-    """The live settings with the timelapse's range, and without noise reduction."""
+    """The live settings with the timelapse's range and readout, and without noise reduction."""
 
-    live = dataclasses.replace(inputs.live, noise_reduction_weight=1.0)
+    live = clip_readout(
+        dataclasses.replace(inputs.live, noise_reduction_weight=1.0), inputs.timelapse
+    )
     mode = inputs.timelapse.timelapse_range_mode
     if mode == TIMELAPSE_RANGE_AS_DISPLAYED:
         return live
@@ -212,15 +245,23 @@ def picture_size(recording: Recording, rotation: int) -> tuple[int, int] | None:
 
 
 def render_layer(
-    renderer: ThermalRenderer, counts: np.ndarray, size: tuple[int, int]
+    renderer: ThermalRenderer, counts: np.ndarray, size: tuple[int, int], stamp: str | None = None
 ) -> Image.Image:
-    """One frame, as the stream draws it, scaled up by whole pixels before the readout goes on."""
+    """One frame, as the stream draws it, scaled up by whole pixels before the readout goes on.
+
+    The scale's name, when there is one to write, goes on last, with the markers told where it
+    will be so that none of their numbers ends up underneath it.
+    """
 
     image, stats, _ = renderer.render_image(counts)
     picture = Image.fromarray(image, mode="RGB").resize(size, Image.Resampling.NEAREST)
     overlay = renderer.overlay_for(stats)
+    reserved = [stamp_box(size, stamp)] if stamp else []
     if overlay is not None:
-        draw_overlay(picture, overlay)
+        draw_overlay(picture, overlay, reserved)
+    if stamp:
+        style = overlay_style(size, colorbar=False)
+        draw_label(picture, reserved[0][:2], stamp, style)
     return picture
 
 
@@ -265,7 +306,7 @@ def feed_frames(
     renderer: ThermalRenderer,
     size: tuple[int, int],
     sink: BinaryIO,
-    scale: str | None = None,
+    stamp: str | None = None,
 ) -> EncodedFrames:
     """Every layer in order, a frame or the picture saying why there is none."""
 
@@ -274,10 +315,8 @@ def feed_frames(
         if record.counts is None:
             picture = missing_layer_picture(record, encoded.last_frame, size)
         else:
-            picture = render_layer(renderer, record.counts, size)
-            encoded.last_frame = picture.copy()
-        if scale is not None:
-            stamp_scale(picture, scale)
+            picture = render_layer(renderer, record.counts, size, stamp)
+            encoded.last_frame = picture
         sink.write(picture.tobytes())
         encoded.count += 1
     return encoded
@@ -301,7 +340,8 @@ def encode(recording: Recording, settings: RenderSettings, inputs: ClipInputs) -
         )
         frames_in = cast("BinaryIO", process.stdin)
         try:
-            encoded = feed_frames(recording, renderer, size, frames_in, settings.colour_scale)
+            stamp = clip_stamp(settings, inputs)
+            encoded = feed_frames(recording, renderer, size, frames_in, stamp)
             frames_in.close()
         except BrokenPipeError:
             encoded = EncodedFrames()
@@ -333,6 +373,7 @@ def make_clip(recording: Recording, inputs: ClipInputs) -> dict:
     outcome = encode(recording, clip_render_settings(recording, inputs), inputs)
     if not outcome.get("error"):
         outcome["scale"] = inputs.live.colour_scale
+        outcome["scale_in_name"] = inputs.timelapse.timelapse_scale_in_name
     seconds = time.monotonic() - started
     said = outcome.get("error") or "clip made"
     log_line(f"timelapse: {recording.recording_id}: {said}, in {seconds:.1f} s")

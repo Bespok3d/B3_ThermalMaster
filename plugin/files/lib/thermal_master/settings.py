@@ -23,7 +23,7 @@ from .camera import (
     VALID_GAINS,
     CameraSettings,
 )
-from .colour_scale import VALID_COLOUR_SCALES
+from .colour_scale import VALID_COLOUR_SCALES, known_scale
 from .log import log_line
 from .pipeline import (
     FIXED_RANGE,
@@ -42,7 +42,9 @@ from .temperature import (
     FrameStats,
 )
 from .timelapse import (
+    CLIP_READOUT_SWITCHES,
     FORGET_KEY_ACTION,
+    TIMELAPSE_SWITCHES,
     VALID_TIMELAPSE_RANGES,
     TimelapseSettings,
     clamped_keep,
@@ -272,7 +274,9 @@ class SettingsStore:
         # are invited to edit, so what comes out of it goes through the same validator a posted
         # change does.
         self._settings = dataclasses.replace(
-            self._settings, spots=clean_spots(self._settings.spots)
+            self._settings,
+            spots=clean_spots(self._settings.spots),
+            colour_scale=known_scale(self._settings.colour_scale),
         )
         self._camera = restored(self._camera, saved)
         self._timelapse = checked_timelapse(restored(self._timelapse, saved))
@@ -519,7 +523,19 @@ TIMELAPSE_JSON_SETTINGS: dict[str, TimelapseCheck] = {
         value, current.timelapse_range_high_celsius
     ),
     "moonraker_api_key": a_key,
+    **{switch: lambda value, _current: bool(value) for switch in TIMELAPSE_SWITCHES},
 }
+
+
+def copied_readout(timelapse: TimelapseSettings, live: RenderSettings) -> TimelapseSettings:
+    """The clips' readout set to the live picture's: the same boxes ticked, spots if any are placed.
+    """
+
+    return dataclasses.replace(
+        timelapse,
+        timelapse_spots=bool(live.spots),
+        **{switch: getattr(live, field) for switch, field in CLIP_READOUT_SWITCHES.items()},
+    )
 
 
 def checked_timelapse(settings: TimelapseSettings) -> TimelapseSettings:
@@ -565,6 +581,7 @@ def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> Time
 
     typed_key = posted("moonraker_api_key").strip()
     forgotten = FORGET_KEY_ACTION in form.get(SHUTTER_FIELD, [])
+    ticked: dict[str, Any] = {switch: switch in form for switch in TIMELAPSE_SWITCHES}
     return dataclasses.replace(
         timelapse_settings_from_json(
             {
@@ -577,4 +594,5 @@ def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> Time
         ),
         timelapse="timelapse" in form,
         moonraker_api_key="" if forgotten else typed_key or current.moonraker_api_key,
+        **ticked,
     )

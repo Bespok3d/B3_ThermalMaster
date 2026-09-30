@@ -10,6 +10,7 @@ libusb-driven capture and MJPEG streaming for the Thermal Master P1.
 | numpy | NumPy Developers | BSD-3-Clause | yes | yes, as a wheel |
 | Pillow | Jeffrey A. Clark and contributors | MIT-CMU | yes | yes, as a wheel |
 | pyusb | PyUSB contributors | BSD-3-Clause | yes | yes, as a wheel |
+| Material Icons | Google | Apache-2.0 | yes | the "info" icon, inline in the settings page |
 
 The USB protocol layer is not reimplemented here. `files/vendor/p3_camera.py` is verbatim from
 [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera) at pinned commit

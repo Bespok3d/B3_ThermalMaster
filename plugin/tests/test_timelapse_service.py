@@ -285,3 +285,48 @@ def test_deleting_a_print_takes_its_copies_off_the_timelapse_page(
     assert StandInClient.deleted == [
         ("timelapse", "cube_thermal.mp4"), ("timelapse", "cube_thermal.jpg")
     ]
+
+
+def recorded_with(streamer, service_for, root, seen):
+    """A four layer print, the firmware's answer at each look given by `seen`."""
+
+    statuses = [
+        dataclasses.replace(printing(streamer, layer), firmware_timelapse=answer)
+        for layer, answer in zip((1, 2, 3), seen)
+    ]
+    statuses.append(streamer.PrintStatus("complete", "cube.gcode", 3, 4, firmware_timelapse=False))
+    service, _ = service_for(statuses, streamer.JobInfo("0002F1", "cube.gcode", STARTED))
+    run_all(service, 4)
+    return streamer.Recording.open(only_recording(streamer, root).folder)
+
+
+def test_a_print_the_firmware_was_recording_is_noted_as_such(
+    thermal_streamer, service_for, tmp_path
+):
+    recording = recorded_with(thermal_streamer, service_for, tmp_path, (True, True, True))
+
+    assert recording.firmware_timelapse is True
+
+
+def test_a_print_the_firmware_was_not_recording_is_noted_too(
+    thermal_streamer, service_for, tmp_path
+):
+    recording = recorded_with(thermal_streamer, service_for, tmp_path, (False, False, False))
+
+    assert recording.firmware_timelapse is False
+
+
+def test_once_seen_recording_it_stays_seen(thermal_streamer, service_for, tmp_path):
+    """The answer after the print is false either way, and must not undo one given during it."""
+
+    recording = recorded_with(thermal_streamer, service_for, tmp_path, (False, True, False))
+
+    assert recording.firmware_timelapse is True
+
+
+def test_a_printer_with_nothing_to_say_leaves_nothing_noted(
+    thermal_streamer, service_for, tmp_path
+):
+    recording = recorded_with(thermal_streamer, service_for, tmp_path, (None, None, None))
+
+    assert recording.firmware_timelapse is None

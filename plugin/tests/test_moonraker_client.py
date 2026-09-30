@@ -194,3 +194,37 @@ def test_a_file_is_deleted_by_its_quoted_path(thermal_streamer, moonraker):
     assert client.delete_file("timelapse", "cube thermal+1.mp4")
     assert not client.delete_file("timelapse", "missing.mp4")
     assert StandInMoonraker.received[0][0] == "/server/files/timelapse/cube%20thermal%2B1.mp4"
+
+
+def u1_answer(active, asked):
+    return {"result": {"status": {
+        "print_stats": {"state": "printing", "filename": "cube.gcode", "info": {}},
+        "timelapse": {"is_active": active},
+        "print_task_config": {"time_lapse_camera": asked},
+    }}}
+
+
+@pytest.mark.parametrize(("active", "asked", "said"), [
+    (True, True, True),
+    (False, False, False),
+    (True, False, True),
+    (False, True, True),
+])
+def test_a_snapmaker_says_whether_it_is_recording_its_own_timelapse(
+    thermal_streamer, active, asked, said
+):
+    status = thermal_streamer.parsed_print_status(u1_answer(active, asked))
+
+    assert status.firmware_timelapse is said
+
+
+def test_mainline_klipper_has_nothing_to_say_about_one(thermal_streamer):
+    """Klipper answers an object it does not have with an empty one."""
+
+    answer = {"result": {"status": {
+        "print_stats": {"state": "printing", "filename": "cube.gcode", "info": {}},
+        "timelapse": {},
+        "print_task_config": {},
+    }}}
+
+    assert thermal_streamer.parsed_print_status(answer).firmware_timelapse is None

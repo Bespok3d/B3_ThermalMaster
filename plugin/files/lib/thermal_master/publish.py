@@ -126,6 +126,10 @@ class Publisher:
         coming would be ten minutes for nothing.
         """
 
+        # A printer that said it was not making a clip of this print is taken at its word, which
+        # saves ten minutes of waiting on a U1 printing with the timelapse unticked.
+        if recording.firmware_timelapse is False:
+            return recording.base_name
         names = self._names()
         if not firmware_clips(names):
             return recording.base_name

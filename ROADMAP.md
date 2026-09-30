@@ -2579,22 +2579,43 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    a `_cover.jpg`. Cheap to test before any code: upload a renamed copy by hand, as the test pair
    was, once named `<name>_thermal_<stamp>.mp4` and once with a `_cover.jpg` beside it.
 
-   **Open, to come back to:** the colour bar. On a measured range it spans the scene, and with the
-   nozzle in view (16.6 to 149.4 C on the Pi 4) most of it is the top colour, flat, because the
-   colours only change across the auto range. Proposed on 2026-09-29: A, the bar spans the range
-   where colours change, as it already does on a told range, with the triangles saying the scene
-   goes past an end and the markers still reading the extremes; or B, a broken bar keeping the
-   extremes in short caps. A is how it was before 0.14.0. A third came up the same day from a
-   friend of the maintainer's: a logarithmic mapping, so the whole scene keeps its colours but the
-   low end, the bed and the part, gets more of them than the nozzle does. Under discussion, not
-   to be built yet. It reaches the tile, the viewer, the snapshot, recordings and the timelapse
-   alike.
+   **The colour bar, decided on 2026-09-30, in 0.28.5.** Proposed on 2026-09-29: A, the bar spans
+   the range where the colours change, with the triangles saying the scene goes past an end; B, a
+   broken bar; and, from a friend of the maintainer's, a log mapping so the whole scene keeps
+   colours with most of them at the cool end. Rendered first from three captured frames (a nozzle
+   at 89.6 C, one at 187.3 C, and a scene with nothing hot in it, 17.7 to 40.4 C), then built as seven selectable scales on a test branch (0.28.1 to 0.28.4,
+   in `CHANGELOG_DEV.md`) and recorded live and as clips of one 252 layer print on the U1:
+   - The share of the palette the middle 96% of the scene got, on the hot frame: 10% for a straight
+     line over the scene, 31% for a log with a 10 C softness, 39% with 3 C, 85% for a knee at 85%.
+   - Live: today's ruler over the scene moved too much, re-labelled every frame by a nozzle reading
+     between 86 and 132 C; A held still; linear was too dark to keep; the logs and the 85% knee
+     looked good, and a 75% knee started to look as dark as linear.
+   - Clips, from start: the bed warmed past the layer 2 range, and today's picture went flat white
+     at the bottom by the end; the knee kept it, the strong log next.
+   - Chosen: four scales, `stretch` (with A's ruler as the only ruler, which undoes 0.14.0's), `knee`
+     at 85% with a 5 C softness, `log-mild` (10 C) and `log-strong` (3 C), all working with a held
+     range too: a log keeps to the held temperatures, a knee reaches past them to the hottest.
+   - Cost on the U1, a one-off bench of 300 P1 frames through each scale, against a
+     14.1 to 14.5 ms frame: worked out per pixel, the logs added 1.8 to 2.8 ms and the knee 1.3 to
+     2.9 ms, and htop read 52% of a core against 42% for the stretch; a table of the curve looked up
+     with 32 bit passes over the frame saved almost nothing there, and made a straight line 0.5 ms
+     dearer. In 0.28.5 the knee is the stretch below its bend and a log only on the pixels above it,
+     and the logs look their table up with 16 bit passes; measured on the Mac VM at within 0.1 ms of
+     the stretch, and on the U1 before release.
+
+   **For later: a U1 print's own timelapse, asked for rather than waited on (0.28.4).** On the U1
+   `timelapse.is_active` and `print_task_config.time_lapse_camera` were both true for the whole of a
+   print started with the timelapse ticked and false for one without, and both false once the print
+   had ended; `print_task_config.reprint_info.time_lapse_camera` stayed true after the ticked print
+   until the print was confirmed on the screen. The plugin reads the first two with the status it
+   already asks for during a print, and only waits for the firmware's clip when one of them was true.
 
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
 4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
-   and a default chosen.
+   and a default chosen. Done for the colour scale, above, by making one print's clip again with
+   each; the range mode stays "fixed once the print has started" by default.
 
 ## 8. Alternatives considered and rejected
 

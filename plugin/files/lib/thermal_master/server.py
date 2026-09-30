@@ -32,6 +32,7 @@ from .recording import Recording, find_recording
 from .settings import (
     camera_settings_from_form,
     camera_settings_from_json,
+    copied_readout,
     locked_range,
     settings_from_form,
     settings_from_json,
@@ -39,6 +40,7 @@ from .settings import (
     timelapse_settings_from_json,
 )
 from .temperature import DEFAULT_UNITS, encode_thermal_frame
+from .timelapse import COPY_READOUT_ACTION
 from .viewer import render_viewer_page
 
 if TYPE_CHECKING:
@@ -627,22 +629,24 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             payload = json.loads(body or "{}")
             palette_name, settings = settings_from_json(payload, self.palettes, current)
             asked = payload.get(SHUTTER_FIELD)
+            clips = timelapse_settings_from_json(payload, timelapse)
             return RequestedChanges(
                 palette_name,
                 settings,
                 camera_settings_from_json(payload, camera),
-                timelapse_settings_from_json(payload, timelapse),
+                copied_readout(clips, settings) if asked == COPY_READOUT_ACTION else clips,
                 asked == SHUTTER_ACTION,
                 asked == LOCK_RANGE_ACTION,
             )
         form = parse_qs(body)
         palette_name, settings = settings_from_form(form, self.palettes, current)
         commands = form.get(SHUTTER_FIELD, [])
+        clips = timelapse_settings_from_form(form, timelapse)
         return RequestedChanges(
             palette_name,
             settings,
             camera_settings_from_form(form, camera),
-            timelapse_settings_from_form(form, timelapse),
+            copied_readout(clips, settings) if COPY_READOUT_ACTION in commands else clips,
             SHUTTER_ACTION in commands,
             LOCK_RANGE_ACTION in commands,
         )

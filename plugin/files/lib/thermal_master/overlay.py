@@ -110,11 +110,8 @@ class Overlay:
     reticle: bool = True
     hotspot: bool = True
     coldspot: bool = True
-    # Whether the display range was told rather than measured. The bar is drawn differently for
-    # the two: see `bar_axis` and the triangles in `draw_colorbar`.
-    fixed_range: bool = False
     # The curve the picture was drawn with, when it was not the straight stretch. The ruler then
-    # shows the whole palette evenly and says with ticks which temperatures its rows are.
+    # says with a tick which temperature its bend or its middle is.
     mapping: ColourMapping | None = None
 
 
@@ -253,26 +250,17 @@ _Position = tuple[float, float]
 _Rectangle = tuple[float, float, float, float]
 
 
-def bar_axis(stats: FrameStats, fixed_range: bool = False) -> tuple[float, float]:
-    """The temperatures the bar spans, bottom and top.
+def bar_axis(stats: FrameStats) -> tuple[float, float]:
+    """The temperatures the bar spans, bottom and top: the range the colours are spread over.
 
-    On a measured range, the frame's own coldest and hottest, so the ends of the ruler are the
-    numbers the markers show. They were the ends of the display range until 0.14.0, which was
-    defensible and confused every person who looked at it: a ruler topped 25.3 beside a marker
-    reading 30.0 reads as a contradiction, however carefully the difference is explained. A ruler
-    whose top is the hottest thing in view needs no explaining.
-
-    On a told range, the range itself, which is the whole point of telling it: the ruler stops
-    moving, and a colour halfway up the bar means the same temperature in every frame. The markers
-    can then read past the ends, and the triangles are what says so.
-
-    A flat scene on a measured range has no span of its own, so the display range stands in and the
-    bar keeps a height.
+    The scene's own coldest and hottest from 0.14.0, so the ruler's ends were the numbers the
+    markers show. Put back to the range in 0.28.5, after the scales were compared on the U1: a
+    ruler over the scene is re-labelled every frame by a nozzle whose reading jumps twenty degrees
+    from one to the next, and almost all of it is one flat colour. Over the range, it holds still
+    and every row of it is a colour the picture uses. The triangles say when the scene goes past.
     """
 
-    if fixed_range or stats.maximum_celsius <= stats.minimum_celsius:
-        return (stats.range_low_celsius, stats.range_high_celsius)
-    return (stats.minimum_celsius, stats.maximum_celsius)
+    return (stats.range_low_celsius, stats.range_high_celsius)
 
 
 def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
@@ -289,13 +277,11 @@ def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
 def bar_gradient(
     palette: np.ndarray, axis: tuple[float, float], stats: FrameStats, height: int
 ) -> np.ndarray:
-    """The bar's colours, built by asking the picture's own mapping what each row would be.
+    """The bar's colours, built by asking the stretch what each row's temperature would be.
 
-    This is what makes the ruler honest rather than decorative. The bar spans the whole scene, and
-    the palette spans only the auto-ranged middle of it, so the rows above and below that come out
-    in the end colours, flat. Which is exactly what the picture does to those pixels: anything
-    hotter than the range is drawn in the top colour. The flat bands are not a drawing shortcut,
-    they are the truth about where colour stops carrying information.
+    Over the range, which is what the ruler spans, that is the palette from end to end. Over a
+    wider axis, the rows past the range come out flat in the end colours, which is what the picture
+    does to those pixels; the benches still draw it that way to compare.
     """
 
     low, high = axis
@@ -310,16 +296,10 @@ def bar_gradient(
 def mark_bar(
     image: Image.Image, at_top: bool, style: OverlayStyle, colour: tuple[int, int, int]
 ) -> None:
-    """A triangle at one end of the bar.
+    """A triangle at one end of the bar: there is something past this end the colours cannot show.
 
-    It means two things, and which one depends on the range. On a measured range the bar spans the
-    scene, so an extreme is never past the end, it is exactly at it: the triangle is a visual tie
-    between the red cross on the picture and the number at the top of the ruler, and it is drawn
-    only for a marker that is actually on.
-
-    On a told range the scene can leave the scale entirely, and then the triangle means what it
-    meant before 0.15.0: there is something past this end that the colours cannot show you. That
-    reading only makes sense once the scale is fixed, which is why it came back with it.
+    It follows the scene rather than the marker of the same colour, so somebody who switched the
+    hotspot marker off still learns that the picture is clipping.
     """
 
     left, top, width, height = style.bar_box
@@ -332,33 +312,20 @@ def mark_bar(
 
 
 def marks_top(overlay: Overlay, axis: tuple[float, float]) -> bool:
-    """Whether the top of the bar gets a triangle, which is two questions in one.
+    """Whether the scene goes past the top of the bar."""
 
-    On a measured range it is there to tie the top of the ruler to the marker of the same colour,
-    so it follows that marker being switched on. On a told range it is there to say the scene has
-    gone off the top, so it follows the scene rather than the marker: somebody who switched the
-    hotspot marker off still needs to know the picture is clipping.
-    """
-
-    if overlay.fixed_range:
-        return overlay.stats.maximum_celsius > axis[1]
-    return overlay.hotspot
+    return overlay.stats.maximum_celsius > axis[1]
 
 
 def marks_bottom(overlay: Overlay, axis: tuple[float, float]) -> bool:
-    if overlay.fixed_range:
-        return overlay.stats.minimum_celsius < axis[0]
-    return overlay.coldspot
+    return overlay.stats.minimum_celsius < axis[0]
 
 
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
-    """The ruler down the right edge, spanning the scene and labelled with its ends."""
+    """The stretch's ruler down the right edge, over its range and labelled with its ends."""
 
-    axis = bar_axis(overlay.stats, overlay.fixed_range)
+    axis = bar_axis(overlay.stats)
     paste_bar(image, bar_gradient(overlay.palette, axis, overlay.stats, style.bar_box[3]), style)
-    # No tick where the auto-ranging stops: the gradient already draws that boundary, since above
-    # it the bar is flat and below it the colour varies. A line on top of an edge that is already
-    # visible is one moving thing too many, and it read as noise on hardware.
     draw_bar_ends(image, overlay, style, axis)
 
 
@@ -569,11 +536,15 @@ def markers_for(overlay: Overlay) -> list[Marker]:
     return [marker for shown, marker in wanted if shown]
 
 
-def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
+def draw_overlay(
+    image: Image.Image, overlay: Overlay, reserved: list[_Rectangle] | None = None
+) -> None:
+    """The ruler and the markers. `reserved` is anywhere else a marker's number must stay off."""
+
     style = overlay_style(image.size, overlay.colorbar)
     # Every marker in one pass, so each can see where the ones before it put their labels, and
     # where a curved ruler put its ticks.
-    placed: list[_Rectangle] = []
+    placed: list[_Rectangle] = list(reserved or [])
     if overlay.colorbar and overlay.mapping is not None:
         placed += draw_curved_colorbar(image, overlay, style, overlay.mapping)
     elif overlay.colorbar:

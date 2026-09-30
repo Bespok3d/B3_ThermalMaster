@@ -327,25 +327,17 @@ class Measured:
         self.range_high_celsius = high
 
 
-def test_the_ruler_spans_the_scene_rather_than_the_display_range(thermal_streamer):
-    """The change of 0.14.0, and the reason for it: a ruler must agree with the markers.
+def test_the_ruler_spans_the_colours_rather_than_the_scene(thermal_streamer):
+    """The change of 0.28.5, which undid 0.14.0's: a ruler over the scene would not hold still.
 
-    Before this the ends were the auto-ranged bounds, so a ruler topped 25.3 sat beside a marker
-    reading 30.0 and read as a contradiction. Hardware produced exactly that, twice, to two
-    different people looking at it.
+    Over the scene, its top was re-labelled every frame by a nozzle whose reading jumps twenty
+    degrees between two of them, and almost all of it was one flat colour. The triangles say when
+    the scene goes past the ends, which is what the ruler over the scene was there to say.
     """
 
     axis = thermal_streamer.bar_axis(Measured(19.6, 30.0, 21.7, 25.3))
 
-    assert axis == (19.6, 30.0)
-
-
-def test_a_flat_scene_falls_back_to_the_display_range(thermal_streamer):
-    """A scene with no span of its own would otherwise give the bar no height at all."""
-
-    axis = thermal_streamer.bar_axis(Measured(25.0, 25.0, 24.0, 26.0))
-
-    assert axis == (24.0, 26.0)
+    assert axis == (21.7, 25.3)
 
 
 def test_the_top_of_the_ruler_is_the_hottest_pixel(thermal_streamer):

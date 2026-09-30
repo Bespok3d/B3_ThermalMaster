@@ -112,6 +112,36 @@ def test_the_firmwares_clip_is_waited_for(thermal_streamer, tmp_path):
     assert calls == [thermal_streamer.FIRMWARE_POLL_SECONDS]
 
 
+def test_a_print_the_firmware_said_it_was_not_recording_is_not_waited_for(
+    thermal_streamer, tmp_path
+):
+    folder = StandInFolder(
+        ["Older_PLA_1h_20260920090000.mp4"], arriving=["Voron_Cube_PLA_8m_20260921141320.mp4"]
+    )
+    wait, calls = waiting_that_lets(folder)
+    recording = made_clip(thermal_streamer, tmp_path)
+    recording.note_firmware_timelapse(False)
+
+    base = thermal_streamer.Publisher(folder, wait).base_name(recording)
+
+    assert base == "Voron_Cube_20260921141320"
+    assert calls == []
+
+
+def test_a_print_the_firmware_said_it_was_recording_is_waited_for(thermal_streamer, tmp_path):
+    folder = StandInFolder(
+        ["Older_PLA_1h_20260920090000.mp4"], arriving=["Voron_Cube_PLA_8m_20260921141320.mp4"]
+    )
+    wait, calls = waiting_that_lets(folder)
+    recording = made_clip(thermal_streamer, tmp_path)
+    recording.note_firmware_timelapse(True)
+
+    assert thermal_streamer.Publisher(folder, wait).base_name(recording) == (
+        "Voron_Cube_PLA_8m_20260921141320"
+    )
+    assert calls == [thermal_streamer.FIRMWARE_POLL_SECONDS]
+
+
 def test_a_firmware_clip_that_never_comes_leaves_our_own_name(thermal_streamer, tmp_path):
     folder = StandInFolder(["Older_PLA_1h_20260920090000.mp4"])
     wait, _ = waiting_that_lets(folder)

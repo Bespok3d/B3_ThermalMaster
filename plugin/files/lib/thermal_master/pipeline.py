@@ -22,10 +22,11 @@ from PIL import Image
 from .colour_scale import (
     CURVE_SHAPES,
     DEFAULT_COLOUR_SCALE,
+    LOG_CURVE,
     MIN_SPAN_RAW_COUNTS,
-    SCALE_OPTION_A,
     ColourMapping,
     CurveShape,
+    ToldScene,
 )
 from .geometry import orient
 from .overlay import Overlay, draw_overlay, encode_upscale, stream_off_picture
@@ -267,9 +268,8 @@ class RenderSettings:
     # picture: a spot that existed only in one viewer would be missing from the tile, from a
     # recorded clip and from every other browser, which is most of the reasons to place one.
     spots: tuple[tuple[int, int], ...] = ()
-    # Which of the mappings in `colour_scale` the picture is drawn with. Only while the range
-    # follows the scene, or a clip has told the renderer the print's coldest and hottest: a range
-    # somebody held is the whole scale, and there is nothing for a curve to bend.
+    # Which of the scales in `colour_scale` the picture is drawn with. The stretch is what it
+    # always was; the curves spread the palette unevenly, over a followed range or a held one.
     colour_scale: str = DEFAULT_COLOUR_SCALE
 
     @property
@@ -298,17 +298,6 @@ class RenderSettings:
         return (self.flip_horizontal, self.flip_vertical)
 
 
-def curve_shape(
-    settings: RenderSettings, told_scene: tuple[float, float] | None
-) -> CurveShape | None:
-    """The curve the picture is drawn with, or None for the straight stretch."""
-
-    shape = CURVE_SHAPES.get(settings.colour_scale)
-    if shape is None or (settings.fixed_range and told_scene is None):
-        return None
-    return shape
-
-
 def frame_extremes(frame: np.ndarray) -> tuple[float, float]:
     return (float(frame.min()), float(frame.max()))
 
@@ -321,15 +310,15 @@ class ThermalRenderer:
     third, the smoothed coldest and hottest, eased like the bounds so that a nozzle crossing the
     view does not re-map every colour in one frame.
 
-    A clip can tell it the coldest and hottest instead, `told_scene`, in raw counts, which is what
-    lets a curve run over a range that is held for the whole clip.
+    A clip can tell it the whole print's coldest and hottest instead, `told_scene`, which is what
+    lets a curve mean the same thing from the first layer of a clip to the last.
     """
 
     def __init__(
         self,
         palette: np.ndarray,
         settings: RenderSettings = RenderSettings(),
-        told_scene: tuple[float, float] | None = None,
+        told_scene: ToldScene | None = None,
     ) -> None:
         self._palette = palette
         self._settings = settings
@@ -337,7 +326,7 @@ class ThermalRenderer:
         self._previous_frame: np.ndarray | None = None
         self._told_bounds = told_bounds(settings)
         self._told_scene = told_scene
-        self._shape = curve_shape(settings, told_scene)
+        self._shape: CurveShape | None = CURVE_SHAPES.get(settings.colour_scale)
         self._scene: tuple[float, float] | None = None
         self._mapping: ColourMapping | None = None
 
@@ -421,14 +410,34 @@ class ThermalRenderer:
     def _palette_indices(self, frame: np.ndarray, bounds: tuple[float, float]) -> np.ndarray:
         """The stretch, or the curve and the mapping it used, kept for the ruler."""
 
-        if self._shape is None:
+        shape = self._shape
+        if shape is None:
             self._mapping = None
             return normalize_to_bytes(frame, *bounds)
-        self._scene = self._told_scene or smooth_bounds(
-            self._scene, frame_extremes(frame), self._settings.bounds_smoothing
-        )
-        self._mapping = ColourMapping(self._shape, bounds, self._scene, self._settings.emissivity)
+        scene = self._scene_for(shape, frame, bounds)
+        self._mapping = ColourMapping(shape, bounds, scene, self._settings.emissivity)
         return self._mapping.indices(frame)
+
+    def _scene_for(
+        self, shape: CurveShape, frame: np.ndarray, bounds: tuple[float, float]
+    ) -> tuple[float, float]:
+        """What a curve runs over: the scene, the whole print, or the held temperatures.
+
+        Held by a person, a log runs over the held temperatures, so a colour still means the same
+        temperature in every frame; a knee keeps them below its bend and reaches past them to the
+        hottest thing in view, or in a clip to the print's hottest.
+        """
+
+        told = self._told_scene
+        if told is None:
+            self._scene = smooth_bounds(
+                self._scene, frame_extremes(frame), self._settings.bounds_smoothing
+            )
+            measured = self._scene
+        else:
+            measured = (told.coldest, told.hottest)
+        held = self._settings.fixed_range and (told is None or not told.range_measured)
+        return bounds if held and shape.curve == LOG_CURVE else measured
 
     def overlay_for(self, stats: FrameStats) -> Overlay | None:
         """What to draw over a frame that measured this, or None with the whole readout off.
@@ -448,9 +457,6 @@ class ThermalRenderer:
             settings.reticle,
             settings.hotspot,
             settings.coldspot,
-            # Option A is the stretch with the ruler over the colours rather than the scene, which
-            # is what a held range already draws.
-            settings.fixed_range or settings.colour_scale == SCALE_OPTION_A,
             self._mapping,
         )
 

@@ -36,9 +36,9 @@ from .recording import (
     Retention,
     find_recording,
     free_space,
+    named_suffix,
     recordings,
     remove_recording,
-    scale_suffix,
 )
 from .timelapse import (
     INTERRUPTED,
@@ -158,6 +158,7 @@ class TimelapseService:
         self._settle_open_recordings(status)
         for event in self._tracker.update(status):
             self._handlers[type(event)](event, status)
+        self._note_firmware(status)
         self._say(self._describe(status))
         return POLL_WHILE_PRINTING_SECONDS if status.active else POLL_WHILE_IDLE_SECONDS
 
@@ -239,9 +240,7 @@ class TimelapseService:
         if base is not None and not outcome.get("error"):
             # The copies from before first: made with another scale, they have another name.
             self._publisher.unpublish(recording)
-            outcome["published"] = self._publisher.publish(
-                recording, base, scale_suffix(outcome.get("scale"))
-            )
+            outcome["published"] = self._publisher.publish(recording, base, named_suffix(outcome))
         return outcome
 
     def _queue(self, recording_id: str) -> None:
@@ -348,6 +347,18 @@ class TimelapseService:
         if recording.meta.get("frames"):
             self._take(int(recording.meta.get("last_layer") or 0) + 1)
         self._close(recording, event.state)
+
+    def _note_firmware(self, status: PrintStatus) -> None:
+        """Whether the firmware is making its own clip, read during the print and not after it.
+
+        After it, both fields have gone false on a U1 whether or not there was a clip, so only an
+        answer given while printing means anything.
+        """
+
+        recording = self._recording
+        if recording is None or not status.active or status.firmware_timelapse is None:
+            return
+        recording.note_firmware_timelapse(status.firmware_timelapse)
 
     def _close(self, recording: Recording, state: str) -> None:
         recording.finish(state)

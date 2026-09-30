@@ -1,29 +1,27 @@
 # Changelog
 
-## 0.28.3
+## 0.28.5
 
-- **The curved scales cost less.** The curve is worked out for a table of about a thousand
-  temperatures instead of for every pixel of every frame.
-
-## 0.28.2
-
-- **The scale is in the clip's name**, on the Timelapse page and in a download, so the clips of one
-  print made with different scales can be told apart.
-- **Making a clip again no longer waits for the printer's own clip** when it did not come the
-  first time: it goes back under the name the first one was given.
-- **Delete and Make the clip again are not offered** while a print is waiting to be made into a
-  clip or being made into one.
-
-## 0.28.1
-
-- **A test build, to choose how temperatures become colours.** A new "Scale (testing)" setting in
-  the Range panel offers seven ways of spreading the palette: today's, today's with the ruler over
-  the colours, a straight line over the whole scene, two log curves, and a knee at 85% and 75%.
-  They apply while the colours follow the scene, and in timelapse clips made with the print's own
-  range.
-- **Make the clip again.** Each print that still has its temperatures can be made into a clip
-  again, with whatever is chosen now, and each clip is marked with the scale it was made with.
-- This entry is replaced once a scale has been chosen.
+- **Four colour scales**, under Range on the settings page: the stretch the picture has always
+  used, a knee that squeezes everything hotter than the range into the top of the palette so a
+  nozzle keeps its shape, and two logs that spread the whole scene with most of the colours at its
+  cool end. They work with a followed range and a held one, live and in timelapse clips, and they
+  change the picture, never the readings.
+- **The ruler spans the colours.** Following the scene, it used to run from the coldest to the
+  hottest thing in view, so a nozzle re-labelled its top every frame and most of it was one flat
+  colour. It now runs over the temperatures the colours are spread over, as it already did with a
+  held range, and a triangle at an end says the scene goes past it.
+- **Clips have their own readout**: the ruler, the crosshair, the markers and the spots can be on in
+  the camera tile and off in the clips, or the other way round, with a button to copy the live
+  picture's. Two more boxes write the colour scale in the corner of each clip and in its name.
+- **Make the clip again with the current colours.** A print that still has its temperatures, the
+  two newest, can be drawn again with the palette, colour scale and readout chosen now, and goes
+  back on the Timelapse page in place of the old copy.
+- **No ten minute wait on a U1 print without the printer's own timelapse.** The plugin asks during
+  the print whether the firmware is recording one, and only waits for its clip when it is.
+- **The explanations are beside the options they explain**, behind an (i) you hover over or click,
+  instead of in a long list at the foot of the settings page. The plugin's version is at the foot
+  instead.
 
 ## 0.28.0
 

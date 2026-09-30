@@ -34,7 +34,13 @@ MOONRAKER_TIMEOUT_SECONDS = 2.0
 REFUSED_STATUSES = (401, 403)
 
 
-PRINT_STATS_QUERY = "/printer/objects/query?print_stats=state,filename,info"
+# The two fields after print_stats are a Snapmaker's: whether its firmware is recording a timelapse
+# of this print, and whether the print was started with one asked for. Klipper answers an object it
+# does not have with an empty one, so on mainline they cost nothing and say nothing.
+PRINT_STATS_QUERY = (
+    "/printer/objects/query?print_stats=state,filename,info"
+    "&timelapse=is_active&print_task_config=time_lapse_camera"
+)
 
 
 NEWEST_JOB_QUERY = "/server/history/list?limit=1&order=desc"
@@ -65,7 +71,8 @@ def whole_number(value: object) -> int | None:
 
 
 def parsed_print_status(answer: dict) -> PrintStatus | None:
-    stats = answer.get("result", {}).get("status", {}).get("print_stats")
+    status = answer.get("result", {}).get("status", {})
+    stats = status.get("print_stats")
     if not isinstance(stats, dict):
         return None
     info = stats.get("info") or {}
@@ -74,7 +81,23 @@ def parsed_print_status(answer: dict) -> PrintStatus | None:
         filename=str(stats.get("filename") or ""),
         current_layer=whole_number(info.get("current_layer")),
         total_layer=whole_number(info.get("total_layer")),
+        firmware_timelapse=firmware_timelapse(status),
     )
+
+
+def firmware_timelapse(status: dict) -> bool | None:
+    """Whether the printer's firmware is recording its own timelapse, or None where it cannot say.
+
+    Either field will do. Read on a U1 on 2026-09-30, both were true for the whole of a print
+    started with the timelapse ticked and false for one without, and both went false once the
+    print ended. `is_active` is the one that says what the firmware is doing rather than what was
+    asked, which matters on a printer where a macro forces the timelapse on.
+    """
+
+    active = (status.get("timelapse") or {}).get("is_active")
+    asked = (status.get("print_task_config") or {}).get("time_lapse_camera")
+    known = [value for value in (active, asked) if isinstance(value, bool)]
+    return any(known) if known else None
 
 
 def parsed_newest_job(answer: dict) -> JobInfo | None:

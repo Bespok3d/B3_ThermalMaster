@@ -251,6 +251,21 @@ class Recording:
         return f"{stem}_{stamp}"
 
     @property
+    def firmware_timelapse(self) -> bool | None:
+        """Whether the printer was seen making its own clip of this print, if it could say."""
+
+        seen = self.meta.get("firmware_timelapse")
+        return seen if isinstance(seen, bool) else None
+
+    def note_firmware_timelapse(self, seen: bool) -> None:
+        """Once true, true for good: a print that was being recorded by the firmware still was."""
+
+        noted = self.firmware_timelapse is True or seen
+        if self.firmware_timelapse != noted:
+            self.meta["firmware_timelapse"] = noted
+            self.save()
+
+    @property
     def clip_scale(self) -> str | None:
         """The colour scale the clip was made with, on the test/color-bar branch."""
 
@@ -261,7 +276,7 @@ class Recording:
     def clip_name(self) -> str:
         """What the clip is called when it leaves the printer."""
 
-        return f"{self.base_name}_thermal{scale_suffix(self.clip_scale)}.mp4"
+        return f"{self.base_name}_thermal{named_suffix(self.meta.get('clip') or {})}.mp4"
 
     @property
     def published(self) -> list[str]:
@@ -323,10 +338,11 @@ class Recording:
         }
 
 
-def scale_suffix(scale: str | None) -> str:
-    """The scale on the end of a clip's name, so seven downloads of one print can be told apart."""
+def named_suffix(outcome: dict) -> str:
+    """The scale on the end of a clip's name, when the clip was made with it asked for there."""
 
-    return f"_{scale}" if scale else ""
+    scale = outcome.get("scale")
+    return f"_{scale}" if scale and outcome.get("scale_in_name") else ""
 
 
 def recordings(root: Path) -> list[Recording]:

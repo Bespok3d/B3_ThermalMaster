@@ -184,7 +184,7 @@ def run_timelapse_checks(page, store) -> list:
     checks.append(("forget is greyed out with no key", page.is_disabled("#forget-key"), True))
     page.check("input[name=timelapse]")
     page.fill("input[name=moonraker_api_key]", "a-made-up-key")
-    page.click("fieldset#timelapse button[type=submit]")
+    page.click("fieldset#timelapse button[type=submit]:not([name])")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     saved = store.timelapse_snapshot()
     checks.append(("the switch reaches the plugin", saved.timelapse, True))
@@ -211,6 +211,31 @@ def run_timelapse_checks(page, store) -> list:
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("delete removes the print", page.locator(".clip").count(), 0))
     checks.append(("and comes back to the list", page.url.endswith("#timelapses"), True))
+    return checks
+
+
+def run_info_checks(page) -> list:
+    """An (i) shows its text while hovered, keeps it once clicked, and drops it on a second click."""
+
+    about = "#info-colour_scale ~ p.about"
+    icon = "label[for=info-colour_scale]"
+    checks = [("an explanation starts hidden", page.is_visible(about), False)]
+    page.hover(icon)
+    checks.append(("hovering its (i) shows it", page.is_visible(about), True))
+    page.mouse.move(0, 0)
+    checks.append(("and moving away hides it again", page.is_visible(about), False))
+    page.click(icon)
+    page.mouse.move(0, 0)
+    checks.append(("clicking keeps it on the page", page.is_visible(about), True))
+    page.click(icon)
+    page.mouse.move(0, 0)
+    checks.append(("and a second click takes it away", page.is_visible(about), False))
+    checks.append(("the icon is a drawn one", page.locator(f"{icon} svg path").count(), 1))
+    checks.append((
+        "the version is at the foot of the page",
+        page.inner_text("p.version").startswith("Thermal Master "),
+        True,
+    ))
     return checks
 
 
@@ -244,23 +269,24 @@ def run_checks(page, store, device) -> list:
     checks.append((
         "every colour scale is offered",
         page.locator("select[name=colour_scale] option").count(),
-        7,
+        4,
     ))
     page.select_option("select[name='colour_scale']", "knee")
     page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("the colour scale reaches the plugin", store.as_dict()["colour_scale"], "knee"))
-    page.select_option("select[name='colour_scale']", "today")
+    page.select_option("select[name='colour_scale']", "stretch")
     page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
-    checks.append(("and back to today", store.as_dict()["colour_scale"], "today"))
+    checks.append(("and back to the stretch", store.as_dict()["colour_scale"], "stretch"))
+    checks += run_info_checks(page)
 
     # Holding the range is the first button that changes something the form is showing, and the
     # page used to ignore the answer it got back: the plugin went to a fixed range, the page went
     # on saying "follow the scene", and the next Apply posted what the page was saying and undid
     # it. Both halves are checked, because the second one is what made it a defect rather than a
     # missing flourish.
-    page.click("text=Hold what I see now")
+    page.click("button[value=lock-range]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     held = store.as_dict()
     checks.append(("holding the range switches the plugin", held["range_mode"], "fixed"))
