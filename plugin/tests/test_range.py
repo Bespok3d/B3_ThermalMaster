@@ -123,15 +123,10 @@ def test_the_ruler_spans_the_held_range_rather_than_the_scene(thermal_streamer, 
         thermal_streamer.build_palettes()["ironbow"], held(thermal_streamer, 20.0, 100.0)
     )
     _, stats, _ = renderer.render_image(bed)
-    overlay = thermal_streamer.Overlay(
-        thermal_streamer.build_palettes()["ironbow"], stats, "celsius", fixed_range=True
-    )
 
-    axis = thermal_streamer.bar_axis(stats, True)
+    axis = thermal_streamer.bar_axis(stats)
 
     assert axis == (stats.range_low_celsius, stats.range_high_celsius)
-    assert thermal_streamer.bar_axis(stats) == (stats.minimum_celsius, stats.maximum_celsius)
-    assert overlay.fixed_range is True
 
 
 def test_a_triangle_says_the_scene_has_left_the_scale(thermal_streamer, bed):
@@ -142,9 +137,9 @@ def test_a_triangle_says_the_scene_has_left_the_scale(thermal_streamer, bed):
     )
     _, stats, _ = renderer.render_image(bed)
     overlay = thermal_streamer.Overlay(
-        thermal_streamer.build_palettes()["ironbow"], stats, "celsius", fixed_range=True
+        thermal_streamer.build_palettes()["ironbow"], stats, "celsius"
     )
-    axis = thermal_streamer.bar_axis(stats, True)
+    axis = thermal_streamer.bar_axis(stats)
 
     assert thermal_streamer.marks_top(overlay, axis) is True
     assert thermal_streamer.marks_bottom(overlay, axis) is False
@@ -156,29 +151,33 @@ def test_a_scene_inside_the_scale_gets_no_triangles(thermal_streamer, bed):
     )
     _, stats, _ = renderer.render_image(bed)
     overlay = thermal_streamer.Overlay(
-        thermal_streamer.build_palettes()["ironbow"], stats, "celsius", fixed_range=True
+        thermal_streamer.build_palettes()["ironbow"], stats, "celsius"
     )
-    axis = thermal_streamer.bar_axis(stats, True)
+    axis = thermal_streamer.bar_axis(stats)
 
     assert thermal_streamer.marks_top(overlay, axis) is False
     assert thermal_streamer.marks_bottom(overlay, axis) is False
 
 
-def test_on_auto_the_triangles_still_follow_the_markers(thermal_streamer, bed):
-    """The 0.15.0 meaning, unchanged, because on a measured range it is still the true one."""
+def test_on_a_followed_range_the_triangles_say_the_same(thermal_streamer, bed):
+    """Since 0.28.6 the ruler spans the colours either way, so the triangles mean one thing.
+
+    The middle 96% of the scene is what the colours cover, so something hotter than it is past
+    the top, whether or not the hottest pixel's marker is on.
+    """
 
     renderer = thermal_streamer.ThermalRenderer(
         thermal_streamer.build_palettes()["ironbow"],
-        thermal_streamer.RenderSettings(emissivity=1.0, coldspot=False),
+        thermal_streamer.RenderSettings(emissivity=1.0, hotspot=False),
     )
     _, stats, _ = renderer.render_image(bed)
     overlay = thermal_streamer.Overlay(
-        thermal_streamer.build_palettes()["ironbow"], stats, "celsius", coldspot=False
+        thermal_streamer.build_palettes()["ironbow"], stats, "celsius", hotspot=False
     )
     axis = thermal_streamer.bar_axis(stats)
 
-    assert thermal_streamer.marks_top(overlay, axis) is True
-    assert thermal_streamer.marks_bottom(overlay, axis) is False
+    assert thermal_streamer.marks_top(overlay, axis) is (stats.maximum_celsius > axis[1])
+    assert thermal_streamer.marks_bottom(overlay, axis) is (stats.minimum_celsius < axis[0])
 
 
 def test_holding_the_range_does_not_measure_one(thermal_streamer, bed, monkeypatch):

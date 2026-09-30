@@ -18,6 +18,7 @@ import functools
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from .colour_scale import ColourMapping
 from .geometry import orient_point  # noqa: F401 - re-exported for the package facade
 from .palettes import PALETTE_STEPS
 from .temperature import FrameStats, format_temperature
@@ -109,9 +110,9 @@ class Overlay:
     reticle: bool = True
     hotspot: bool = True
     coldspot: bool = True
-    # Whether the display range was told rather than measured. The bar is drawn differently for
-    # the two: see `bar_axis` and the triangles in `draw_colorbar`.
-    fixed_range: bool = False
+    # The curve the picture was drawn with, when it was not the straight stretch. The ruler then
+    # says with a tick which temperature its bend or its middle is.
+    mapping: ColourMapping | None = None
 
 
 @functools.lru_cache(maxsize=8)
@@ -249,26 +250,17 @@ _Position = tuple[float, float]
 _Rectangle = tuple[float, float, float, float]
 
 
-def bar_axis(stats: FrameStats, fixed_range: bool = False) -> tuple[float, float]:
-    """The temperatures the bar spans, bottom and top.
+def bar_axis(stats: FrameStats) -> tuple[float, float]:
+    """The temperatures the bar spans, bottom and top: the range the colours are spread over.
 
-    On a measured range, the frame's own coldest and hottest, so the ends of the ruler are the
-    numbers the markers show. They were the ends of the display range until 0.14.0, which was
-    defensible and confused every person who looked at it: a ruler topped 25.3 beside a marker
-    reading 30.0 reads as a contradiction, however carefully the difference is explained. A ruler
-    whose top is the hottest thing in view needs no explaining.
-
-    On a told range, the range itself, which is the whole point of telling it: the ruler stops
-    moving, and a colour halfway up the bar means the same temperature in every frame. The markers
-    can then read past the ends, and the triangles are what says so.
-
-    A flat scene on a measured range has no span of its own, so the display range stands in and the
-    bar keeps a height.
+    The scene's own coldest and hottest from 0.14.0, so the ruler's ends were the numbers the
+    markers show. Put back to the range in 0.28.6, after the scales were compared on the U1: a
+    ruler over the scene is re-labelled every frame by a nozzle whose reading jumps twenty degrees
+    from one to the next, and almost all of it is one flat colour. Over the range, it holds still
+    and every row of it is a colour the picture uses. The triangles say when the scene goes past.
     """
 
-    if fixed_range or stats.maximum_celsius <= stats.minimum_celsius:
-        return (stats.range_low_celsius, stats.range_high_celsius)
-    return (stats.minimum_celsius, stats.maximum_celsius)
+    return (stats.range_low_celsius, stats.range_high_celsius)
 
 
 def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
@@ -285,13 +277,11 @@ def bar_row(value: float, axis: tuple[float, float], height: int) -> int:
 def bar_gradient(
     palette: np.ndarray, axis: tuple[float, float], stats: FrameStats, height: int
 ) -> np.ndarray:
-    """The bar's colours, built by asking the picture's own mapping what each row would be.
+    """The bar's colours, built by asking the stretch what each row's temperature would be.
 
-    This is what makes the ruler honest rather than decorative. The bar spans the whole scene, and
-    the palette spans only the auto-ranged middle of it, so the rows above and below that come out
-    in the end colours, flat. Which is exactly what the picture does to those pixels: anything
-    hotter than the range is drawn in the top colour. The flat bands are not a drawing shortcut,
-    they are the truth about where colour stops carrying information.
+    Over the range, which is what the ruler spans, that is the palette from end to end. Over a
+    wider axis, the rows past the range come out flat in the end colours, which is what the picture
+    does to those pixels; the benches still draw it that way to compare.
     """
 
     low, high = axis
@@ -306,16 +296,10 @@ def bar_gradient(
 def mark_bar(
     image: Image.Image, at_top: bool, style: OverlayStyle, colour: tuple[int, int, int]
 ) -> None:
-    """A triangle at one end of the bar.
+    """A triangle at one end of the bar: there is something past this end the colours cannot show.
 
-    It means two things, and which one depends on the range. On a measured range the bar spans the
-    scene, so an extreme is never past the end, it is exactly at it: the triangle is a visual tie
-    between the red cross on the picture and the number at the top of the ruler, and it is drawn
-    only for a marker that is actually on.
-
-    On a told range the scene can leave the scale entirely, and then the triangle means what it
-    meant before 0.15.0: there is something past this end that the colours cannot show you. That
-    reading only makes sense once the scale is fixed, which is why it came back with it.
+    It follows the scene rather than the marker of the same colour, so somebody who switched the
+    hotspot marker off still learns that the picture is clipping.
     """
 
     left, top, width, height = style.bar_box
@@ -328,42 +312,39 @@ def mark_bar(
 
 
 def marks_top(overlay: Overlay, axis: tuple[float, float]) -> bool:
-    """Whether the top of the bar gets a triangle, which is two questions in one.
+    """Whether the scene goes past the top of the bar."""
 
-    On a measured range it is there to tie the top of the ruler to the marker of the same colour,
-    so it follows that marker being switched on. On a told range it is there to say the scene has
-    gone off the top, so it follows the scene rather than the marker: somebody who switched the
-    hotspot marker off still needs to know the picture is clipping.
-    """
-
-    if overlay.fixed_range:
-        return overlay.stats.maximum_celsius > axis[1]
-    return overlay.hotspot
+    return overlay.stats.maximum_celsius > axis[1]
 
 
 def marks_bottom(overlay: Overlay, axis: tuple[float, float]) -> bool:
-    if overlay.fixed_range:
-        return overlay.stats.minimum_celsius < axis[0]
-    return overlay.coldspot
+    return overlay.stats.minimum_celsius < axis[0]
 
 
 def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> None:
-    """The ruler down the right edge, spanning the scene and labelled with its ends."""
+    """The stretch's ruler down the right edge, over its range and labelled with its ends."""
 
-    width = image.size[0]
+    axis = bar_axis(overlay.stats)
+    paste_bar(image, bar_gradient(overlay.palette, axis, overlay.stats, style.bar_box[3]), style)
+    draw_bar_ends(image, overlay, style, axis)
+
+
+def paste_bar(image: Image.Image, ramp: np.ndarray, style: OverlayStyle) -> None:
     left, top, bar_width, bar_height = style.bar_box
-    stats = overlay.stats
-    axis = bar_axis(stats, overlay.fixed_range)
-    ramp = bar_gradient(overlay.palette, axis, stats, bar_height)
     bar = Image.fromarray(ramp.astype(np.uint8), mode="RGB")
     image.paste(bar.resize((bar_width, bar_height), Image.Resampling.NEAREST), (left, top))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle(
+    ImageDraw.Draw(image).rectangle(
         (left, top, left + bar_width - 1, top + bar_height - 1), outline=OVERLAY_SHADOW_RGB
     )
-    # No tick where the auto-ranging stops: the gradient already draws that boundary, since above
-    # it the bar is flat and below it the colour varies. A line on top of an edge that is already
-    # visible is one moving thing too many, and it read as noise on hardware.
+
+
+def draw_bar_ends(
+    image: Image.Image, overlay: Overlay, style: OverlayStyle, axis: tuple[float, float]
+) -> None:
+    """The triangles and the two numbers, at the ends of whichever ruler was drawn."""
+
+    width = image.size[0]
+    top, bar_height = style.bar_box[1], style.bar_box[3]
     for at_top, shown, colour in (
         (True, marks_top(overlay, axis), HOTSPOT_RGB),
         (False, marks_bottom(overlay, axis), COLDSPOT_RGB),
@@ -379,6 +360,50 @@ def draw_colorbar(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> 
                hottest, style, HOTSPOT_RGB)
     draw_label(image, (right - label_width(coldest, style.pixel_height), top + bar_height + 1),
                coldest, style, COLDSPOT_RGB)
+
+
+def curved_gradient(palette: np.ndarray, height: int) -> np.ndarray:
+    """The whole palette, hottest at the top, one row per step of it rather than per degree."""
+
+    rows = np.linspace(PALETTE_STEPS - 1, 0, max(height, 1)).astype(np.uint8)
+    gradient: np.ndarray = palette[rows].reshape(-1, 1, 3)
+    return gradient
+
+
+def draw_curved_colorbar(
+    image: Image.Image, overlay: Overlay, style: OverlayStyle, mapping: ColourMapping
+) -> list[_Rectangle]:
+    """The ruler for a curve: evenly coloured, with a tick saying where the curve bends.
+
+    Rows here are steps of the palette, not degrees, so the middle of the bar is not the middle
+    temperature. The tick says what it is instead, as the labels of a log axis do. Its label's
+    rectangle is handed back, so the markers keep their numbers off it.
+    """
+
+    paste_bar(image, curved_gradient(overlay.palette, style.bar_box[3]), style)
+    draw_bar_ends(image, overlay, style, (mapping.celsius_at(0.0), mapping.celsius_at(1.0)))
+    return [
+        draw_tick(image, fraction, mapping.celsius_at(fraction), overlay.units, style)
+        for fraction in mapping.ticks
+    ]
+
+
+def draw_tick(
+    image: Image.Image, fraction: float, celsius: float, units: str, style: OverlayStyle
+) -> _Rectangle:
+    """A short line off the left of the bar at this share of the palette, and its temperature."""
+
+    left, top, _, bar_height = style.bar_box
+    row = top + int(round((1.0 - fraction) * (bar_height - 1)))
+    arm = max(style.margin, 3)
+    draw = ImageDraw.Draw(image)
+    draw.line((left - arm, row + 1, left - 1, row + 1), fill=OVERLAY_SHADOW_RGB)
+    draw.line((left - arm, row, left - 1, row), fill=OVERLAY_TEXT_RGB)
+    text = format_temperature(celsius, units)
+    width = label_width(text, style.pixel_height)
+    position = (left - arm - 2 - width, row - style.line_height / 2)
+    draw_label(image, position, text, style)
+    return (position[0], position[1], position[0] + width, position[1] + style.line_height)
 
 
 def overlapping(one: _Rectangle, other: _Rectangle) -> bool:
@@ -511,12 +536,19 @@ def markers_for(overlay: Overlay) -> list[Marker]:
     return [marker for shown, marker in wanted if shown]
 
 
-def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
+def draw_overlay(
+    image: Image.Image, overlay: Overlay, reserved: list[_Rectangle] | None = None
+) -> None:
+    """The ruler and the markers. `reserved` is anywhere else a marker's number must stay off."""
+
     style = overlay_style(image.size, overlay.colorbar)
-    if overlay.colorbar:
+    # Every marker in one pass, so each can see where the ones before it put their labels, and
+    # where a curved ruler put its ticks.
+    placed: list[_Rectangle] = list(reserved or [])
+    if overlay.colorbar and overlay.mapping is not None:
+        placed += draw_curved_colorbar(image, overlay, style, overlay.mapping)
+    elif overlay.colorbar:
         draw_colorbar(image, overlay, style)
-    # Every marker in one pass, so each can see where the ones before it put their labels.
-    placed: list[_Rectangle] = []
     for marker in markers_for(overlay):
         draw_marker(image, marker, overlay, style, placed)
 
@@ -526,6 +558,11 @@ def draw_overlay(image: Image.Image, overlay: Overlay) -> None:
 # this is read is a dashboard tile with no other explanation anywhere near it.
 STREAM_OFF_TITLE = "Stream off"
 STREAM_OFF_HINT = "Press Start to turn the camera back on"
+
+
+# The plugin's dark background, behind the "Stream off" words and under a timelapse frame for a
+# layer missed before any was taken.
+PLACEHOLDER_RGB = (16, 18, 22)
 
 
 # The size it is drawn at. Nothing is streaming, so there is no frame to take a shape from, and
@@ -543,7 +580,7 @@ def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
     special case, and each of them says what has happened rather than showing a broken image.
     """
 
-    picture = Image.new("RGB", size, (16, 18, 22))
+    picture = Image.new("RGB", size, PLACEHOLDER_RGB)
     style = overlay_style(size, colorbar=False)
     title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
     draw = ImageDraw.Draw(picture)
@@ -562,6 +599,48 @@ def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
         fill=(154, 160, 170),
     )
     return picture
+
+
+# The band across the top of a picture that is not live: the viewer's watchdog line, drawn the same
+# way, so a timelapse says a layer was missed in the words and colours the viewer uses for a frozen
+# stream. A twentieth of the picture's height for the text, on a band one and a half times that.
+BANNER_FONT_DIVISOR = 20
+
+
+BANNER_BACKGROUND_RGBA = (13, 15, 18, 204)
+
+
+BANNER_TEXT_RGB = (216, 117, 42)
+
+
+BANNER_PADDING_PIXELS = 4
+
+
+def fitted_pixel_height(text: str, preferred: int, width: int) -> int:
+    """The largest text height up to the preferred one at which the text fits the width."""
+
+    pixel_height = preferred
+    while pixel_height > OVERLAY_MIN_FONT_PIXELS and label_width(text, pixel_height) > width:
+        pixel_height -= 1
+    return pixel_height
+
+
+def with_banner(picture: Image.Image, text: str) -> Image.Image:
+    """A copy of the picture with a line of text on a dark band across its top."""
+
+    width, height = picture.size
+    preferred = max(OVERLAY_MIN_FONT_PIXELS, height // BANNER_FONT_DIVISOR)
+    pixel_height = fitted_pixel_height(text, preferred, width - 2 * BANNER_PADDING_PIXELS)
+    band = Image.new("RGBA", picture.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(band)
+    draw.rectangle((0, 0, width, int(pixel_height * 1.5)), fill=BANNER_BACKGROUND_RGBA)
+    draw.text(
+        (BANNER_PADDING_PIXELS, pixel_height // 4),
+        text,
+        font=overlay_font(pixel_height),
+        fill=BANNER_TEXT_RGB,
+    )
+    return Image.alpha_composite(picture.convert("RGBA"), band).convert("RGB")
 
 
 def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:

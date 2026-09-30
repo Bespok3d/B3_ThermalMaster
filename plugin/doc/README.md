@@ -48,10 +48,12 @@ cameras. There is nothing to add by hand under Settings.
 
 Open `/thermal/` on the printer, or follow the plugin's link in the Bespok3d app. It shows the live
 view and everything there is to change: palette, rotation in quarter turns, mirroring, the
-temperature readout and its units, emissivity, sensor gain, and a button to recalibrate the sensor.
-Changes take effect immediately and are remembered across restarts.
+colour scale, the temperature readout and its units, emissivity, sensor gain, and a button to
+recalibrate the sensor. Changes take effect immediately and are remembered across restarts. An (i)
+beside an option explains it: hover over it to read, or click it to keep the explanation open until
+the next click. The plugin's version is at the foot of the page.
 
-![The settings page: the Image, Range, Readout and Camera panels](images/settings.jpg)
+![The settings page on a phone: the live picture and the Image, Range and Readout panels, then the Camera and Timelapse panels](images/settings.jpg)
 
 | Panel | Setting | JSON field | Values |
 | --- | --- | --- | --- |
@@ -60,6 +62,7 @@ Changes take effect immediately and are remembered across restarts.
 | Image | Mirror left to right, top to bottom | `flip_horizontal`, `flip_vertical` | `true`, `false` |
 | Image | Enlarging | `upscale_filter` | `smooth`, `sharp` |
 | Range | Colours | `range_mode` | `auto` follows the scene, `fixed` holds the two numbers below |
+| Range | Colour scale | `colour_scale` | `stretch`, `knee`, `log-mild`, `log-strong`; see [Colour scales](#colour-scales) |
 | Range | From, To | `range_low_celsius`, `range_high_celsius` | degrees Celsius, whatever the display units |
 | Readout | Ruler, crosshair, hottest and coldest pixel | `colorbar`, `reticle`, `hotspot`, `coldspot` | `true`, `false` |
 | Readout | Units | `units` | `celsius`, `fahrenheit` |
@@ -67,6 +70,13 @@ Changes take effect immediately and are remembered across restarts.
 | Camera | Gain | `gain` | `high` for -20 to 150 C, `low` for 0 to 550 C |
 | Camera | Stop the camera, Start | `streaming` | `true`, `false` |
 | Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
+| Timelapse | Record one frame per layer | `timelapse` | `true`, `false`; off until you switch it on |
+| Timelapse | Keep | `timelapse_keep` | 1 to 100 prints, 10 by default |
+| Timelapse | Colours | `timelapse_range_mode` | `from-start`, `whole-print`, `fixed`, `as-displayed` |
+| Timelapse | From, To | `timelapse_range_low_celsius`, `timelapse_range_high_celsius` | degrees Celsius, used by `fixed` |
+| Timelapse | Drawn into the clips: ruler, crosshair, hottest and coldest pixel, placed spots | `timelapse_colorbar`, `timelapse_reticle`, `timelapse_hotspot`, `timelapse_coldspot`, `timelapse_spots` | `true`, `false`; all on by default |
+| Timelapse | The colour scale in the corner of each clip, in the clip's name | `timelapse_scale_label`, `timelapse_scale_in_name` | `true`, `false`; off by default |
+| Timelapse | Moonraker key | `moonraker_api_key` | a key, or `""` to forget it; never sent back, `moonraker_api_key_set` says whether one is saved |
 
 The same settings are at `/thermal/settings`. A `GET` answers with all of them as JSON, along with a
 sentence on what the camera is doing and what the plugin is costing the printer. A `POST` with a
@@ -77,8 +87,9 @@ curl -X POST http://<printer>/thermal/settings \
   -H "Content-Type: application/json" -d '{"palette": "rainbow", "units": "fahrenheit"}'
 ```
 
-The two buttons are commands rather than settings: `{"command": "shutter"}` recalibrates the sensor,
-and `{"command": "lock-range"}` holds the range the picture is using right now.
+The buttons are commands rather than settings: `{"command": "shutter"}` recalibrates the sensor,
+`{"command": "lock-range"}` holds the range the picture is using right now, and
+`{"command": "copy-live-readout"}` sets the clips' readout to the live picture's.
 
 Rotation is applied here rather than in Fluidd's own camera settings, because a camera defined by a
 config file is read-only there: the panel shows "Managed by your Moonraker configuration" and greys
@@ -96,21 +107,18 @@ exactly what it did before there was a readout at all.
 
 It draws four things into the picture itself:
 
-- A colorbar down the right edge, spanning the coldest and hottest temperatures in view and
-  labelled with them, in the same colours as the markers that name those pixels.
-
-  Two ticks across it mark where the auto-ranging stops. Between them the colour varies; above and
-  below them the bar is one flat colour, because so is the picture. The mapping ignores the top and
-  bottom two percent of the scene so that one glint or one dead pixel cannot wash everything out,
-  and anything past that is drawn in the end colour. The flat bands are not decoration: they are
-  where colour stops carrying information.
+- A colorbar down the right edge, spanning the temperatures the colours are spread over and
+  labelled with its ends. Following the scene, that is the middle 96% of what is in view, so one
+  glint or one dead pixel cannot wash everything out; holding a range, it is the held temperatures.
+  A triangle at an end says the scene goes past it, and the markers still read the extremes. With
+  a knee or a log it runs to the hottest thing in view, with a tick at the knee's bend or halfway
+  up a log (see [Colour scales](#colour-scales)).
 - A crosshair in the middle, with the temperature under it.
 - A red marker on the hottest pixel in view, with its temperature.
 - A blue marker on the coldest pixel, with its temperature.
 
 Where two markers land close together, the second one moves its number rather than writing over the
-first. The ruler ticks whichever extremes are switched on, so what the bar says and what the markers
-say never disagree.
+first.
 
 Burned into the picture rather than drawn over it, so the stream and the still carry their own
 readout wherever they are opened, including anything that fetches them outside this plugin. The cost is that switching the readout on doubles
@@ -210,6 +218,88 @@ The P3 is implemented from the same driver and its own model configuration, and 
 on a printer: the resolution, the model detection and the gain modes are all in place and none of
 them have met the hardware. If you have a P3, it should work, and a report either way is welcome.
 
+## Timelapse
+
+Switch it on in the Timelapse panel of the settings page, and every print gets a thermal clip: one
+frame each time the layer changes, one more for the finished part, made into a clip once the print
+has ended, which holds the finished part on screen for two seconds at the end. The clips are listed at the bottom of the settings page, newest first, to play, download
+or delete.
+
+**The slicer has to tell Klipper the layer number.** Most do not by default. In OrcaSlicer or
+PrusaSlicer, add this as the first line of the printer's machine start G-code:
+
+```
+SET_PRINT_STATS_INFO TOTAL_LAYER=[total_layer_count]
+```
+
+and this to its layer change G-code:
+
+```
+SET_PRINT_STATS_INFO CURRENT_LAYER={layer_num + 1}
+```
+
+Without them the print is recorded with no frames, and the Timelapse panel says the slicer is not
+sending layer numbers.
+
+**Colours** are chosen once for the whole clip, because the plugin keeps the temperatures of every
+layer rather than pictures of them. "Fixed once the print has started" takes its range from the
+first frame with a layer on the bed, so what the bed and nozzle do before then does not wash the
+part out; a print that stopped before its second layer uses the whole print's range instead. "The whole print" runs from the coldest to the hottest thing in any frame. "Hold these
+temperatures" uses the two numbers in the panel, and "the same as the live picture" follows the
+Range panel above it. The palette, the rotation and the colour scale are the live picture's, and
+the clip is drawn when it is made, with whatever they are then.
+
+**What is drawn into the clips** is set in the Timelapse panel, apart from the live picture: the
+ruler, the crosshair, the hottest and coldest pixel and any placed spots, all on by default. Untick
+them all for a plain thermal clip while the camera tile keeps its numbers. "Copy the readout from
+the live view" ticks the same boxes the Readout panel has. Two more boxes write the colour scale in
+the corner of each clip and put it in the clip's name, which helps tell apart clips of one print
+made with different scales; both are off by default, and the list says which scale each clip was
+made with either way.
+
+**Making a clip again.** "Make the clip again with the current colours", beside each print that
+still has its temperatures, draws its clip again with the palette, colour scale and clip readout
+chosen now, and puts it back on the Timelapse page in place of the old copy, without waiting for
+the printer's own clip a second time. Only the two newest prints keep their temperatures.
+
+**If the nozzle is in view,** set the gain to wide range under Camera. High sensitivity reads
+nothing above 150 C, so a nozzle shows as 150 C, and the panel says so while the timelapse is on.
+
+**What is kept.** The number of prints you choose, 10 by default; older ones are deleted whole.
+The temperatures are kept only for the two newest prints, and if the printer's disk falls below
+200 MB free, the oldest temperatures go first, then the oldest clips, and no new frame is kept
+until there is room again. The plugin only ever deletes its own files, which live in
+`/userdata/bespok3d/var/thermal-master-timelapse/`, one folder per print.
+
+**Nothing gathered is thrown away.** A cancelled print gets its clip, and so does one that was cut
+short by a reboot or a power cut: the clip is made from what was recorded the next time the plugin
+starts. A layer passed with the camera unplugged repeats the last picture with "Camera
+disconnected" and the layer across its top, and one passed with the camera switched off says
+"Camera off" instead, so the clip keeps its length and holds still where the camera was lost.
+Switching the timelapse off during a print keeps what was taken so far.
+
+**If Moonraker asks for a login,** for instance with Bespok3d's Moonraker Login plugin, the panel
+says so and the timelapse cannot follow the print. Paste Moonraker's API key into the Moonraker key
+box. It is kept on the printer and is never shown again, not on the page and not at
+`/thermal/settings`; "Forget the saved key" removes it, and is greyed out while none is saved.
+
+**On the Timelapse page of Fluidd and Mainsail too.** When Moonraker has a Timelapse page, each
+clip and its thumbnail are copied there as well, through Moonraker. The U1 has one, from Bespok3d's
+Timelapse plugin, which the firmware's own clips appear on; the thermal clip is named after the
+firmware's clip of the same print with `_thermal` added, so the two sort side by side, and the
+plugin waits up to ten minutes for the firmware to finish its clip before making its own, so the
+two never share the processor. It only waits when the printer said during the print that it was
+recording one: with the timelapse unticked, the thermal clip is made as soon as the print ends. On mainline Klipper the page comes with `moonraker-timelapse`,
+which is optional: add `[timelapse]` to `moonraker.conf`, with `enabled: False` to keep its own
+capture off, and include its `timelapse.cfg`. Without a Timelapse page the clips are on the
+settings page only. A print the plugin deletes, by hand or by the count, takes its copies there
+with it, and nothing is copied while that disk has less than 200 MB free.
+
+**What it costs.** Nothing between layers: the camera is read anyway, and a layer change costs a
+copy of one frame. The clip is made after the print, at the lowest priority, and takes about a
+minute of the processor for a 1,000 layer print. The list is also at `/thermal/timelapses` as JSON,
+and each clip at `/thermal/timelapse.mp4?id=` with the id from that list.
+
 ## Notes
 
 **If the picture freezes for about three seconds, every thirty seconds or so,** check that the
@@ -307,6 +397,36 @@ Six palettes, all showing the same temperatures: only the colours change, never 
 
 Pick one on the settings page, or with `{"palette": "rainbow"}` posted to `/thermal/settings`. The
 picture above is one frame captured on a printer, rendered by the plugin in each palette.
+
+## Colour scales
+
+![The four colour scales, on a nozzle at 187 C and on a scene with nothing hot in it](images/colour-scales.jpg)
+
+How temperatures are spread over the palette, chosen under Range on the settings page. Like the
+palettes, a scale changes the picture and never the readings.
+
+- **Stretch**, the default and what the plugin has always drawn: the palette spread evenly over the
+  range, and anything hotter in the top colour. The bed and the part get every colour there is, and
+  a nozzle in view is one flat blob.
+- **Knee**: the stretch below a bend, with 85% of the palette, and everything hotter squeezed into
+  the top 15%, up to the hottest thing in view. The bed and the part look much as they do with the
+  stretch, and the nozzle keeps some shape. The ruler has a tick at the bend.
+- **Log, gentle** and **Log, strong**: the whole scene, coldest to hottest, on a log curve, so the
+  cool end gets more of the colours than the hot end, strong more so than gentle. Smoother than the
+  stretch on a scene with nothing hot in it; darker on the part with a hot nozzle in view. The
+  ruler has a tick halfway up, with the temperature there.
+
+**With a held range**, the logs keep to the held temperatures, so a colour still means the same
+temperature in every frame, and the knee keeps the held temperatures below its bend and squeezes
+anything hotter above it. In a timelapse clip the curves run over the whole print's coldest and
+hottest, so they too mean the same thing from the first layer to the last.
+
+**What they cost.** Measured on the U1, against a 13.6 ms frame with the stretch: about 1.2 ms
+more for the knee and the gentle log, and 1.5 ms for the strong log, roughly a tenth. The stretch
+costs what it always did.
+
+The picture above is two frames captured on a printer, the top one with the nozzle at 187 C in view and
+the bottom one with nothing hot in it, drawn by the plugin with each scale.
 
 ## The display range
 

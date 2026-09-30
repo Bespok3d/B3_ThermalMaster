@@ -216,3 +216,14 @@ def test_every_image_the_documentation_ships_is_one_it_shows():
     }
 
     assert shipped == shown
+
+
+def test_the_service_keeps_its_timelapses_beside_its_settings():
+    """In the plugin's own var folder, which teardown leaves alone, like the settings file."""
+
+    for service in SERVICES:
+        arguments = service["args"]
+        folder = arguments[arguments.index("--timelapse-dir") + 1]
+        settings = arguments[arguments.index("--settings-file") + 1]
+        assert folder.startswith("$BESPOK3D/var/")
+        assert folder.rsplit("/", 1)[0] == settings.rsplit("/", 1)[0]

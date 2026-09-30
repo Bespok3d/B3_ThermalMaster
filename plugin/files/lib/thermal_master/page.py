@@ -12,8 +12,12 @@ it never sees, so an absolute path is a guess about the mount point, and it has 
 
 from __future__ import annotations
 
+import html
+import time
+
 from .camera import (
     GAIN_DESCRIPTIONS,
+    GAIN_HIGH,
     SHUTTER_DONE,
     SHUTTER_FAILED,
     SHUTTER_IDLE,
@@ -22,9 +26,20 @@ from .camera import (
     STOP_STREAM_ACTION,
     VALID_GAINS,
 )
+from .colour_scale import SCALE_NAMES, VALID_COLOUR_SCALES
 from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
+from .recording import BYTES_PER_MEGABYTE
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
+from .timelapse import (
+    COPY_READOUT_ACTION,
+    FORGET_KEY_ACTION,
+    MAX_TIMELAPSE_KEEP,
+    MIN_TIMELAPSE_KEEP,
+    TIMELAPSE_SWITCHES,
+    VALID_TIMELAPSE_RANGES,
+)
+from .version import plugin_version
 
 # What the two filters are called on the page. The names are about what a person sees rather than
 # about the algorithm: nobody choosing how their camera looks wants to be asked about bilinear
@@ -42,6 +57,41 @@ RANGE_MODE_DESCRIPTIONS = {
 }
 
 
+# The four scales, named for what they do to the picture.
+COLOUR_SCALE_DESCRIPTIONS = {
+    "stretch": "Stretch",
+    "knee": "Knee, hot end squeezed in",
+    "log-mild": "Log, gentle",
+    "log-strong": "Log, strong",
+}
+
+
+# How the timelapse's colour range is offered, in the order it is offered.
+TIMELAPSE_RANGE_DESCRIPTIONS = {
+    "from-start": "Fixed once the print has started",
+    "whole-print": "The whole print, coldest to hottest",
+    "fixed": "Hold these temperatures",
+    "as-displayed": "The same as the live picture",
+}
+
+
+# What a finished recording's state is called in the list of timelapses.
+RECORDING_STATE_DESCRIPTIONS = {
+    "printing": "Recording now",
+    "complete": "Finished",
+    "cancelled": "Cancelled",
+    "error": "Stopped by an error",
+    "interrupted": "Interrupted, by a restart or a power cut",
+    "stopped": "Recording switched off during the print",
+}
+
+
+HIGH_SENSITIVITY_WARNING = (
+    '<p class="status">The camera is in high sensitivity, which reads nothing above 150 C, so a '
+    "nozzle in view shows as 150 C. Wide range is under Camera.</p>"
+)
+
+
 # What the switch says, and what pressing it asks for. Labelled by what it will do rather than by
 # what is happening, which is the convention every play button follows, and the word on it is the
 # word the placeholder picture tells people to look for.
@@ -54,6 +104,128 @@ STREAM_SWITCH = {
 # How often the page asks what the plugin is costing. Slow enough to be free and fast enough that
 # switching the camera off in one window is visible in the number a moment later.
 COST_POLL_MILLISECONDS = 5000
+
+
+# Material Icons' "info", outlined, from @material-design-icons/svg 0.14.15, under the Apache
+# License 2.0 (see NOTICE). Inline, since the page loads nothing from anywhere else.
+INFO_ICON = (
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 '
+    '6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 '
+    '8 8-3.59 8-8 8z"/></svg>'
+)
+
+
+# What each (i) explains, by the placeholder it fills: what it is about, for a screen reader, and
+# the explanation. They were paragraphs at the foot of the page until 0.28.6, a long way from the
+# options they explained and long enough that nobody read to the end of them.
+INFO_TEXTS = {
+    "enlarging": (
+        "enlarging",
+        "Enlarging is how the picture is made bigger before the readout is drawn on it, which only "
+        "happens while some part of the readout is switched on. Smooth blends the sensor's pixels; "
+        "sharp leaves them as squares and is about a sixth less work for the printer per frame. "
+        "Which one looks better depends on the scene and the screen.",
+    ),
+    "range": (
+        "the colours",
+        "Following the scene spreads the palette over the middle of what is in view, so contrast "
+        "is always as good as it can be, and a colour means nothing in particular: it changes "
+        "whenever the scene does. Holding two temperatures fixes it, so a colour means the same "
+        "temperature in every frame. \"Hold what I see now\" fills the two boxes from the picture "
+        "in front of you. Either way the ruler spans the colours, and a triangle at one end says "
+        "the scene goes past it. Holding costs the printer slightly less work, since there is "
+        "nothing to measure.",
+    ),
+    "colour_scale": (
+        "the colour scale",
+        "How temperatures are spread over the palette. Stretch spreads it evenly over the range "
+        "and draws anything hotter in the top colour: the most contrast for the bed and the part, "
+        "none for the nozzle. Knee is the stretch below a bend, with everything hotter squeezed "
+        "into the top of the palette, so the nozzle still shows. The two logs spread the whole "
+        "scene and give most of the colours to its cool end, strong more so than gentle. Over a "
+        "held range, the logs keep to the held temperatures and the knee squeezes in anything "
+        "hotter. It changes the picture, never the numbers, and the curves cost the printer "
+        "slightly more than the stretch.",
+    ),
+    "readout": (
+        "the readout",
+        "The readout is drawn into the picture, so it shows in the printer's camera tile too. "
+        "Anything switched on here encodes at a larger size, so the text stays legible; switching "
+        "all of it off costs nothing at all. The same numbers, and the frame average, are at "
+        '<a href="stats">stats</a>.',
+    ),
+    "emissivity": (
+        "emissivity",
+        "Emissivity is how much of what a surface radiates is its own heat rather than a "
+        "reflection of the room, so a shiny surface reads cold until you tell the plugin it is "
+        "shiny. It changes the numbers only, never the picture.",
+    ),
+    "camera": (
+        "calibrating and stopping the camera",
+        "Calibration closes the camera's internal shutter for a moment and re-levels the sensor "
+        "against it. The camera does this by itself about every ninety seconds; the button is for "
+        "when the picture has drifted and you would rather not wait. It costs one frame. Stopping "
+        "the camera releases it completely: nothing is read, nothing is rendered, and the printer "
+        "pays nothing at all for having the plugin installed. Everything that shows the camera "
+        "shows a \"Stream off\" picture instead, it survives a restart, and the same switch is in "
+        "the camera view's toolbar.",
+    ),
+    "cost": (
+        "the cost line",
+        "This plugin's own share of the printer's processor, read from the kernel rather than "
+        "estimated, and updated while this page is open. The printer has four cores, so 100% of "
+        "one core is a quarter of the machine, and the figure can pass 100% because the plugin "
+        "has more than one thread. Expect it to be highest here, because a settings page is a "
+        "live stream and a live stream is somebody watching.",
+    ),
+    "timelapse": (
+        "the timelapse",
+        "The timelapse takes one frame each time the layer number changes, and one more when the "
+        "print ends, and makes them into a clip once it has. It needs the slicer to tell Klipper "
+        "the layer number with <code>SET_PRINT_STATS_INFO</code>; the plugin's README says what to "
+        "add. It keeps the temperatures rather than pictures, so the clip is drawn when it is "
+        "made. Its colours are fixed once the print has started, which keeps what the bed and "
+        "nozzle did before the first layer out of it, the whole print's coldest to hottest, "
+        "temperatures of your own, or the live picture's. The oldest prints go once there are "
+        "more than the number to keep, and sooner if the printer's disk runs short of space. "
+        "Where Moonraker has a Timelapse page, as the U1 does and mainline Klipper does with "
+        "moonraker-timelapse, each clip is copied there too, named after the printer's own clip "
+        "of the print when it made one.",
+    ),
+    "clip_readout": (
+        "what is drawn into the clips",
+        "The clips' readout is their own, so a clip can come out plain while the camera tile "
+        "keeps its numbers, or the other way round. \"Copy the readout from the live view\" ticks "
+        "the boxes the Readout section has ticked, and placed spots if any are placed. The "
+        "palette and the colour scale are always the live picture's. The colour scale in the "
+        "corner, or in the name, is for telling apart clips of one print made with different "
+        "scales.",
+    ),
+    "moonraker_key": (
+        "the Moonraker key",
+        "Only needed when Moonraker asks for a login. It is kept on the printer and never shown "
+        "again, and \"Forget the saved key\" removes it.",
+    ),
+    "timelapses": (
+        "the list of timelapses",
+        "Each print's clip, newest first. \"Make the clip again with the current colours\" draws "
+        "it again from the kept temperatures, with the palette, colour scale and clip readout "
+        "chosen now, and puts it back on the Timelapse page under the same name. Only the two "
+        "newest prints keep their temperatures, so older ones can be played, downloaded or "
+        "deleted, but not made again.",
+    ),
+}
+
+
+def info(key: str) -> str:
+    """An (i) and what it explains, as three siblings for the stylesheet to show and hide."""
+
+    about, text = INFO_TEXTS[key]
+    return (
+        f'<input type="checkbox" class="info-toggle" id="info-{key}" aria-label="About {about}">'
+        f'<label class="info" for="info-{key}">{INFO_ICON}</label>'
+        f'<p class="about">{text}</p>'
+    )
 
 
 CONTROL_PAGE_TEMPLATE = """<!doctype html>
@@ -74,14 +246,18 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
          font: 15px/1.5 system-ui, sans-serif; }}
   main {{ max-width: 34rem; margin: 0 auto; }}
   img {{ width: 100%; border-radius: 6px; background: #000; display: block; }}
-  fieldset {{ border: 1px solid #33373f; border-radius: 6px; margin: 1rem 0 0; padding: 0.75rem; }}
+  /* A fieldset is as wide as its widest content unless told otherwise, and a select is as wide as
+     its longest option: on a phone the Timelapse panel ran off the right of the screen. */
+  fieldset {{ border: 1px solid #33373f; border-radius: 6px; margin: 1rem 0 0; padding: 0.75rem;
+              min-width: 0; }}
   legend {{ padding: 0 0.4rem; color: #9aa0aa; font-size: 0.85rem; }}
   label {{ display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }}
   label span {{ min-width: 7rem; }}
-  select {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
+  select {{ flex: 1; min-width: 0; padding: 0.35rem; background: #1d2026; color: inherit;
             border: 1px solid #33373f; border-radius: 4px; }}
   input[type="number"] {{ width: 6rem; padding: 0.35rem; background: #1d2026; color: inherit;
                           border: 1px solid #33373f; border-radius: 4px; }}
+  button:disabled {{ opacity: 0.4; cursor: default; }}
   button {{ margin-top: 0.8rem; margin-right: 0.5rem; padding: 0.5rem 1.1rem; border: 0;
             border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
             cursor: pointer; }}
@@ -91,6 +267,37 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      only way back to the camera was to reload the dashboard. */
   .back {{ display: inline-block; margin-bottom: 0.6rem; color: #9aa0aa; font-size: 0.85rem; }}
   p {{ color: #9aa0aa; font-size: 0.85rem; }}
+  input[type="password"] {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
+                            border: 1px solid #33373f; border-radius: 4px; }}
+  h2 {{ margin: 1.4rem 0 0.4rem; font-size: 1rem; font-weight: 600; }}
+  .clip {{ border: 1px solid #33373f; border-radius: 6px; margin: 0.6rem 0; padding: 0.6rem; }}
+  .clip video {{ width: 100%; border-radius: 4px; background: #000; display: block; }}
+  .clip p {{ margin: 0.4rem 0; }}
+  .clip form {{ display: inline; }}
+  .clip a {{ color: #d8752a; margin-right: 0.8rem; }}
+  /* An option and its (i), side by side, with the explanation underneath once asked for. The
+     explanation is a sibling of a checkbox nobody sees, so hovering the icon shows it for as long
+     as the pointer stays, and clicking it keeps it until the next click. No script: it has to
+     work in whatever opens the page, a Fluidd tile included. The checkbox has no name, so the form
+     never posts it and the script that reflects settings back never touches it. */
+  .field {{ position: relative; display: flex; flex-wrap: wrap; align-items: center;
+            column-gap: 0.4rem; }}
+  .field > :first-child {{ flex: 1; min-width: 0; }}
+  .info-toggle {{ position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }}
+  label.info {{ display: inline-flex; margin: 0; cursor: pointer; color: #9aa0aa; }}
+  label.info svg {{ width: 18px; height: 18px; fill: currentColor; }}
+  .info-toggle:checked + label.info {{ color: #d8752a; }}
+  .info-toggle:focus-visible + label.info {{ outline: 2px solid #d8752a; border-radius: 50%; }}
+  .about {{ display: none; flex-basis: 100%; margin: 0.2rem 0 0.6rem; }}
+  .info-toggle:checked + label.info + .about {{ display: block; }}
+  /* Only where there is a pointer that hovers. A phone keeps the last thing tapped "hovered" until
+     the next tap somewhere else, so with this rule everywhere a second tap unpinned the text and
+     the hover still showed it. */
+  @media (hover: hover) {{
+    label.info:hover {{ color: #d8752a; }}
+    label.info:hover + .about {{ display: block; }}
+  }}
+  .version {{ margin-top: 1.4rem; font-size: 0.75rem; }}
 </style>
 </head>
 <body>
@@ -106,13 +313,24 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
              Mirror left to right</label>
       <label><input type="checkbox" name="flip_vertical"{flip_vertical}>
              Mirror top to bottom</label>
-      <label><span>Enlarging</span>
-             <select name="upscale_filter">{upscale_filter_options}</select></label>
+      <div class="field">
+        <label><span>Enlarging</span>
+               <select name="upscale_filter">{upscale_filter_options}</select></label>
+        {info_enlarging}
+      </div>
       <button type="submit">Apply</button>
     </fieldset>
     <fieldset>
       <legend>Range</legend>
-      <label><span>Colours</span><select name="range_mode">{range_mode_options}</select></label>
+      <div class="field">
+        <label><span>Colours</span><select name="range_mode">{range_mode_options}</select></label>
+        {info_range}
+      </div>
+      <div class="field">
+        <label><span>Colour scale</span>
+               <select name="colour_scale">{colour_scale_options}</select></label>
+        {info_colour_scale}
+      </div>
       <label><span>From</span>
              <input type="number" name="range_low_celsius" step="0.1"
                     value="{range_low}"> C</label>
@@ -124,8 +342,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     </fieldset>
     <fieldset>
       <legend>Readout</legend>
-      <label><input type="checkbox" name="colorbar"{colorbar}>
-             Temperature ruler down the edge</label>
+      <div class="field">
+        <label><input type="checkbox" name="colorbar"{colorbar}>
+               Temperature ruler down the edge</label>
+        {info_readout}
+      </div>
       <label><input type="checkbox" name="reticle"{reticle}>
              Centre crosshair and its reading</label>
       <label><input type="checkbox" name="hotspot"{hotspot}>
@@ -133,59 +354,92 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><input type="checkbox" name="coldspot"{coldspot}>
              Coldest pixel</label>
       <label><span>Units</span><select name="units">{unit_options}</select></label>
-      <label><span>Emissivity</span>
-             <select name="emissivity">{emissivity_options}</select></label>
+      <div class="field">
+        <label><span>Emissivity</span>
+               <select name="emissivity">{emissivity_options}</select></label>
+        {info_emissivity}
+      </div>
       <button type="submit">Apply</button>
     </fieldset>
     <fieldset>
       <legend>Camera</legend>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
-      <button type="submit">Apply</button>
-      <button type="submit" name="command" value="shutter">Calibrate now</button>
-      <button type="submit" name="command" value="{stream_command}"
-              id="stream-switch">{stream_label}</button>
+      <div class="field">
+        <div class="buttons">
+          <button type="submit">Apply</button>
+          <button type="submit" name="command" value="shutter">Calibrate now</button>
+          <button type="submit" name="command" value="{stream_command}"
+                  id="stream-switch">{stream_label}</button>
+        </div>
+        {info_camera}
+      </div>
       <p class="status" id="device-status">{device_status}</p>
-      <p class="status" id="plugin-cost">{plugin_cost}</p>
+      <div class="field">
+        <p class="status" id="plugin-cost">{plugin_cost}</p>
+        {info_cost}
+      </div>
+    </fieldset>
+    <fieldset id="timelapse">
+      <legend>Timelapse</legend>
+      <div class="field">
+        <label><input type="checkbox" name="timelapse"{timelapse}>
+               Record one frame per layer of every print</label>
+        {info_timelapse}
+      </div>
+      <label><span>Keep</span>
+             <input type="number" name="timelapse_keep" min="{keep_minimum}" max="{keep_maximum}"
+                    step="1" value="{timelapse_keep}"> prints</label>
+      <label><span>Colours</span>
+             <select name="timelapse_range_mode">{timelapse_range_options}</select></label>
+      <label><span>From</span>
+             <input type="number" name="timelapse_range_low_celsius" step="0.1"
+                    value="{timelapse_low}"> C</label>
+      <label><span>To</span>
+             <input type="number" name="timelapse_range_high_celsius" step="0.1"
+                    value="{timelapse_high}"> C</label>
+      <div class="field">
+        <p class="status">Drawn into the clips:</p>
+        {info_clip_readout}
+      </div>
+      <label><input type="checkbox" name="timelapse_colorbar"{timelapse_colorbar}>
+             Temperature ruler down the edge</label>
+      <label><input type="checkbox" name="timelapse_reticle"{timelapse_reticle}>
+             Centre crosshair and its reading</label>
+      <label><input type="checkbox" name="timelapse_hotspot"{timelapse_hotspot}>
+             Hottest pixel</label>
+      <label><input type="checkbox" name="timelapse_coldspot"{timelapse_coldspot}>
+             Coldest pixel</label>
+      <label><input type="checkbox" name="timelapse_spots"{timelapse_spots}>
+             Placed spots</label>
+      <label><input type="checkbox" name="timelapse_scale_label"{timelapse_scale_label}>
+             Write the colour scale in the corner of each clip</label>
+      <label><input type="checkbox" name="timelapse_scale_in_name"{timelapse_scale_in_name}>
+             Put the colour scale in the clip's name</label>
+      <button type="submit" name="command" value="{copy_readout_command}">Copy the readout from
+              the live view</button>
+      <div class="field">
+        <label><span>Moonraker key</span>
+               <input type="password" name="moonraker_api_key" autocomplete="off"
+                      placeholder="{key_placeholder}"></label>
+        {info_moonraker_key}
+      </div>
+      <button type="submit">Apply</button>
+      <button type="submit" name="command" value="{forget_key_command}"
+              id="forget-key"{forget_disabled}>Forget the saved key</button>
+      <p class="status" id="timelapse-status">{timelapse_status}</p>
+      {gain_warning}
     </fieldset>
   </form>
-  <p>Following the scene maps the coldest and hottest thing in view to the ends of the palette, so
-     contrast is always as good as it can be and a colour means nothing in particular: it changes
-     whenever the scene does, which is what makes the picture breathe when a toolhead crosses it.
-     Holding two temperatures fixes the mapping, so a colour means the same thing in every frame
-     and the ruler becomes a constant reference. Anything outside the held range is drawn in the
-     end colour, and a triangle on the ruler says the scene has gone past it. "Hold what I see now"
-     fills the two boxes from the picture in front of you, which is usually easier than guessing
-     numbers. Holding also costs the printer slightly less work, since there is nothing to
-     measure.</p>
-  <p>Enlarging is how the picture is made bigger before the readout is drawn on it, which only
-     happens while some part of the readout is switched on. Smooth blends the sensor's pixels;
-     sharp leaves them as squares and is about a sixth less work for the printer per frame. Which
-     one looks better depends on the scene and the screen, so it is here rather than decided for
-     you.</p>
+  <section id="timelapses">
+    <div class="field">
+      <h2>Timelapses</h2>
+      {info_timelapses}
+    </div>
+    <div id="timelapse-list">{timelapse_list}</div>
+  </section>
   <p>Changes take effect immediately and survive a restart. The picture takes about a second to
      settle afterwards, while the auto-ranging finds the scene again.</p>
-  <p>The readout is drawn into the picture, so it shows in the printer's camera tile too. Anything
-     switched on here encodes at a larger size, so the text stays legible; switching all of it off
-     costs nothing at all. The ruler also ticks whichever extremes you are marking, so the two
-     always agree. The same numbers, plus the frame
-     average and the coldest pixel, are at <a href="stats">stats</a>.</p>
-  <p>Emissivity is how much of what a surface radiates is its own heat rather than a reflection of
-     the room, so a shiny surface reads cold until you tell the plugin it is shiny. It changes the
-     numbers only, never the picture.</p>
-  <p>The cost line is this plugin's own share of the printer's processor, read from the kernel
-     rather than estimated, and it updates while this page is open. The printer has four cores, so
-     100% of one core is a quarter of the machine, and the figure can pass 100% because the plugin
-     has more than one thread. Expect it to be highest here, because a settings page is a live
-     stream and a live stream is somebody watching.</p>
-  <p>Stopping the camera releases it completely: nothing is read, nothing is rendered, and the
-     printer pays nothing at all for having the plugin installed. Everything that shows the camera
-     shows a "Stream off" picture instead of an error, and the temperatures behind it stop being
-     offered, because there are none behind a picture of words. It survives a restart, so a printer
-     that reboots overnight comes back the way you left it. The same switch is in the camera
-     view's toolbar.</p>
-  <p>Calibration closes the camera's internal shutter for a moment and re-levels the sensor against
-     it. The camera does this by itself about every ninety seconds; the button is for when the
-     picture has drifted and you would rather not wait. It costs one frame.</p>
+  <p class="version">Thermal Master {plugin_version}</p>
 </main>
 {control_script}
 </body>
@@ -204,6 +458,9 @@ CONTROL_SCRIPT = """<script>
   var line = document.getElementById("device-status");
   var streamSwitch = document.getElementById("stream-switch");
   var costLine = document.getElementById("plugin-cost");
+  var timelapseLine = document.getElementById("timelapse-status");
+  var timelapseList = document.getElementById("timelapse-list");
+  var listedFor = timelapseLine ? timelapseLine.textContent : "";
   if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
   // getAttribute, not form.action. A named control shadows a form property of the same name, so
   // form.action is only the URL as long as nothing in the form is called "action". The attribute
@@ -253,6 +510,7 @@ CONTROL_SCRIPT = """<script>
     reflect(state);
     showStream(state);
     showCost(state);
+    forgetSecrets(state);
     // A calibration is applied by the capture thread between two frames, so the answer to the post
     // itself is always "requested". Ask again a few times, briefly, for what actually happened.
     if (state.pending && polls < 8) {
@@ -282,6 +540,42 @@ CONTROL_SCRIPT = """<script>
 
   function showCost(state) {
     if (costLine && typeof state.cost === "string") { costLine.textContent = state.cost; }
+    if (timelapseLine && typeof state.timelapse_status === "string") {
+      timelapseLine.textContent = state.timelapse_status;
+      if (state.timelapse_status !== listedFor) {
+        listedFor = state.timelapse_status;
+        refreshTimelapses();
+      }
+    }
+  }
+
+  // The list was drawn once, when the page loaded, and a clip finished while the page was open
+  // stayed "Recording now" until a reload. It is asked for again whenever the timelapse's line
+  // changes, as the same HTML the page was drawn with, and left alone while a clip is playing, so
+  // somebody watching one is not interrupted by the next.
+  function refreshTimelapses() {
+    if (!timelapseList) { return; }
+    fetch("timelapses.html", { headers: { "Accept": "text/html" } })
+      .then(function (reply) { return reply.ok ? reply.text() : Promise.reject(reply.status); })
+      .then(function (markup) {
+        var playing = Array.prototype.some.call(
+          timelapseList.querySelectorAll("video"), function (clip) { return !clip.paused; });
+        if (!playing && timelapseList.innerHTML !== markup) { timelapseList.innerHTML = markup; }
+      })
+      .catch(function () {});
+  }
+
+  // The key is never sent back, so the box it was typed into is emptied once it has gone up, and
+  // the button that forgets it is only offered while there is one to forget.
+  function forgetSecrets(state) {
+    var key = form.elements.namedItem("moonraker_api_key");
+    var forget = document.getElementById("forget-key");
+    var saved = !!state.moonraker_api_key_set;
+    if (key) {
+      key.value = "";
+      key.placeholder = saved ? "Saved" : "Not set";
+    }
+    if (forget) { forget.disabled = !saved; }
   }
 
   // Asked for on its own timer, and only this line is touched with the answer. Running the whole
@@ -348,19 +642,117 @@ def describe_device(status: dict | None) -> str:
     return said.get(shutter.get("state"), "Camera state is not available.")
 
 
+def option(value: str, label: str, selected: bool) -> str:
+    return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
+
+
+def timelapse_fields(settings: dict) -> dict:
+    """The Timelapse section's placeholders, from the settings a page may be shown."""
+
+    warned = settings["timelapse"] and settings["gain"] == GAIN_HIGH
+    return {
+        "timelapse": " checked" if settings["timelapse"] else "",
+        "keep_minimum": MIN_TIMELAPSE_KEEP,
+        "keep_maximum": MAX_TIMELAPSE_KEEP,
+        "timelapse_keep": settings["timelapse_keep"],
+        "timelapse_range_options": "".join(
+            option(
+                name, TIMELAPSE_RANGE_DESCRIPTIONS[name], name == settings["timelapse_range_mode"]
+            )
+            for name in VALID_TIMELAPSE_RANGES
+        ),
+        "timelapse_low": f"{settings['timelapse_range_low_celsius']:.1f}",
+        "timelapse_high": f"{settings['timelapse_range_high_celsius']:.1f}",
+        "key_placeholder": "Saved" if settings["moonraker_api_key_set"] else "Not set",
+        "forget_key_command": FORGET_KEY_ACTION,
+        "forget_disabled": "" if settings["moonraker_api_key_set"] else " disabled",
+        "gain_warning": HIGH_SENSITIVITY_WARNING if warned else "",
+        "copy_readout_command": COPY_READOUT_ACTION,
+        **{switch: " checked" if settings[switch] else "" for switch in TIMELAPSE_SWITCHES},
+    }
+
+
+def described_size(size: int) -> str:
+    return f"{size / BYTES_PER_MEGABYTE:.1f} MB"
+
+
+def clip_entry(summary: dict) -> str:
+    """One print in the list: its clip if there is one, what it was, and what can be done to it."""
+
+    quoted = html.escape(str(summary["id"]), quote=True)
+    started = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(summary["started_at"]))
+    state = RECORDING_STATE_DESCRIPTIONS.get(summary["state"], summary["state"])
+    video = (
+        f'<video controls preload="none" poster="timelapse.jpg?id={quoted}" '
+        f'src="timelapse.mp4?id={quoted}"></video>'
+        if summary["has_clip"]
+        else ""
+    )
+    download = (
+        f'<a href="timelapse.mp4?id={quoted}&amp;download=1">Download, '
+        f"{described_size(summary['clip_bytes'])}</a>"
+        if summary["has_clip"]
+        else ""
+    )
+    # Not offered while the print is still being recorded: the service would refuse it, and a
+    # button that does nothing is worse than none.
+    # Nor while it is waiting to be made into a clip or being made into one, for the same reason.
+    held = summary["state"] == "printing" or bool(summary.get("busy"))
+    delete = "" if held else clip_button("delete", quoted, "Delete")
+    remake = (
+        clip_button("remake", quoted, "Make the clip again with the current colours")
+        if summary["has_frames"] and not held
+        else ""
+    )
+    error = f" {html.escape(summary['error'])}" if summary.get("error") else ""
+    if summary.get("busy") and summary["state"] != "printing":
+        error += " Being made into a clip."
+    if summary.get("scale"):
+        named = SCALE_NAMES.get(str(summary["scale"]), str(summary["scale"]))
+        error += f" Colour scale: {html.escape(named)}."
+    if summary.get("published_as"):
+        error += " Also on the Timelapse page."
+    elif summary.get("publish_error"):
+        error += f" {html.escape(summary['publish_error'])}"
+    return (
+        f'<article class="clip">{video}'
+        f"<p><strong>{html.escape(str(summary['filename'] or 'A print'))}</strong>, {started}. "
+        f"{state}, {summary['frames']} frames.{error}</p>"
+        f"<div>{download}{remake}{delete}</div></article>"
+    )
+
+
+def clip_button(field: str, quoted: str, label: str) -> str:
+    return (
+        f'<form method="post" action="timelapses">'
+        f'<input type="hidden" name="{field}" value="{quoted}">'
+        f'<button type="submit">{label}</button></form>'
+    )
+
+
+def timelapse_list(timelapses: dict | None) -> str:
+    summaries = (timelapses or {}).get("timelapses") or []
+    if not summaries:
+        return "<p>No timelapses yet.</p>"
+    return "".join(clip_entry(summary) for summary in summaries)
+
+
 def render_control_page(
     settings: dict,
     palette_names: list,
     device_status: dict | None = None,
     cost: str | None = None,
+    timelapses: dict | None = None,
 ) -> str:
     """The page itself. Plain form, no JavaScript: it has to work in whatever opens it."""
 
-    def option(value: str, label: str, selected: bool) -> str:
-        return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
-
     stream_command, stream_label = STREAM_SWITCH[bool(settings["streaming"])]
     return CONTROL_PAGE_TEMPLATE.format(
+        **{f"info_{key}": info(key) for key in INFO_TEXTS},
+        plugin_version=html.escape(plugin_version()),
+        **timelapse_fields(settings),
+        timelapse_status=html.escape((timelapses or {}).get("status") or ""),
+        timelapse_list=timelapse_list(timelapses),
         plugin_cost=cost if cost is not None else describe_cost(None),
         stream_command=stream_command,
         stream_label=stream_label,
@@ -385,6 +777,10 @@ def render_control_page(
         range_mode_options="".join(
             option(name, RANGE_MODE_DESCRIPTIONS[name], name == settings["range_mode"])
             for name in VALID_RANGE_MODES
+        ),
+        colour_scale_options="".join(
+            option(name, COLOUR_SCALE_DESCRIPTIONS[name], name == settings["colour_scale"])
+            for name in VALID_COLOUR_SCALES
         ),
         range_low=f"{settings['range_low_celsius']:.1f}",
         range_high=f"{settings['range_high_celsius']:.1f}",

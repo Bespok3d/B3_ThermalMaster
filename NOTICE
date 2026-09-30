@@ -14,6 +14,10 @@ This product vendors and builds upon third-party software:
 2. PyUSB (plugin/files/vendor/usb/)        License: BSD-3-Clause
 3. NumPy (plugin/files/vendor/numpy/)      License: BSD-3-Clause
 4. Pillow (plugin/files/vendor/PIL/)       License: HPND (PIL/Pillow License)
+5. Material Icons, the "info" icon, outlined
+   (inline in plugin/files/lib/thermal_master/page.py)
+   Source:  https://github.com/google/material-design-icons, as @material-design-icons/svg 0.14.15
+   License: Apache License 2.0
 
 The vendored aarch64 packages (2-4) are downloaded at build time from PyPI and are not
 committed to this repository. Their license files are retained inside each package's
