@@ -267,7 +267,7 @@ class Recording:
 
     @property
     def clip_scale(self) -> str | None:
-        """The colour scale the clip was made with, on the test/color-bar branch."""
+        """The colour scale the clip was made with, which the list of clips names."""
 
         scale = (self.meta.get("clip") or {}).get("scale")
         return str(scale) if scale else None

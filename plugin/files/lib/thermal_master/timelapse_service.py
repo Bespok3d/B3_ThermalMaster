@@ -186,8 +186,9 @@ class TimelapseService:
     def remake(self, recording_id: str) -> bool:
         """Make a finished print's clip again from its temperatures, with the settings of now.
 
-        For the test/color-bar branch, where one print is made into a clip with each scale in turn.
-        Queued rather than made here, since a clip is a minute of work and this is a request.
+        The settings page's "Make the clip again with the current colours": the palette, colour
+        scale or clip readout changed since, or a scale to compare. Queued rather than made here,
+        since a clip is a minute of work and this is a request.
         """
 
         recording = find_recording(self.root, recording_id)

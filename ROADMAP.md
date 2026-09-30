@@ -2189,11 +2189,15 @@ the tag `plugin-thermal-master-v0.27.0` built, tested, signed and published the 
 "Thermal Master" under the organisation's fingerprint. In the Bespok3d app the plugin appeared, and
 installed and ran on the maintainer's printer once the right version was selected in the app.
 
-### Phase 9: a thermal timelapse, one frame per layer. Planned on 2026-09-29.
+### Phase 9: a thermal timelapse, one frame per layer. Built in 0.28.0 to 0.28.6.
 
 The printer's own camera makes a timelapse of each print. A thermal one would show something that
 one cannot: heat spreading through the part and the bed layer by layer, and where it cools first.
-Sketched on 2026-09-28 and not started; nothing here is built.
+Sketched on 2026-09-28 and planned on 2026-09-29, below as it was planned. Steps 0 to 2 and the
+colour comparison of step 4 are built and were tried on the Pi 4 and the U1 on 2026-09-29 and
+2026-09-30, released together in 0.28.6 with four colour scales, clips with their own readout, and
+no wait for a U1 print's own clip when the printer is not making one. Step 3, the automatic gain
+switch, is still to build.
 
 **Decided so far.**
 
@@ -2698,6 +2702,17 @@ looked into. So everything below the Bespok3d layer runs unchanged on a
 second, different Klipper printer. It is still the maintainer running it, so it is not the stranger's install that
 promotion to `stable` waits for.
 
+**2026-09-30, at 0.28.6.** Phase 9's timelapse is built: a clip of every print, one frame per
+layer, made on the printer after the print, kept under a count and a free space floor, listed on
+the settings page and copied to the Timelapse page of Fluidd and Mainsail. With it come four colour
+scales for the live picture and the clips (the stretch, a knee and two logs, chosen on the U1 from
+seven), the ruler over the colours rather than the scene, clips with their own readout, remaking a
+clip with the current colours, no ten minute wait for a U1 print's own clip when the printer says
+it is not making one, the settings page's explanations behind an (i) beside each option, a page
+that fits a phone, and the version at its foot. All of it was tried on the U1; the timelapse also
+on the Pi 4. Built on the branch `feature/timelapse`, with the colour scales tried on
+`test/color-bar` as 0.28.1 to 0.28.5 (in `CHANGELOG_DEV.md`).
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
@@ -2724,16 +2739,14 @@ What is left, in the order it is worth doing:
   might avoid it, and is not worth buying for this.
 - **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
   only the channel changed.
-- **Phase 9, a thermal timelapse**, sketched in section 7: one frame per layer, from Moonraker's
-  layer count, kept as temperatures and encoded on the printer after the print, depending on no
-  other plugin, and shown in the Timelapse page of Fluidd and Mainsail where Moonraker has a
-  `timelapse` root. Planned on 2026-09-29 in five steps; step 1 built as 0.28.0 the same day, to be
-  tried on the Pi 4. Every open question
-  answered or decided the same day: about a
-  minute of processor for a 1,000 layer clip, 10 prints kept under a free space floor, a clip
-  even from a cancelled or interrupted print, and a one way gain switch. Still to measure:
-  which colour range looks best on real clips. A gain switch is followed by the camera's shutter
-  3.7 s later, measured twice, so the plugin waits 5 s after one.
+- **Phase 9's remainder**, in section 7:
+  - Step 3, the automatic gain switch: wide range at 145 C in high sensitivity, one way for the
+    print, no frame for 5 s after it (the camera's shutter follows a switch 3.7 s later, measured
+    twice), and the chosen gain back at the end.
+  - Snapmaker's phone app, which does not list the thermal clip: try the two names by hand first.
+  - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
+  - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
+    layer clips the bed warmed past it, which the knee handles and the stretch does not.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted
