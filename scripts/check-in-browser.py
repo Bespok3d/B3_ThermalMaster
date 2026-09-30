@@ -23,6 +23,7 @@ that wrong produces a reading that is confidently, plausibly wrong.
 from __future__ import annotations
 
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -136,8 +137,149 @@ def serve(streamer):
     server = streamer.ThermalServer(
         ("127.0.0.1", PORT), frames, store, streamer.build_palettes(), device
     )
+    server.timelapses = timelapse_service(streamer, store)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, store, device
+
+
+def timelapse_service(streamer, store):
+    """A timelapse with one finished print in it, and a Moonraker that is not there."""
+
+    root = Path(tempfile.mkdtemp(prefix="thermal-timelapse-"))
+    finished = streamer.Recording.create(root, 1_790_000_000.0, "0002F1", "<cube>.gcode")
+    finished.finish("complete")
+    finished.clip_path.write_bytes(b"not a real clip, only its bytes")
+    return streamer.TimelapseService(
+        streamer.TimelapseWiring(
+            root=root, client=streamer.MoonrakerClient("http://127.0.0.1:9"),
+            settings_store=store, tap=streamer.FrameTap(), streaming=lambda: True,
+            palettes=streamer.build_palettes(), ffmpeg=None,
+        )
+    )
+
+
+def run_timelapse_refresh_checks(page, service) -> list:
+    """A clip finished while the page is open shows up without a reload (found on the U1)."""
+
+    streamer = sys.modules["thermal_master"]
+    before = page.locator(".clip").count()
+    made = streamer.Recording.create(service.root, 1_790_003_600.0, "0002F2", "later.gcode")
+    made.finish("complete")
+    made.clip_path.write_bytes(b"another clip's bytes")
+    service._say("On. Waiting for a print to start, a clip just made.")  # noqa: SLF001
+    page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
+    return [("a finished clip appears without a reload", page.locator(".clip").count(), before + 1)]
+
+
+# The settings page asks for the status line every five seconds; a little over that.
+COST_POLL_WAIT_MILLISECONDS = 6500
+
+
+def run_timelapse_checks(page, store) -> list:
+    """The Timelapse section posts in the background like the rest, and never shows the key."""
+
+    navigated = {"yes": False}
+    page.on("framenavigated", lambda _frame: navigated.update(yes=True))
+    checks = []
+    checks.append(("forget is greyed out with no key", page.is_disabled("#forget-key"), True))
+    page.check("input[name=timelapse]")
+    page.fill("input[name=moonraker_api_key]", "a-made-up-key")
+    page.click("fieldset#timelapse button[type=submit]:not([name])")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    saved = store.timelapse_snapshot()
+    checks.append(("the switch reaches the plugin", saved.timelapse, True))
+    checks.append(("the key reaches the plugin", saved.moonraker_api_key, "a-made-up-key"))
+    checks.append(("without reloading the page", navigated["yes"], False))
+    emptied = page.input_value("input[name=moonraker_api_key]")
+    checks.append(("the key box is emptied", emptied, ""))
+    checks.append((
+        "and says a key is saved",
+        page.get_attribute("input[name=moonraker_api_key]", "placeholder"),
+        "Saved",
+    ))
+    checks.append(("the key is nowhere on the page", "a-made-up-key" in page.content(), False))
+    checks.append(("forget is offered once there is a key", page.is_disabled("#forget-key"), False))
+    page.click("#forget-key")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("forget forgets it", store.timelapse_snapshot().moonraker_api_key, ""))
+    checks.append(("and greys itself out again", page.is_disabled("#forget-key"), True))
+    checks.append(("still without reloading the page", navigated["yes"], False))
+    checks.append(("a print name is shown as text", page.locator(".clip strong").inner_text(),
+                   "<cube>.gcode"))
+    page.click(".clip form:has(input[name=delete]) button")
+    page.wait_for_load_state("domcontentloaded")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("delete removes the print", page.locator(".clip").count(), 0))
+    checks.append(("and comes back to the list", page.url.endswith("#timelapses"), True))
+    return checks
+
+
+def run_info_checks(page) -> list:
+    """An (i) shows its text while hovered, keeps it once clicked, and drops it on a second click."""
+
+    about = "#info-colour_scale ~ p.about"
+    icon = "label[for=info-colour_scale]"
+    checks = [("an explanation starts hidden", page.is_visible(about), False)]
+    page.hover(icon)
+    checks.append(("hovering its (i) shows it", page.is_visible(about), True))
+    page.mouse.move(0, 0)
+    checks.append(("and moving away hides it again", page.is_visible(about), False))
+    page.click(icon)
+    page.mouse.move(0, 0)
+    checks.append(("clicking keeps it on the page", page.is_visible(about), True))
+    page.click(icon)
+    page.mouse.move(0, 0)
+    checks.append(("and a second click takes it away", page.is_visible(about), False))
+    checks.append(("the icon is a drawn one", page.locator(f"{icon} svg path").count(), 1))
+    checks.append((
+        "the version is at the foot of the page",
+        page.inner_text("p.version").startswith("Thermal Master "),
+        True,
+    ))
+    return checks
+
+
+# A narrow Android phone's width in CSS pixels, the width the Timelapse panel was found too wide for.
+PHONE_WIDTH = 360
+
+
+def run_phone_checks(browser, port: int) -> list:
+    """On a phone: nothing runs off the screen, an (i) stays beside its option, taps open and close.
+
+    A phone keeps the last thing tapped "hovered", so the hover rule has to be for pointers that
+    hover only, or a second tap unpins the text while the stuck hover keeps showing it (found on
+    an Android phone on 2026-09-30). The same phone showed the Timelapse panel running off the
+    right of the screen and the (i)s wrapping under their selects.
+    """
+
+    context = browser.new_context(
+        viewport={"width": PHONE_WIDTH, "height": 800}, device_scale_factor=2, is_mobile=True,
+        has_touch=True,
+    )
+    page = context.new_page()
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
+    about = "#info-colour_scale ~ p.about"
+    icon = "label[for=info-colour_scale]"
+    # Every panel's right edge, not the page's scroll width: a phone zooms out to fit a page that is
+    # too wide, which hides the overflow from the page's own measurements.
+    widest = page.evaluate(
+        "Math.max(...[...document.querySelectorAll('fieldset')]"
+        ".map(f => f.getBoundingClientRect().right))"
+    )
+    checks = [("nothing runs off a phone's screen", widest <= PHONE_WIDTH, True)]
+    select = page.locator("select[name=colour_scale]").bounding_box()
+    beside = page.locator(icon).bounding_box()
+    checks.append((
+        "an (i) stays beside its option",
+        abs((beside["y"] + beside["height"] / 2) - (select["y"] + select["height"] / 2)) < 8,
+        True,
+    ))
+    page.tap(icon)
+    checks.append(("a tap opens an explanation", page.is_visible(about), True))
+    page.tap(icon)
+    checks.append(("and a second tap closes it", page.is_visible(about), False))
+    context.close()
+    return checks
 
 
 def run_checks(page, store, device) -> list:
@@ -167,13 +309,27 @@ def run_checks(page, store, device) -> list:
     page.click("form#controls fieldset:first-of-type button[type=submit]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("apply changes a setting", store.as_dict()["palette"], "sepia"))
+    checks.append((
+        "every colour scale is offered",
+        page.locator("select[name=colour_scale] option").count(),
+        4,
+    ))
+    page.select_option("select[name='colour_scale']", "knee")
+    page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("the colour scale reaches the plugin", store.as_dict()["colour_scale"], "knee"))
+    page.select_option("select[name='colour_scale']", "stretch")
+    page.click("form#controls fieldset:nth-of-type(2) button[type=submit]")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("and back to the stretch", store.as_dict()["colour_scale"], "stretch"))
+    checks += run_info_checks(page)
 
     # Holding the range is the first button that changes something the form is showing, and the
     # page used to ignore the answer it got back: the plugin went to a fixed range, the page went
     # on saying "follow the scene", and the next Apply posted what the page was saying and undid
     # it. Both halves are checked, because the second one is what made it a defect rather than a
     # missing flourish.
-    page.click("text=Hold what I see now")
+    page.click("button[value=lock-range]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     held = store.as_dict()
     checks.append(("holding the range switches the plugin", held["range_mode"], "fixed"))
@@ -830,6 +986,13 @@ def main() -> None:
         print("")
         print("control page")
         report(run_checks(page, store, device), problems)
+        timelapse_page = browser.new_page()
+        timelapse_page.on("pageerror", lambda error: problems.append(f"page error: {error}"))
+        timelapse_page.goto(f"http://127.0.0.1:{PORT}/", wait_until="domcontentloaded")
+        print("")
+        print("timelapse")
+        report(run_timelapse_checks(timelapse_page, store), problems)
+        report(run_timelapse_refresh_checks(timelapse_page, _server.timelapses), problems)
 
         viewer = browser.new_page()
         viewer.on("pageerror", lambda error: problems.append(f"viewer page error: {error}"))
@@ -852,6 +1015,9 @@ def main() -> None:
         print("")
         print("recording")
         report(run_recording_checks(browser, PORT), problems)
+        print("")
+        print("the settings page on a phone")
+        report(run_phone_checks(browser, PORT), problems)
         print("")
         print("the off switch")
         report(run_switch_checks(browser, PORT, store), problems)

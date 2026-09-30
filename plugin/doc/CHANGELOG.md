@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.28.6
+
+- **Four colour scales**, under Range on the settings page: the stretch the picture has always
+  used, a knee that squeezes everything hotter than the range into the top of the palette so a
+  nozzle keeps its shape, and two logs that spread the whole scene with most of the colours at its
+  cool end. They work with a followed range and a held one, live and in timelapse clips, and they
+  change the picture, never the readings.
+- **The ruler spans the colours.** Following the scene, it used to run from the coldest to the
+  hottest thing in view, so a nozzle re-labelled its top every frame and most of it was one flat
+  colour. It now runs over the temperatures the colours are spread over, as it already did with a
+  held range, and a triangle at an end says the scene goes past it.
+- **Clips have their own readout**: the ruler, the crosshair, the markers and the spots can be on in
+  the camera tile and off in the clips, or the other way round, with a button to copy the live
+  picture's. Two more boxes write the colour scale in the corner of each clip and in its name.
+- **Make the clip again with the current colours.** A print that still has its temperatures, the
+  two newest, can be drawn again with the palette, colour scale and readout chosen now, and goes
+  back on the Timelapse page in place of the old copy.
+- **No ten minute wait on a U1 print without the printer's own timelapse.** The plugin asks during
+  the print whether the firmware is recording one, and only waits for its clip when it is.
+- **The explanations are beside the options they explain**, behind an (i) you hover over or click,
+  instead of in a long list at the foot of the settings page. The plugin's version is at the foot
+  instead.
+- **The settings page fits a phone.** The Timelapse panel no longer runs off the right of the
+  screen, the (i)s stay beside their options, and a second tap on one closes it.
+
+## 0.28.0
+
+- **A thermal timelapse of every print.** Switch it on in the new Timelapse panel of the settings
+  page, and the plugin takes one frame each time the layer changes and makes a clip once the print
+  ends. The clips are listed at the bottom of the settings page, to play, download or delete. It
+  needs the slicer to send layer numbers; the documentation has the two lines to add.
+- **The colours are chosen once for the whole clip**: fixed once the print has started, the whole
+  print's coldest to hottest, two temperatures of your own, or the same as the live picture.
+- **It keeps the last 10 prints**, or the number you choose, and makes room sooner if the
+  printer's disk runs short.
+- **Nothing gathered is lost.** Cancelled prints, prints cut short by a power cut, and layers the
+  camera missed all end up in the clip.
+- **On the Timelapse page in Fluidd and Mainsail** as well, wherever Moonraker has one: on the U1
+  beside the printer's own clip of the same print, and on mainline Klipper with
+  `moonraker-timelapse` installed.
+- **Moonraker logins are handled.** If Moonraker asks for a login, the panel says so and takes
+  Moonraker's API key, which is never shown again.
+
 ## 0.27.2
 
 - **The documentation has pictures.** A picture of the viewer and three scenes at the top, the

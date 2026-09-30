@@ -5,12 +5,21 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import signal
 import threading
 from pathlib import Path
 
-from .camera import DEFAULT_GAIN, VALID_GAINS, CameraSettings, DeviceController, capture_loop
+from .camera import (
+    DEFAULT_GAIN,
+    VALID_GAINS,
+    CameraSettings,
+    DeviceController,
+    capture_loop,
+    streaming_wanted,
+)
 from .log import log_line
+from .moonraker import DEFAULT_MOONRAKER_URL, MoonrakerClient
 from .palettes import DEFAULT_PALETTE, build_palettes
 from .pipeline import (
     DEFAULT_JPEG_QUALITY,
@@ -21,6 +30,8 @@ from .pipeline import (
 from .server import DEFAULT_BIND, DEFAULT_PORT, LatestFrame, ThermalServer
 from .settings import RendererSource, SettingsStore
 from .temperature import DEFAULT_EMISSIVITY, DEFAULT_UNITS, VALID_UNITS
+from .timelapse import FrameTap
+from .timelapse_service import TimelapseService, TimelapseWiring
 
 SHUTDOWN_GRACE_SECONDS = 5.0
 
@@ -45,7 +56,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gain", default=DEFAULT_GAIN, choices=VALID_GAINS)
     parser.add_argument("--emissivity", type=float, default=DEFAULT_EMISSIVITY)
     parser.add_argument("--settings-file", default=None)
+    # Where timelapses are kept. Without it there is no timelapse, and the settings page says so.
+    parser.add_argument("--timelapse-dir", default=None)
+    parser.add_argument("--moonraker-url", default=DEFAULT_MOONRAKER_URL)
+    parser.add_argument("--ffmpeg", default="ffmpeg")
     return parser.parse_args()
+
+
+def start_timelapse(
+    options: argparse.Namespace,
+    settings_store: SettingsStore,
+    tap: FrameTap,
+    device: DeviceController,
+    shutdown: threading.Event,
+) -> TimelapseService | None:
+    """The timelapse's threads, when there is a folder to keep timelapses in."""
+
+    if not options.timelapse_dir:
+        return None
+    service = TimelapseService(
+        TimelapseWiring(
+            root=Path(options.timelapse_dir),
+            client=MoonrakerClient(
+                options.moonraker_url,
+                lambda: settings_store.timelapse_snapshot().moonraker_api_key,
+            ),
+            settings_store=settings_store,
+            tap=tap,
+            streaming=lambda: streaming_wanted(device),
+            palettes=build_palettes(),
+            ffmpeg=shutil.which(options.ffmpeg),
+        )
+    )
+    threading.Thread(target=service.run, args=(shutdown,), daemon=True).start()
+    log_line(f"timelapse kept in {options.timelapse_dir}")
+    return service
 
 
 def install_shutdown_handlers(shutdown: threading.Event, server: ThermalServer) -> None:
@@ -89,7 +134,8 @@ def main() -> None:
         CameraSettings(gain=options.gain),
     )
     renderer_source = RendererSource(settings_store, palettes)
-    frame_store = LatestFrame()
+    tap = FrameTap()
+    frame_store = LatestFrame(tap)
     shutdown = threading.Event()
     device = DeviceController(settings_store)
     worker = threading.Thread(
@@ -99,6 +145,7 @@ def main() -> None:
     server = ThermalServer(
         (options.bind, options.port), frame_store, settings_store, palettes, device
     )
+    server.timelapses = start_timelapse(options, settings_store, tap, device, shutdown)
     install_shutdown_handlers(shutdown, server)
     log_line(f"serving http://{options.bind}:{options.port}/stream.mjpg")
     server.serve_forever()

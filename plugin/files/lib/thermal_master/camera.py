@@ -239,6 +239,13 @@ class DeviceController:
         _, settings = self._settings_store.camera_snapshot()
         return settings.streaming
 
+    @property
+    def gain_in_effect(self) -> str | None:
+        """The gain last sent to the camera: the one the frames arriving now were taken in."""
+
+        with self._lock:
+            return self._gain_in_effect
+
     def request_shutter(self) -> None:
         """Ask for a calibration. Safe from any thread; nothing here touches the camera."""
 
@@ -309,6 +316,10 @@ class CameraNotFoundError(Exception):
     """No supported thermal camera is on the USB bus."""
 
 
+def gain_in_effect(device: DeviceController | None) -> str | None:
+    return device.gain_in_effect if device is not None else None
+
+
 def streaming_wanted(device: DeviceController | None) -> bool:
     """Whether the switch is on. No controller at all means nothing can have turned it off."""
 
@@ -377,6 +388,9 @@ def stream_frames(
         thermal_raw = next_thermal_frame(camera)
         if thermal_raw is not None:
             consecutive_failures = 0
+            # Offered before the idle check, because the timelapse takes its frame whether or not
+            # anybody is watching, and taking it costs a copy only when a layer asked for one.
+            frame_store.offer_raw(thermal_raw, gain_in_effect(device))
             # The frame is read either way, because the camera streams whether or not anyone is
             # watching and a reader that stops reading falls out of step with it. What is skipped
             # is the expensive half: nine tenths of this plugin's cost was rendering frames into

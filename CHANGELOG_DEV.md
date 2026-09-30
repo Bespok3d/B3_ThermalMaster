@@ -3,14 +3,63 @@ SPDX-FileCopyrightText: Copyright (C) 2026 Mauker and the Bespok3d contributors
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Development changelog, 0.1.0 to 0.26.1
+# Development changelog
 
-Every release made before the plugin was published, from its first cut to the last private build,
-kept as it was written at the time. None of these went out through the Bespok3d app: they were
-built by hand and installed on the maintainer's printer, where every one from 0.2.2 on was
-confirmed. The public changelog, `plugin/doc/CHANGELOG.md`, starts at 0.27.0 and is the one that
-ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning behind each
-change.
+Every build that never went out through the Bespok3d app, kept as it was written at the time: the
+releases made before the plugin was published, 0.1.0 to 0.26.1, and the test builds made since, on
+a branch, before the release they led to. They were built by hand and installed on the
+maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts at 0.27.0 and is the
+one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
+behind each change.
+
+## Test builds for 0.28.6, on the test/color-bar branch
+
+Built on 2026-09-29 and 2026-09-30 and tried on the U1, to choose how temperatures become colours.
+Their public entry is 0.28.6's.
+
+### 0.28.5
+
+- **Four colour scales**, chosen from the seven below: the stretch, a knee at 85%, and the gentle
+  and strong logs, over a followed range and a held one, live and in clips. The ruler spans the
+  colours on every scale.
+- **Clips have their own readout**, with a button to copy the live one, and the colour scale in
+  their corner and name on request. "Make the clip again with the current colours".
+- **The explanations are behind an (i)** beside each option, and the version is at the foot of the
+  settings page.
+- Found on the U1: on a phone a second tap did not close an explanation, and the Timelapse panel
+  ran off the screen. Fixed in 0.28.6.
+
+### 0.28.4
+
+- **No ten minute wait on a print without the printer's own timelapse.** On a U1, the plugin
+  asks during the print whether the firmware is recording one, and only waits for it when it is.
+  With the timelapse unticked, the thermal clip is made as soon as the print ends.
+
+### 0.28.3
+
+- **The curved scales cost less.** The curve is worked out for a table of about a thousand
+  temperatures instead of for every pixel of every frame.
+
+### 0.28.2
+
+- **The scale is in the clip's name**, on the Timelapse page and in a download, so the clips of one
+  print made with different scales can be told apart.
+- **Making a clip again no longer waits for the printer's own clip** when it did not come the
+  first time: it goes back under the name the first one was given.
+- **Delete and Make the clip again are not offered** while a print is waiting to be made into a
+  clip or being made into one.
+
+### 0.28.1
+
+- **A test build, to choose how temperatures become colours.** A new "Scale (testing)" setting in
+  the Range panel offers seven ways of spreading the palette: today's, today's with the ruler over
+  the colours, a straight line over the whole scene, two log curves, and a knee at 85% and 75%.
+  They apply while the colours follow the scene, and in timelapse clips made with the print's own
+  range.
+- **Make the clip again.** Each print that still has its temperatures can be made into a clip
+  again, with whatever is chosen now, and each clip is marked with the scale it was made with.
+- This entry is replaced once a scale has been chosen.
+
 
 ## 0.26.1
 

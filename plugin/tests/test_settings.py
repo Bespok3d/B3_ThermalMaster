@@ -154,7 +154,8 @@ def test_the_control_page_shows_the_current_state(thermal_streamer, store):
     assert '<option value="celsius" selected>' in page
     # The attribute in the markup, not the word anywhere on the page: the page carries a script
     # now, and that script has every right to contain the word "checked".
-    assert page.count(" checked>") == 4  # the ruler and the three markers, all on by default
+    # The ruler and the three markers, all on by default, and the clips' own five, also on.
+    assert page.count(" checked>") == 9
 
 
 def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer, settings_dict):
