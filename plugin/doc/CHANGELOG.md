@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.28.3
+
+- **The curved scales cost less.** The curve is worked out for a table of about a thousand
+  temperatures instead of for every pixel of every frame.
+
 ## 0.28.2
 
 - **The scale is in the clip's name**, on the Timelapse page and in a download, so the clips of one

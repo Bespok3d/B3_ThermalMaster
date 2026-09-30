@@ -35,6 +35,14 @@ MIN_SPAN_RAW_COUNTS = 32.0
 RAW_COUNTS_PER_KELVIN = 64.0
 
 
+# A curve is looked up in a table rather than worked out at every pixel: on the U1 the log over all
+# 19,200 pixels of a P1 frame cost 2 to 2.8 ms a frame, a sixth of the frame, for a curve a few
+# thousand points describe to within a step of the palette. Each entry covers a power of two of
+# counts, so a pixel finds its entry with a shift, and the power is the largest that keeps the
+# curve from climbing more than half a step of the palette across one entry where it is steepest.
+LOOKUP_PALETTE_STEPS_PER_ENTRY = 0.5
+
+
 # The seven being compared, named as the panels of the study in `Claude outputs/bar-study/` were.
 # Today and Option A are the straight stretch, and differ only in the ruler: today's spans the
 # scene, Option A's spans the colours and says with a triangle that the scene goes past them.
@@ -156,10 +164,41 @@ class ColourMapping:
         chosen: np.ndarray = np.where(counts <= bend, below, above)
         return chosen
 
-    def indices(self, frame: np.ndarray) -> np.ndarray:
-        """Palette indices, truncated the way the stretch truncates them."""
+    def steepest(self) -> float:
+        """The most of the palette one count climbs anywhere on the curve.
 
-        indices: np.ndarray = (self.fractions(frame) * (PALETTE_STEPS - 1)).astype(np.uint8)
+        At the bottom of a log, and for a knee the steeper of its two halves.
+        """
+
+        low, high = self.scene
+        if self.shape.curve == LINEAR_CURVE:
+            return 1.0 / span_of(low, high)
+        if self.shape.curve == LOG_CURVE:
+            return 1.0 / (self.softness * math.log1p(span_of(low, high) / self.softness))
+        bottom, bend = self.display
+        above = self.softness * math.log1p(span_of(bend, high) / self.softness)
+        return max(self.shape.knee / span_of(bottom, bend), (1.0 - self.shape.knee) / above)
+
+    def indices(self, frame: np.ndarray) -> np.ndarray:
+        """Palette indices, looked up in a table of the curve rather than worked out per pixel.
+
+        The table runs from the count drawn in the bottom colour to the count drawn in the top one,
+        and each entry holds the curve at the middle of the counts it covers, so a pixel is never
+        more than one step of the palette from where the curve itself would put it. Anything
+        outside the table is the end colour, as it is on the curve.
+        """
+
+        low = math.floor(self.raw_at(0.0))
+        span = max(self.raw_at(1.0) - low, 1.0)
+        widest = LOOKUP_PALETTE_STEPS_PER_ENTRY / ((PALETTE_STEPS - 1) * self.steepest())
+        shift = max(0, math.floor(math.log2(widest))) if widest >= 1.0 else 0
+        entries = (int(span) >> shift) + 2
+        width = 1 << shift
+        middles = low + np.arange(entries, dtype=np.float32) * width + (width - 1) / 2.0
+        table = (self.fractions(middles) * (PALETTE_STEPS - 1)).astype(np.uint8)
+        positions = (frame.astype(np.int32) - low) >> shift
+        np.clip(positions, 0, entries - 1, out=positions)
+        indices: np.ndarray = np.take(table, positions)
         return indices
 
     def raw_at(self, fraction: float) -> float:

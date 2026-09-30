@@ -94,6 +94,31 @@ def test_a_curve_colours_each_pixel_as_its_mapping_says(thermal_streamer, palett
     assert np.array_equal(image, palettes["ironbow"][used.indices(frame)])
 
 
+@pytest.mark.parametrize("scale", ["linear", "log-mild", "log-strong", "knee", "knee-soft"])
+def test_the_table_draws_what_the_curve_would(thermal_streamer, scale):
+    """Looked up rather than worked out, and never more than one step of the palette off."""
+
+    curve = mapping(thermal_streamer, scale)
+    frame = hot_scene()
+    frame[0, :8] = [0, 1, int(raw_for(-40.0)), int(raw_for(19.9)), int(raw_for(34.0)),
+                    int(raw_for(189.9)), int(raw_for(400.0)), 65535]
+
+    direct = (curve.fractions(frame) * 255).astype(np.int16)
+    looked_up = curve.indices(frame).astype(np.int16)
+
+    assert looked_up.dtype == np.int16
+    assert np.abs(looked_up - direct).max() <= 1
+
+
+def test_a_narrow_scene_gets_a_table_finer_than_a_count(thermal_streamer):
+    curve = mapping(thermal_streamer, "log-strong", display=(20.0, 20.5), scene=(20.0, 21.0))
+    frame = np.linspace(raw_for(19.0), raw_for(22.0), 19_200).astype(np.uint16).reshape(120, 160)
+
+    direct = (curve.fractions(frame) * 255).astype(np.int16)
+
+    assert np.abs(curve.indices(frame).astype(np.int16) - direct).max() <= 1
+
+
 def test_the_knee_gives_the_stretch_its_share_of_the_palette(thermal_streamer):
     knee = mapping(thermal_streamer, "knee")
     bend = np.array([raw_for(34.0)], dtype=np.float32)
