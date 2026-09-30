@@ -328,7 +328,7 @@ class Measured:
 
 
 def test_the_ruler_spans_the_colours_rather_than_the_scene(thermal_streamer):
-    """The change of 0.28.5, which undid 0.14.0's: a ruler over the scene would not hold still.
+    """The change of 0.28.6, which undid 0.14.0's: a ruler over the scene would not hold still.
 
     Over the scene, its top was re-labelled every frame by a nozzle whose reading jumps twenty
     degrees between two of them, and almost all of it was one flat colour. The triangles say when

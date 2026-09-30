@@ -116,7 +116,7 @@ INFO_ICON = (
 
 
 # What each (i) explains, by the placeholder it fills: what it is about, for a screen reader, and
-# the explanation. They were paragraphs at the foot of the page until 0.28.5, a long way from the
+# the explanation. They were paragraphs at the foot of the page until 0.28.6, a long way from the
 # options they explained and long enough that nobody read to the end of them.
 INFO_TEXTS = {
     "enlarging": (
@@ -246,11 +246,14 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
          font: 15px/1.5 system-ui, sans-serif; }}
   main {{ max-width: 34rem; margin: 0 auto; }}
   img {{ width: 100%; border-radius: 6px; background: #000; display: block; }}
-  fieldset {{ border: 1px solid #33373f; border-radius: 6px; margin: 1rem 0 0; padding: 0.75rem; }}
+  /* A fieldset is as wide as its widest content unless told otherwise, and a select is as wide as
+     its longest option: on a phone the Timelapse panel ran off the right of the screen. */
+  fieldset {{ border: 1px solid #33373f; border-radius: 6px; margin: 1rem 0 0; padding: 0.75rem;
+              min-width: 0; }}
   legend {{ padding: 0 0.4rem; color: #9aa0aa; font-size: 0.85rem; }}
   label {{ display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }}
   label span {{ min-width: 7rem; }}
-  select {{ flex: 1; padding: 0.35rem; background: #1d2026; color: inherit;
+  select {{ flex: 1; min-width: 0; padding: 0.35rem; background: #1d2026; color: inherit;
             border: 1px solid #33373f; border-radius: 4px; }}
   input[type="number"] {{ width: 6rem; padding: 0.35rem; background: #1d2026; color: inherit;
                           border: 1px solid #33373f; border-radius: 4px; }}
@@ -279,14 +282,21 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
      never posts it and the script that reflects settings back never touches it. */
   .field {{ position: relative; display: flex; flex-wrap: wrap; align-items: center;
             column-gap: 0.4rem; }}
-  .field > :first-child {{ flex: 1; }}
+  .field > :first-child {{ flex: 1; min-width: 0; }}
   .info-toggle {{ position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }}
   label.info {{ display: inline-flex; margin: 0; cursor: pointer; color: #9aa0aa; }}
   label.info svg {{ width: 18px; height: 18px; fill: currentColor; }}
-  label.info:hover, .info-toggle:checked + label.info {{ color: #d8752a; }}
+  .info-toggle:checked + label.info {{ color: #d8752a; }}
   .info-toggle:focus-visible + label.info {{ outline: 2px solid #d8752a; border-radius: 50%; }}
   .about {{ display: none; flex-basis: 100%; margin: 0.2rem 0 0.6rem; }}
-  label.info:hover + .about, .info-toggle:checked + label.info + .about {{ display: block; }}
+  .info-toggle:checked + label.info + .about {{ display: block; }}
+  /* Only where there is a pointer that hovers. A phone keeps the last thing tapped "hovered" until
+     the next tap somewhere else, so with this rule everywhere a second tap unpinned the text and
+     the hover still showed it. */
+  @media (hover: hover) {{
+    label.info:hover {{ color: #d8752a; }}
+    label.info:hover + .about {{ display: block; }}
+  }}
   .version {{ margin-top: 1.4rem; font-size: 0.75rem; }}
 </style>
 </head>

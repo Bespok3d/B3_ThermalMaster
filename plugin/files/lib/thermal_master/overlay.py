@@ -254,7 +254,7 @@ def bar_axis(stats: FrameStats) -> tuple[float, float]:
     """The temperatures the bar spans, bottom and top: the range the colours are spread over.
 
     The scene's own coldest and hottest from 0.14.0, so the ruler's ends were the numbers the
-    markers show. Put back to the range in 0.28.5, after the scales were compared on the U1: a
+    markers show. Put back to the range in 0.28.6, after the scales were compared on the U1: a
     ruler over the scene is re-labelled every frame by a nozzle whose reading jumps twenty degrees
     from one to the next, and almost all of it is one flat colour. Over the range, it holds still
     and every row of it is a colour the picture uses. The triangles say when the scene goes past.

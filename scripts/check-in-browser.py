@@ -239,6 +239,49 @@ def run_info_checks(page) -> list:
     return checks
 
 
+# A narrow Android phone's width in CSS pixels, the width the Timelapse panel was found too wide for.
+PHONE_WIDTH = 360
+
+
+def run_phone_checks(browser, port: int) -> list:
+    """On a phone: nothing runs off the screen, an (i) stays beside its option, taps open and close.
+
+    A phone keeps the last thing tapped "hovered", so the hover rule has to be for pointers that
+    hover only, or a second tap unpins the text while the stuck hover keeps showing it (found on
+    an Android phone on 2026-09-30). The same phone showed the Timelapse panel running off the
+    right of the screen and the (i)s wrapping under their selects.
+    """
+
+    context = browser.new_context(
+        viewport={"width": PHONE_WIDTH, "height": 800}, device_scale_factor=2, is_mobile=True,
+        has_touch=True,
+    )
+    page = context.new_page()
+    page.goto(f"http://127.0.0.1:{port}/", wait_until="domcontentloaded")
+    about = "#info-colour_scale ~ p.about"
+    icon = "label[for=info-colour_scale]"
+    # Every panel's right edge, not the page's scroll width: a phone zooms out to fit a page that is
+    # too wide, which hides the overflow from the page's own measurements.
+    widest = page.evaluate(
+        "Math.max(...[...document.querySelectorAll('fieldset')]"
+        ".map(f => f.getBoundingClientRect().right))"
+    )
+    checks = [("nothing runs off a phone's screen", widest <= PHONE_WIDTH, True)]
+    select = page.locator("select[name=colour_scale]").bounding_box()
+    beside = page.locator(icon).bounding_box()
+    checks.append((
+        "an (i) stays beside its option",
+        abs((beside["y"] + beside["height"] / 2) - (select["y"] + select["height"] / 2)) < 8,
+        True,
+    ))
+    page.tap(icon)
+    checks.append(("a tap opens an explanation", page.is_visible(about), True))
+    page.tap(icon)
+    checks.append(("and a second tap closes it", page.is_visible(about), False))
+    context.close()
+    return checks
+
+
 def run_checks(page, store, device) -> list:
     """Each check returns its name, what happened, and whether that is what should happen."""
 
@@ -972,6 +1015,9 @@ def main() -> None:
         print("")
         print("recording")
         report(run_recording_checks(browser, PORT), problems)
+        print("")
+        print("the settings page on a phone")
+        report(run_phone_checks(browser, PORT), problems)
         print("")
         print("the off switch")
         report(run_switch_checks(browser, PORT, store), problems)

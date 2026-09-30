@@ -12,10 +12,22 @@ maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts a
 one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
 behind each change.
 
-## Test builds for 0.28.5, on the test/color-bar branch
+## Test builds for 0.28.6, on the test/color-bar branch
 
 Built on 2026-09-29 and 2026-09-30 and tried on the U1, to choose how temperatures become colours.
-Their public entry is 0.28.5's.
+Their public entry is 0.28.6's.
+
+### 0.28.5
+
+- **Four colour scales**, chosen from the seven below: the stretch, a knee at 85%, and the gentle
+  and strong logs, over a followed range and a held one, live and in clips. The ruler spans the
+  colours on every scale.
+- **Clips have their own readout**, with a button to copy the live one, and the colour scale in
+  their corner and name on request. "Make the clip again with the current colours".
+- **The explanations are behind an (i)** beside each option, and the version is at the foot of the
+  settings page.
+- Found on the U1: on a phone a second tap did not close an explanation, and the Timelapse panel
+  ran off the screen. Fixed in 0.28.6.
 
 ### 0.28.4
 

@@ -160,7 +160,7 @@ def test_a_scene_inside_the_scale_gets_no_triangles(thermal_streamer, bed):
 
 
 def test_on_a_followed_range_the_triangles_say_the_same(thermal_streamer, bed):
-    """Since 0.28.5 the ruler spans the colours either way, so the triangles mean one thing.
+    """Since 0.28.6 the ruler spans the colours either way, so the triangles mean one thing.
 
     The middle 96% of the scene is what the colours cover, so something hotter than it is past
     the top, whether or not the hottest pixel's marker is on.

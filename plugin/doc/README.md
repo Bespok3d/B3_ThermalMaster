@@ -421,6 +421,10 @@ temperature in every frame, and the knee keeps the held temperatures below its b
 anything hotter above it. In a timelapse clip the curves run over the whole print's coldest and
 hottest, so they too mean the same thing from the first layer to the last.
 
+**What they cost.** Measured on the U1, against a 13.6 ms frame with the stretch: about 1.2 ms
+more for the knee and the gentle log, and 1.5 ms for the strong log, roughly a tenth. The stretch
+costs what it always did.
+
 The picture above is two frames captured on a printer, the top one with the nozzle at 187 C in view and
 the bottom one with nothing hot in it, drawn by the plugin with each scale.
 

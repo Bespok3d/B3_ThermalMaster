@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.28.5
+## 0.28.6
 
 - **Four colour scales**, under Range on the settings page: the stretch the picture has always
   used, a knee that squeezes everything hotter than the range into the top of the palette so a
@@ -22,6 +22,8 @@
 - **The explanations are beside the options they explain**, behind an (i) you hover over or click,
   instead of in a long list at the foot of the settings page. The plugin's version is at the foot
   instead.
+- **The settings page fits a phone.** The Timelapse panel no longer runs off the right of the
+  screen, the (i)s stay beside their options, and a second tap on one closes it.
 
 ## 0.28.0
 

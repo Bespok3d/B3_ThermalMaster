@@ -2579,7 +2579,7 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    a `_cover.jpg`. Cheap to test before any code: upload a renamed copy by hand, as the test pair
    was, once named `<name>_thermal_<stamp>.mp4` and once with a `_cover.jpg` beside it.
 
-   **The colour bar, decided on 2026-09-30, in 0.28.5.** Proposed on 2026-09-29: A, the bar spans
+   **The colour bar, decided on 2026-09-30, released in 0.28.6.** Proposed on 2026-09-29: A, the bar spans
    the range where the colours change, with the triangles saying the scene goes past an end; B, a
    broken bar; and, from a friend of the maintainer's, a log mapping so the whole scene keeps
    colours with most of them at the cool end. Rendered first from three captured frames (a nozzle
@@ -2600,15 +2600,31 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
      2.9 ms, and htop read 52% of a core against 42% for the stretch; a table of the curve looked up
      with 32 bit passes over the frame saved almost nothing there, and made a straight line 0.5 ms
      dearer. In 0.28.5 the knee is the stretch below its bend and a log only on the pixels above it,
-     and the logs look their table up with 16 bit passes; measured on the Mac VM at within 0.1 ms of
-     the stretch, and on the U1 before release.
+     and the logs look their table up with 16 bit passes. Measured on the U1 on 2026-09-30, against
+     13.6 ms for the stretch: the knee 1.2 ms more, the gentle log 1.2 ms, the strong log 1.5 ms.
+     About half of each is the colour map and half the ruler, which works out its ends and tick in
+     degrees and draws the tick's label every frame. For later: redraw the ruler only when its
+     numbers change, which should take off about another 0.5 ms.
+   - Tried on the U1 the same day, 0.28.5: the four scales live, followed and held at 20 to 60 C,
+     each with the ruler and tick it should have; a clip with the clips' readout all unticked came
+     out plain while the tile kept its readout; the copy button matched the Readout panel; the
+     scale in the corner and in the name, `..._thermal_knee.mp4` on Fluidd's Timelapse page; the
+     timelapse held at its own temperatures with the knee kept the bed's colour steady; a saved
+     test build scale came back as the stretch; the (i)s worked on a computer. On an Android phone
+     a second tap left the explanation open, because a phone keeps the last thing tapped "hovered",
+     and the Timelapse panel ran off the right of the screen, with the (i)s wrapping under their
+     selects: a fieldset and a select are as wide as their widest content unless told otherwise.
+     Fixed in 0.28.6, with the hover only for pointers that hover, and checked in the browser
+     harness at 360 pixels wide with touch.
 
    **For later: a U1 print's own timelapse, asked for rather than waited on (0.28.4).** On the U1
    `timelapse.is_active` and `print_task_config.time_lapse_camera` were both true for the whole of a
    print started with the timelapse ticked and false for one without, and both false once the print
-   had ended; `print_task_config.reprint_info.time_lapse_camera` stayed true after the ticked print
-   until the print was confirmed on the screen. The plugin reads the first two with the status it
-   already asks for during a print, and only waits for the firmware's clip when one of them was true.
+   had ended; `print_task_config.reprint_info.time_lapse_camera` keeps the last print's value after it
+   ends, confirmed on the screen or not (true after a ticked print, false after an unticked one). The
+   plugin reads the first two with the status it already asks for during a print, and only waits for
+   the firmware's clip when one of them was true. Tried on the U1 on 2026-09-30: an unticked print's
+   clip appeared as soon as the print ended, and a ticked one waited for the firmware's.
 
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
