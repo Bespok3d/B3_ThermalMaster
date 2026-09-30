@@ -365,8 +365,14 @@ def save_thumbnail(frame: Image.Image | None, path: Path) -> None:
 
 
 def make_clip(recording: Recording, inputs: ClipInputs) -> dict:
-    """Make the clip and say how it went, in the words the settings page shows."""
+    """Make the clip and say how it went, in the words the settings page shows.
 
+    A recording with no frame says so before anything is said about ffmpeg: there is nothing to
+    encode either way, and what fixes it is the slicer's layer lines, not installing an encoder.
+    """
+
+    if next(measured_frames(recording), None) is None:
+        return {"error": NO_FRAMES_REASON}
     if inputs.ffmpeg is None:
         return {"error": "ffmpeg is not installed on this printer, so no clip can be made."}
     started = time.monotonic()

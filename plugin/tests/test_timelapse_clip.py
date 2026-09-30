@@ -142,6 +142,19 @@ def test_a_recording_with_no_frame_says_why(thermal_streamer, palettes, tmp_path
     assert "layer numbers" in outcome["error"]
 
 
+def test_no_frame_is_the_reason_given_even_without_ffmpeg(thermal_streamer, palettes, tmp_path):
+    """The order of the two reasons, which a machine without ffmpeg found (GitHub's runner)."""
+
+    recording = recording_of(thermal_streamer, tmp_path, [])
+    without = dataclasses.replace(
+        inputs(thermal_streamer, palettes, thermal_streamer.TIMELAPSE_RANGE_FROM_START), ffmpeg=None
+    )
+
+    outcome = thermal_streamer.make_clip(recording, without)
+
+    assert "layer numbers" in outcome["error"]
+
+
 def frames_in(clip):
     counted = subprocess.run(
         ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
