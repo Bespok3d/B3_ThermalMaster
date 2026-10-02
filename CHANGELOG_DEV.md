@@ -12,9 +12,10 @@ maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts a
 one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
 behind each change.
 
-## Test builds for 0.29.1
+## Test builds for 0.29.1, on the feature/auto-sensitivity branch
 
-Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max. Its public entry is 0.29.1's.
+Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max and the U1. Its public entry is
+0.29.1's.
 
 ### 0.29.0
 
