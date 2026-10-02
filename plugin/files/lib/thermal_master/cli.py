@@ -86,6 +86,7 @@ def start_timelapse(
             streaming=lambda: streaming_wanted(device),
             palettes=build_palettes(),
             ffmpeg=shutil.which(options.ffmpeg),
+            override_gain=device.override_gain,
         )
     )
     threading.Thread(target=service.run, args=(shutdown,), daemon=True).start()

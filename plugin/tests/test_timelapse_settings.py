@@ -138,12 +138,21 @@ def test_the_page_has_the_timelapse_section(thermal_streamer, settings_dict):
 def test_the_page_warns_about_high_sensitivity_only_with_the_timelapse_on(
     thermal_streamer, settings_dict
 ):
-    shown = settings_dict()
+    shown = {**settings_dict(), "timelapse_auto_gain": False}
     off = thermal_streamer.render_control_page(shown, ["ironbow"])
     on = thermal_streamer.render_control_page({**shown, "timelapse": True}, ["ironbow"])
 
-    assert "reads nothing above 150 C" not in off
-    assert "reads nothing above 150 C" in on
+    assert "stops there. Wide range is under Camera" not in off
+    assert "stops there. Wide range is under Camera" in on
+
+
+def test_with_the_switch_on_the_page_says_what_will_happen_instead(thermal_streamer, settings_dict):
+    shown = {**settings_dict(), "timelapse": True, "timelapse_auto_gain_celsius": 140.0}
+
+    page = thermal_streamer.render_control_page(shown, ["ironbow"])
+
+    assert "stops there. Wide range is under Camera" not in page
+    assert "when something passes 140 C" in page
 
 
 def test_a_print_name_is_escaped_in_the_list(thermal_streamer, settings_dict):

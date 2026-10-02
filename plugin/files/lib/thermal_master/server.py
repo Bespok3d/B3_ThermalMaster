@@ -26,7 +26,7 @@ from .camera import (
     streaming_wanted,
 )
 from .cost import ProcessCost, describe_cost
-from .page import describe_device, render_control_page, timelapse_list
+from .page import describe_device, gain_note, render_control_page, timelapse_list
 from .palettes import build_palettes
 from .recording import Recording, find_recording
 from .settings import (
@@ -507,6 +507,7 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
             status is not None and status.get("shutter", {}).get("state") == SHUTTER_PENDING
         )
         payload["timelapse_status"] = self.timelapse_status()
+        payload["gain_note"] = gain_note(payload)
         return payload
 
     def timelapse_status(self) -> str:

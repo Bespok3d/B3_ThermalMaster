@@ -168,7 +168,19 @@ def run_timelapse_refresh_checks(page, service) -> list:
     made.clip_path.write_bytes(b"another clip's bytes")
     service._say("On. Waiting for a print to start, a clip just made.")  # noqa: SLF001
     page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
-    return [("a finished clip appears without a reload", page.locator(".clip").count(), before + 1)]
+    appeared = page.locator(".clip").count()
+    # The clip being made goes on a line of its own, under what the timelapse is doing.
+    service._encoding = made.recording_id  # noqa: SLF001
+    service._set_phase("Making the clip of later.gcode now.")  # noqa: SLF001
+    page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
+    shown = page.inner_text("#timelapse-status").splitlines()
+    service._encoding = None  # noqa: SLF001
+    return [
+        ("a finished clip appears without a reload", appeared, before + 1),
+        ("a clip being made is a line of its own", shown,
+         ["On. Waiting for a print to start, a clip just made.",
+          "Making the clip of later.gcode now."]),
+    ]
 
 
 # The settings page asks for the status line every five seconds; a little over that.
@@ -189,6 +201,23 @@ def run_timelapse_checks(page, store) -> list:
     saved = store.timelapse_snapshot()
     checks.append(("the switch reaches the plugin", saved.timelapse, True))
     checks.append(("the key reaches the plugin", saved.moonraker_api_key, "a-made-up-key"))
+    checks.append(("the switch to wide range is on by default", saved.timelapse_auto_gain, True))
+    page.uncheck("input[name=timelapse_auto_gain]")
+    page.fill("input[name=timelapse_auto_gain_celsius]", "130")
+    page.click("fieldset#timelapse button[type=submit]:not([name])")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    switched = store.timelapse_snapshot()
+    checks.append(("and unticking it reaches the plugin", switched.timelapse_auto_gain, False))
+    checks.append(("with its temperature", switched.timelapse_auto_gain_celsius, 130.0))
+    # The note under the panel was only ever drawn with the page, so it went on promising the
+    # switch after the box was unticked (found on the Pi).
+    checks.append(("the note says the gain stays",
+                   "stops there. Wide range is under Camera" in page.inner_text("#gain-note"), True))
+    page.check("input[name=timelapse_auto_gain]")
+    page.click("fieldset#timelapse button[type=submit]:not([name])")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    checks.append(("and ticked again, that it switches",
+                   "when something passes 130 C" in page.inner_text("#gain-note"), True))
     checks.append(("without reloading the page", navigated["yes"], False))
     emptied = page.input_value("input[name=moonraker_api_key]")
     checks.append(("the key box is emptied", emptied, ""))
@@ -282,6 +311,19 @@ def run_phone_checks(browser, port: int) -> list:
     return checks
 
 
+# The control page's panels, in the order the form has them, and the Apply that belongs to each.
+IMAGE_PANEL = "form#controls fieldset:nth-of-type(1)"
+RANGE_PANEL = "form#controls fieldset:nth-of-type(2)"
+READOUT_PANEL = "form#controls fieldset:nth-of-type(3)"
+OWN_APPLY = " button[type=submit]:not([name])"
+
+
+def pending_in(page, panel: str) -> tuple[bool, bool]:
+    """Whether a panel's Apply can be pressed, and whether "Not applied yet" shows beside it."""
+
+    return (not page.is_disabled(panel + OWN_APPLY), page.is_visible(panel + " .pending"))
+
+
 def run_checks(page, store, device) -> list:
     """Each check returns its name, what happened, and whether that is what should happen."""
 
@@ -293,6 +335,8 @@ def run_checks(page, store, device) -> list:
         "typeof document.getElementById('controls').action === 'string'"
     )
     checks.append(("form.action is the URL and not a control", action_is_a_url, True))
+    checks.append(("nothing to apply when the page loads", pending_in(page, IMAGE_PANEL),
+                   (False, False)))
 
     page.click("button[value='shutter']")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
@@ -306,9 +350,21 @@ def run_checks(page, store, device) -> list:
     device.apply(sys.modules["p3_camera"].P3Camera())
     settled = device.status()["shutter"]["state"]
     page.select_option("select[name='palette']", "sepia")
-    page.click("form#controls fieldset:first-of-type button[type=submit]")
+    checks.append(("a change offers its panel's Apply", pending_in(page, IMAGE_PANEL),
+                   (True, True)))
+    checks.append(("and no other panel's", pending_in(page, RANGE_PANEL), (False, False)))
+    # A change left half made in another panel, which applying this one used to apply too.
+    page.uncheck("input[name=colorbar]")
+    page.click(IMAGE_PANEL + OWN_APPLY)
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("apply changes a setting", store.as_dict()["palette"], "sepia"))
+    checks.append(("and greys itself out again", pending_in(page, IMAGE_PANEL), (False, False)))
+    checks.append(("another panel's change is not applied", store.as_dict()["colorbar"], True))
+    checks.append(("and is still on the page", page.is_checked("input[name=colorbar]"), False))
+    checks.append(("still waiting to be applied", pending_in(page, READOUT_PANEL), (True, True)))
+    page.check("input[name=colorbar]")
+    checks.append(("undone, it has nothing to apply", pending_in(page, READOUT_PANEL),
+                   (False, False)))
     checks.append((
         "every colour scale is offered",
         page.locator("select[name=colour_scale] option").count(),
@@ -329,6 +385,7 @@ def run_checks(page, store, device) -> list:
     # on saying "follow the scene", and the next Apply posted what the page was saying and undid
     # it. Both halves are checked, because the second one is what made it a defect rather than a
     # missing flourish.
+    page.select_option("select[name=units]", "fahrenheit")
     page.click("button[value=lock-range]")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     held = store.as_dict()
@@ -339,12 +396,25 @@ def run_checks(page, store, device) -> list:
         float(page.input_value("input[name=range_low_celsius]")),
         held["range_low_celsius"],
     ))
-    page.click("text=Apply")
+    checks.append(("a button sends only its command", held["units"], "celsius"))
+    checks.append(("and leaves a change elsewhere on the page",
+                   page.input_value("select[name=units]"), "fahrenheit"))
+    # Enter applies the panel the field is in. Left to the browser it pressed the first button in
+    # the form, the Image panel's Apply, wherever the field was.
+    page.fill("input[name=range_high_celsius]", "61.5")
+    page.press("input[name=range_high_celsius]", "Enter")
     page.wait_for_timeout(SETTLE_MILLISECONDS)
-    checks.append(("and applying again does not undo it", store.as_dict()["range_mode"], "fixed"))
+    entered = store.as_dict()
+    checks.append(("enter applies its own panel", entered["range_high_celsius"], 61.5))
+    checks.append(("without reloading the page", navigated["yes"], False))
+    checks.append(("and applying again does not undo the hold", entered["range_mode"], "fixed"))
+    checks.append(("and nothing from another panel", entered["units"], "celsius"))
     checks.append(
         ("apply does not re-fire the last button", device.status()["shutter"]["state"], settled)
     )
+    page.select_option("select[name=units]", "celsius")
+    checks.append(("put back, the other panel is clean", pending_in(page, READOUT_PANEL),
+                   (False, False)))
     return checks
 
 
