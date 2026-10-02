@@ -179,17 +179,97 @@ The path shapes also differ between dialects, which matters for writing service 
 
 ## 4. Review findings
 
-### 4.0 What is still open
+Every finding has a number, given in the order it was found and never changed or reused, because
+code comments, tests, commit messages and other documents name findings by number. The first
+review's findings are the low numbers, and the revisions and the work since went on from there.
+This section groups the findings by subject, so the numbers jump within a subsection, and from F-57
+on most findings sit in the phase, or the part of section 9, where they were found. F-4 was
+superseded by F-33 in revision 2. F-1, F-19 and F-21 were not carried into this revision, and
+nothing here records what they were. The findings are kept as written, so the reasoning stays
+readable, and most carry their own resolution note; the index below is where to look a number up.
 
-Findings below are kept as written, so the reasoning stays readable, and most now carry their own
-resolution note. Closed by Phase 0: F-2, F-3, F-9, F-10, F-12, F-31, F-40 (partly), F-42, F-43, F-48,
-F-49, F-50, F-51. Closed by Phase 1: F-11, F-20, F-22, F-23, F-24, F-32, F-33, F-34, F-35, F-36, F-37,
-F-38, F-39, F-41, F-44, and the rest of F-40; F-45 keeps Apache-2.0 and now ships a per-plugin
-`doc/LICENSE`, and F-46's capability and exclusivity metadata is declared.
+### 4.0 Index, and what is still open
 
-Genuinely still open: F-7 and F-8 (withdrawn, the udev file is gone),
-F-13 through F-18 (runtime correctness, Phase 3), F-25 through F-30 (streamer design, Phase 5), and
-F-47 (mypy, waiting on the streamer being split into an importable module).
+Checked on 2026-10-02 against each finding's own note, the phases in section 7, and the code. Two
+are not closed: F-55, parked until the tile's frame rate decay gets in the way, and F-77, on
+Bespok3d's side and reported to them. Everything else is closed. "Where" is the subsection of this
+section, the phase in section 7, or section 9.
+
+| Finding | What | Where | Status |
+| --- | --- | --- | --- |
+| F-2 | The vendored driver is not pinned | 4.2 | Closed by Phase 0 |
+| F-3 | Runtime wheels are unpinned | 4.2 | Closed by Phase 0: pinned in `requirements.txt` |
+| F-5 | `publisher` is a fingerprint field, and `author` is missing | 4.2 | Closed in 0.27.0, the first signed release |
+| F-6 | Packages ship unsigned | 4.2 | Closed in 0.27.0 |
+| F-7 | The udev rule is world-writable | 4.4, with F-8 | Closed by Phase 1: the udev file is gone |
+| F-8 | The udev rule sleeps inside `RUN+=` | 4.4, with F-7 | Closed by Phase 1: the udev file is gone |
+| F-9 | `scripts/check.sh` is absent | 4.5 | Closed by Phase 0 |
+| F-10 | No Python quality layer | 4.5 | Closed by Phase 0 |
+| F-11 | No `release.yml` | 4.5 | Closed by Phase 1 |
+| F-12 | Detector scoping | 4.5 | Closed by Phase 0 |
+| F-13 | No SIGTERM handling | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-14 | `stop_streaming()` is never called | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-15 | One bad frame tears down the whole camera | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-16 | A `None` frame is a silent permanent freeze | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-17 | Unbounded retry noise | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-18 | Control commands cannot be issued from HTTP threads | 4.3 | Closed in 0.8.0 (Phase 6) |
+| F-20 | No `plugin/doc/CHANGELOG.md` | 4.6 | Closed by Phase 1 |
+| F-22 | `README.md` describes a vendor fetch and a build that do not exist | 4.6 | Closed by Phase 1, the last part with F-11 |
+| F-23 | The plugin README says only the P1 is enabled | 4.6 | Closed in 0.4.0 (Phase 4) |
+| F-24 | Bind, port and camera details are hardcoded twice | 4.6 | Closed in 0.4.0 (Phase 4): the init script is gone, and the name and aspect are `config[]` |
+| F-25 | The whole frame is converted to Celsius to find two bounds | 4.4 | Closed in 0.5.0 (Phase 5) |
+| F-26 | No smoothing on the auto-gain bounds | 4.4 | Closed in 0.5.0 (Phase 5) |
+| F-27 | A fixed 4x upscale before the JPEG encode | 4.4 | Closed in 0.5.2 |
+| F-28 | `wait_next` re-sends the current frame on timeout | 4.4 | Closed: each frame carries its publication number, which the stream hands back (see F-73) |
+| F-29 | `serve_snapshot` sets no `Cache-Control` | 4.4 | Closed in 0.3.0, at the proxy |
+| F-30 | A `type: ignore` that the mypy gate would not take | 4.4 | Closed in 0.8.5, with F-47 |
+| F-31 | The vendor directory holds drafts and 70 MB of unpacked wheels | 4.4 | Closed by Phase 0 |
+| F-32 | The manifest is in an older dialect than the documentation | 4.1 | Closed by Phase 1 |
+| F-33 | `files` is hand-written and the packed archive is unusable | 4.1 | Closed by Phase 1 |
+| F-34 | The init script duplicates a platform facility | 4.1 | Closed by Phase 1 |
+| F-35 | Nothing registers the camera with Moonraker | 4.1 | Closed by Phase 1 |
+| F-36 | No nginx location file | 4.1 | Closed by Phase 1 |
+| F-37 | The udev rule thought inexpressible | 4.1 | Closed by Phase 1, with F-7 and F-8 |
+| F-38 | `channel` is `lts` on code that has never run | 4.1 | Closed by Phase 1 |
+| F-39 | Manifest fields are missing | 4.1 | Closed by Phase 1 |
+| F-40 | Three hand-rolled scripts duplicate `b3-builder` | 4.2 | Closed by Phase 0 and Phase 1 |
+| F-41 | Releases are documented as push-to-main | 4.2 | Closed by Phase 1 |
+| F-42 | Repo scaffolding is missing | 4.2 | Closed by Phase 0 |
+| F-43 | The vendoring strategy is obsolete | 4.2 | Closed by Phase 1 |
+| F-44 | Attributions are incomplete | 4.2 | Closed by Phase 1 |
+| F-45 | The licence does not match the org's other plugin repos | 4.2 | Closed by Phase 1: Apache-2.0 kept, with a per-plugin `doc/LICENSE` |
+| F-46 | Dependency and capability metadata is empty | 4.2 | Closed by Phase 1 |
+| F-47 | mypy cannot check a single-file streamer | 4.4 | Closed in 0.8.5 |
+| F-48 | The streamer carried pre-existing lint | 4.4 | Closed by Phase 0 |
+| F-49 | The shared tool venv has no runtime libraries | 4.5 | Closed by Phase 0 |
+| F-50 | The vendor directory shadowed installed packages | 4.4 | Closed by Phase 0 |
+| F-51 | The gate venv collided across machines | 4.4 | Closed by Phase 0 |
+| F-52 | Query strings 404ed | 4.4 | Closed in 0.2.1 |
+| F-53 | The service ran under the wrong interpreter | 4.4 | Closed in 0.2.2 |
+| F-54 | The camera worked in Chrome and not in Safari | 4.4 | Closed in 0.4.1 |
+| F-55 | The adaptive tile decays from 15 fps to 5 fps | 4.4 | **Parked**, until the decay gets in the way |
+| F-56 | The numpy pipeline, not the encode, is the cost | 4.4 | Closed in 0.21.0 |
+| F-57 | The driver's `trigger_shutter` cannot work on a P1 | Phase 6 | Closed in 0.8.1, and reported upstream (10.1) |
+| F-58 | The colorbar and the hotspot marker seem to disagree | Phase 6 | Closed in 0.8.1 |
+| F-59 | Every settings change bounced out to the dashboard | Section 9 | Closed in 0.8.2 |
+| F-60 | The calibrate button silently stopped working | Section 9 | Closed in 0.8.3 |
+| F-61 | A camera plugged in after boot | Phase 7e | Closed: never broken |
+| F-62 | The live tile showed its controls and no camera | Phase 7, 0.14.0 round | Closed in 0.14.0 |
+| F-63 | The ruler and the markers disagreed, again | Phase 7, 0.14.0 round | Closed in 0.14.0 |
+| F-64 | The viewer was blank until the pointer crossed it | Phase 7, 0.15.0 round | Closed in 0.15.0 |
+| F-65 | A landscape tile spent its width on nothing | Phase 7, 0.15.0 round | Closed in 0.15.0 |
+| F-66 | Two cameras of the same thing | Phase 7, 0.15.0 round | Closed in 0.16.0 |
+| F-67 | The controls were hidden where they were wanted | Phase 7, 0.15.0 round | Closed in 0.17.0 |
+| F-68 | The settings page was a one way trip | Phase 7, 0.15.0 round | Closed in 0.17.0 |
+| F-69 | Placing a spot before the first frame did nothing | Phase 7e | Closed before 0.19.0 shipped |
+| F-70 | The finder found itself | 4.4 | Closed in `scripts/find-plugin.sh`, which does not ship |
+| F-71 | The page threw away the answer it asked for | Phase 7f | Closed in 0.22.1 |
+| F-72 | The picture froze every thirty-one seconds | Section 9 | Closed: the printer's wifi, off since 2026-09-27; log timestamps in 0.25.2 |
+| F-73 | Two open streams sent each other the same frame | Section 9 | Closed in 0.25.1 |
+| F-74 | A network break froze the picture for good | Section 9 | Closed in 0.26.0 |
+| F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
+| F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
+| F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
 
 ### 4.1 The manifest describes a plugin model that does not exist
 
