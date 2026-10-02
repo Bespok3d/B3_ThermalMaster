@@ -2785,7 +2785,8 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    nozzle past about 200 C, and 0.29.1 switches at 195 C: past every PLA reading on the U1, 169 C
    in a print and 194 C held against the camera, and before a reading on its way up is stuck at
    the cap. Wide range only earns its noise and its cool readings for high temperature
-   materials. The ruler hiding the hottest marker at the right edge is for later.
+   materials. The hottest marker at the right edge was drawn, on top of the ruler, as a thin red
+   cross on the ruler's orange; 0.30.0 gives the cross the labels' dark shadow.
 
    Found on the Pi and fixed in 0.29.1: the note under the Timelapse panel was only drawn with the
    page, so it went on saying the camera would switch after the box was unticked until a reload;
@@ -2799,6 +2800,29 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
    and a default chosen. Done for the colour scale, above, by making one print's clip again with
    each; the range mode stays "fixed once the print has started" by default.
+
+   **Decided on 2026-10-02, for 0.30.0: clips get a colour scale of their own, the knee by
+   default.** The U1 print of that day, rendered from its kept temperatures with the plugin's own
+   clip code, settled it, and showed the question had been put wrongly. The range taken from the
+   second layer's frame was 13.5 to 38.5 C, the bed at its top, and the part and the nozzle never
+   in it: only 20 to 31 of the 19,200 pixels read above 45 C in layers 30 to 100, the nozzle tip and
+   the fresh top of the part, and the 98th percentile that sets a range leaves them out by design.
+   So "the whole print" (12.8 to 39.5 C) looked the same as "fixed once started", "hold 20 to 120
+   C" and a range up to the print's hottest, 169 C, were nearly black with only the nozzle showing,
+   and the knee over the same range was the only one that kept the bed orange and the nozzle and
+   the fresh layer apart from it. The rest of the part reads at the bed's temperature from where
+   the U1's camera sits, which no range can change. The live picture keeps the stretch;
+   `timelapse_colour_scale` is `live` or one of the four, `knee` by default, and a settings file
+   from before it gets the knee too. Clips are also enlarged smoothly by default
+   (`timelapse_upscale_filter`): they were always drawn in squares, and a clip is made once, at
+   the lowest priority, so the live picture's reason to offer sharp hardly applies to it.
+
+   Tried on the U1 on 2026-10-02. Making that print's clip again, 102 layers, took 7.3 s smooth
+   and 7.4 s sharp, and 7.4 s before the change: smooth costs nothing that can be measured. "The
+   same as the live picture" gave the old clip's colours. The hottest marker, with its dark edge,
+   shows on the ruler. With a tile open the plugin used 43.6% of one core, against 41.9% measured
+   at 0.27.0 and about 42% since; the edge is four short lines a frame, a few hundredths of a
+   millisecond, so that is the spread between runs rather than the change.
 
 ## 8. Alternatives considered and rejected
 
@@ -2908,10 +2932,9 @@ What is left, in the order it is worth doing:
 - **Phase 9's remainder**, in section 7:
   - Step 3, the automatic gain switch: built and tried on both printers, and switching at 195 C
     since 0.29.1. A print with a nozzle past 200 C, to see it switch at the new default.
-  - The hottest pixel's marker is hidden under the ruler at the right edge of the picture.
+  - 0.30.0, tried on the U1 and ready to release: clips with their own colour scale (the knee)
+    and smooth enlarging, and the markers' dark edge.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
-  - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
-    layer clips the bed warmed past it, which the knee handles and the stretch does not.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted

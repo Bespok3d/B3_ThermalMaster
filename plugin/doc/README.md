@@ -75,6 +75,8 @@ the next click. The plugin's version is at the foot of the page.
 | Timelapse | Switch to wide range when something passes | `timelapse_auto_gain`, `timelapse_auto_gain_celsius` | `true`, `false`, on by default; 30 to 500 C, 195 by default |
 | Timelapse | Colours | `timelapse_range_mode` | `from-start`, `whole-print`, `fixed`, `as-displayed` |
 | Timelapse | From, To | `timelapse_range_low_celsius`, `timelapse_range_high_celsius` | degrees Celsius, used by `fixed` |
+| Timelapse | Colour scale | `timelapse_colour_scale` | `live` (the same as the live picture), `stretch`, `knee`, `log-mild`, `log-strong`; `knee` by default |
+| Timelapse | Enlarging | `timelapse_upscale_filter` | `smooth`, `sharp`; `smooth` by default |
 | Timelapse | Drawn into the clips: ruler, crosshair, hottest and coldest pixel, placed spots | `timelapse_colorbar`, `timelapse_reticle`, `timelapse_hotspot`, `timelapse_coldspot`, `timelapse_spots` | `true`, `false`; all on by default |
 | Timelapse | The colour scale in the corner of each clip, in the clip's name | `timelapse_scale_label`, `timelapse_scale_in_name` | `true`, `false`; off by default |
 | Timelapse | Moonraker key | `moonraker_api_key` | a key, or `""` to forget it; never sent back, `moonraker_api_key_set` says whether one is saved |
@@ -247,8 +249,17 @@ layer rather than pictures of them. "Fixed once the print has started" takes its
 first frame with a layer on the bed, so what the bed and nozzle do before then does not wash the
 part out; a print that stopped before its second layer uses the whole print's range instead. "The whole print" runs from the coldest to the hottest thing in any frame. "Hold these
 temperatures" uses the two numbers in the panel, and "the same as the live picture" follows the
-Range panel above it. The palette, the rotation and the colour scale are the live picture's, and
-the clip is drawn when it is made, with whatever they are then.
+Range panel above it. The palette and the rotation are the live picture's, and the clip is drawn
+when it is made, with whatever they are then.
+
+**Clips have a colour scale and an enlarging of their own.** The colour scale is the knee unless
+you choose another, while the live picture keeps its own. A clip's colours are usually fixed from a
+frame with the bed already warm, so the bed is near the top of them and the part and the nozzle are
+hotter still. With the stretch they came out one flat colour in every layer of a U1 print; the knee
+keeps them in order at the top of the palette, and gives the rest of it to the bed and the room.
+"The same as the live picture" follows the Range panel. Enlarging is smooth unless you choose
+sharp: the live picture offers sharp because it saves work on every frame, and a clip is made once,
+after the print, at the lowest priority.
 
 **What is drawn into the clips** is set in the Timelapse panel, apart from the live picture: the
 ruler, the crosshair, the hottest and coldest pixel and any placed spots, all on by default. Untick

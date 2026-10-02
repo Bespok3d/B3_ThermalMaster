@@ -495,6 +495,11 @@ def draw_marker(
     y = int((marker.spot[1] + 0.5) * scale)
     arm = max(int(image.size[0] * marker.arm_fraction), 3)
     draw = ImageDraw.Draw(image)
+    # A shadow a pixel down and to the right, as the labels have, so a thin coloured cross still
+    # reads where it lands on the ruler or on something the palette has drawn the same colour. On a
+    # U1 print the hottest marker sat on the orange of the ruler and could not be seen at all.
+    draw.line((x - arm + 1, y + 1, x + arm + 1, y + 1), fill=OVERLAY_SHADOW_RGB)
+    draw.line((x + 1, y - arm + 1, x + 1, y + arm + 1), fill=OVERLAY_SHADOW_RGB)
     draw.line((x - arm, y, x + arm, y), fill=marker.colour)
     draw.line((x, y - arm, x, y + arm), fill=marker.colour)
     label = format_temperature(marker.celsius, overlay.units)

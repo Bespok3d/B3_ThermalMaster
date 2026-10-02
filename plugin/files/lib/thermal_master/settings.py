@@ -46,6 +46,8 @@ from .timelapse import (
     FORGET_KEY_ACTION,
     TIMELAPSE_SWITCHES,
     VALID_TIMELAPSE_RANGES,
+    VALID_TIMELAPSE_SCALES,
+    VALID_TIMELAPSE_UPSCALE_FILTERS,
     TimelapseSettings,
     clamped_keep,
     clamped_threshold,
@@ -517,6 +519,12 @@ TIMELAPSE_JSON_SETTINGS: dict[str, TimelapseCheck] = {
     "timelapse_range_mode": lambda value, current: (
         value if value in VALID_TIMELAPSE_RANGES else current.timelapse_range_mode
     ),
+    "timelapse_colour_scale": lambda value, current: (
+        value if value in VALID_TIMELAPSE_SCALES else current.timelapse_colour_scale
+    ),
+    "timelapse_upscale_filter": lambda value, current: (
+        value if value in VALID_TIMELAPSE_UPSCALE_FILTERS else current.timelapse_upscale_filter
+    ),
     "timelapse_range_low_celsius": lambda value, current: posted_temperature(
         value, current.timelapse_range_low_celsius
     ),
@@ -591,6 +599,8 @@ def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> Time
             {
                 "timelapse_keep": posted("timelapse_keep"),
                 "timelapse_range_mode": posted("timelapse_range_mode"),
+                "timelapse_colour_scale": posted("timelapse_colour_scale"),
+                "timelapse_upscale_filter": posted("timelapse_upscale_filter"),
                 "timelapse_range_low_celsius": posted("timelapse_range_low_celsius"),
                 "timelapse_range_high_celsius": posted("timelapse_range_high_celsius"),
                 "timelapse_auto_gain_celsius": posted("timelapse_auto_gain_celsius"),

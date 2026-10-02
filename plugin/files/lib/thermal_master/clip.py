@@ -38,7 +38,15 @@ from .overlay import (
     overlay_style,
     with_banner,
 )
-from .pipeline import FIXED_RANGE, RenderSettings, ThermalRenderer, frame_bounds, ordered_range
+from .pipeline import (
+    FIXED_RANGE,
+    SHARP_UPSCALE,
+    RenderSettings,
+    ThermalRenderer,
+    frame_bounds,
+    ordered_range,
+    resampling,
+)
 from .recording import CAMERA_OFF_RECORD, LayerRecord, Recording
 from .temperature import celsius_for_raw, oriented_size
 from .timelapse import (
@@ -46,6 +54,7 @@ from .timelapse import (
     TIMELAPSE_RANGE_AS_DISPLAYED,
     TIMELAPSE_RANGE_FIXED,
     TIMELAPSE_RANGE_FROM_START,
+    TIMELAPSE_SCALE_LIVE,
     TimelapseSettings,
 )
 
@@ -212,11 +221,26 @@ def fixed_at(live: RenderSettings, bounds: tuple[float, float]) -> RenderSetting
     )
 
 
+def clip_colour_scale(inputs: ClipInputs) -> str:
+    """The clip's own colour scale, or the live picture's when it is asked to follow it."""
+
+    chosen = inputs.timelapse.timelapse_colour_scale
+    return inputs.live.colour_scale if chosen == TIMELAPSE_SCALE_LIVE else chosen
+
+
 def clip_render_settings(recording: Recording, inputs: ClipInputs) -> RenderSettings:
-    """The live settings with the timelapse's range and readout, and without noise reduction."""
+    """The live settings with the timelapse's range, scale, enlarging and readout, without noise
+    reduction.
+    """
 
     live = clip_readout(
-        dataclasses.replace(inputs.live, noise_reduction_weight=1.0), inputs.timelapse
+        dataclasses.replace(
+            inputs.live,
+            noise_reduction_weight=1.0,
+            colour_scale=clip_colour_scale(inputs),
+            upscale_filter=inputs.timelapse.timelapse_upscale_filter,
+        ),
+        inputs.timelapse,
     )
     mode = inputs.timelapse.timelapse_range_mode
     if mode == TIMELAPSE_RANGE_AS_DISPLAYED:
@@ -245,16 +269,22 @@ def picture_size(recording: Recording, rotation: int) -> tuple[int, int] | None:
 
 
 def render_layer(
-    renderer: ThermalRenderer, counts: np.ndarray, size: tuple[int, int], stamp: str | None = None
+    renderer: ThermalRenderer,
+    counts: np.ndarray,
+    size: tuple[int, int],
+    stamp: str | None = None,
+    *,
+    upscale_filter: str = SHARP_UPSCALE,
 ) -> Image.Image:
     """One frame, as the stream draws it, scaled up by whole pixels before the readout goes on.
 
-    The scale's name, when there is one to write, goes on last, with the markers told where it
-    will be so that none of their numbers ends up underneath it.
+    Enlarged with the clip's own filter, before the readout, so the text is sharp either way. The
+    scale's name, when there is one to write, goes on last, with the markers told where it will be
+    so that none of their numbers ends up underneath it.
     """
 
     image, stats, _ = renderer.render_image(counts)
-    picture = Image.fromarray(image, mode="RGB").resize(size, Image.Resampling.NEAREST)
+    picture = Image.fromarray(image, mode="RGB").resize(size, resampling(upscale_filter))
     overlay = renderer.overlay_for(stats)
     reserved = [stamp_box(size, stamp)] if stamp else []
     if overlay is not None:
@@ -301,21 +331,34 @@ class EncodedFrames:
     last_frame: Image.Image | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class LayerLook:
+    """What every frame of a clip shares besides its temperatures: the name in its corner, if
+    any, and how it is enlarged.
+    """
+
+    stamp: str | None = None
+    upscale_filter: str = SHARP_UPSCALE
+
+
 def feed_frames(
     recording: Recording,
     renderer: ThermalRenderer,
     size: tuple[int, int],
     sink: BinaryIO,
-    stamp: str | None = None,
+    look: LayerLook | None = None,
 ) -> EncodedFrames:
     """Every layer in order, a frame or the picture saying why there is none."""
 
+    look = look or LayerLook()
     encoded = EncodedFrames()
     for record in recording.records():
         if record.counts is None:
             picture = missing_layer_picture(record, encoded.last_frame, size)
         else:
-            picture = render_layer(renderer, record.counts, size, stamp)
+            picture = render_layer(
+                renderer, record.counts, size, look.stamp, upscale_filter=look.upscale_filter
+            )
             encoded.last_frame = picture
         sink.write(picture.tobytes())
         encoded.count += 1
@@ -341,7 +384,8 @@ def encode(recording: Recording, settings: RenderSettings, inputs: ClipInputs) -
         frames_in = cast("BinaryIO", process.stdin)
         try:
             stamp = clip_stamp(settings, inputs)
-            encoded = feed_frames(recording, renderer, size, frames_in, stamp)
+            look = LayerLook(stamp, settings.upscale_filter)
+            encoded = feed_frames(recording, renderer, size, frames_in, look)
             frames_in.close()
         except BrokenPipeError:
             encoded = EncodedFrames()
@@ -378,7 +422,7 @@ def make_clip(recording: Recording, inputs: ClipInputs) -> dict:
     started = time.monotonic()
     outcome = encode(recording, clip_render_settings(recording, inputs), inputs)
     if not outcome.get("error"):
-        outcome["scale"] = inputs.live.colour_scale
+        outcome["scale"] = clip_colour_scale(inputs)
         outcome["scale_in_name"] = inputs.timelapse.timelapse_scale_in_name
     seconds = time.monotonic() - started
     said = outcome.get("error") or "clip made"
