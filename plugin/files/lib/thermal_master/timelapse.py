@@ -19,6 +19,9 @@ from collections.abc import Callable
 
 import numpy as np
 
+from .colour_scale import SCALE_KNEE, VALID_COLOUR_SCALES
+from .pipeline import SMOOTH_UPSCALE, VALID_UPSCALE_FILTERS
+
 # How the clip maps temperatures to colours. The live picture's own range, a range of its own, the
 # whole print's coldest to hottest, or the range the print had once it had started. The last is the
 # candidate default: what the bed and the nozzle do before the first layer is down is not what the
@@ -64,6 +67,29 @@ DEFAULT_TIMELAPSE_LOW_CELSIUS = 20.0
 DEFAULT_TIMELAPSE_HIGH_CELSIUS = 120.0
 
 
+# The colour scale a clip is drawn with: one of the four by name, or whichever the live picture
+# has. The knee by default, where the live picture keeps the stretch. A range fixed from the second
+# layer's frame puts the bed at its top, and the part and the nozzle are a few dozen pixels above
+# it: in a stretch clip they were one flat colour in every layer, and the knee keeps them in order
+# at the top of the palette. Rendered both ways from a U1 print of 2026-10-02 (ROADMAP Phase 9).
+TIMELAPSE_SCALE_LIVE = "live"
+
+
+VALID_TIMELAPSE_SCALES = (TIMELAPSE_SCALE_LIVE, *VALID_COLOUR_SCALES)
+
+
+DEFAULT_TIMELAPSE_SCALE = SCALE_KNEE
+
+
+# How a clip is enlarged to its size: the live picture's two choices. Smooth by default. The live
+# picture offers sharp because it saves work on every frame the camera sends; a clip is made once,
+# after the print, at the lowest priority, so the saving buys a blockier clip for very little.
+VALID_TIMELAPSE_UPSCALE_FILTERS = VALID_UPSCALE_FILTERS
+
+
+DEFAULT_TIMELAPSE_UPSCALE_FILTER = SMOOTH_UPSCALE
+
+
 # Where the automatic switch to wide range happens, and what it may be set to. The P1's high
 # sensitivity reads nothing above 207.2 C, at the default emissivity: measured on the U1 with a
 # nozzle at 280 and 300 C, where wide range went on to 215 and 228. Below that the two gains agree
@@ -103,6 +129,8 @@ class TimelapseSettings:
     timelapse_range_mode: str = DEFAULT_TIMELAPSE_RANGE
     timelapse_range_low_celsius: float = DEFAULT_TIMELAPSE_LOW_CELSIUS
     timelapse_range_high_celsius: float = DEFAULT_TIMELAPSE_HIGH_CELSIUS
+    timelapse_colour_scale: str = DEFAULT_TIMELAPSE_SCALE
+    timelapse_upscale_filter: str = DEFAULT_TIMELAPSE_UPSCALE_FILTER
     # The readout drawn into a clip, apart from the live picture's, so a clip can come out plain
     # while the tile keeps its numbers, or the other way round. On by default, as the live one is.
     timelapse_colorbar: bool = True

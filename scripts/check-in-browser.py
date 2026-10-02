@@ -218,6 +218,18 @@ def run_timelapse_checks(page, store) -> list:
     page.wait_for_timeout(SETTLE_MILLISECONDS)
     checks.append(("and ticked again, that it switches",
                    "when something passes 130 C" in page.inner_text("#gain-note"), True))
+    checks.append(("clips have the knee by default",
+                   page.input_value("select[name=timelapse_colour_scale]"), "knee"))
+    page.select_option("select[name=timelapse_colour_scale]", "log-mild")
+    page.select_option("select[name=timelapse_upscale_filter]", "sharp")
+    page.click("fieldset#timelapse button[type=submit]:not([name])")
+    page.wait_for_timeout(SETTLE_MILLISECONDS)
+    looked = store.timelapse_snapshot()
+    checks.append(("a clip scale of its own reaches the plugin", looked.timelapse_colour_scale,
+                   "log-mild"))
+    checks.append(("and so does its enlarging", looked.timelapse_upscale_filter, "sharp"))
+    checks.append(("and the live scale is left alone", store.as_dict()["colour_scale"],
+                   "stretch"))
     checks.append(("without reloading the page", navigated["yes"], False))
     emptied = page.input_value("input[name=moonraker_api_key]")
     checks.append(("the key box is emptied", emptied, ""))
