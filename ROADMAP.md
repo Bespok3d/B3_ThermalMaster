@@ -2197,7 +2197,7 @@ Sketched on 2026-09-28 and planned on 2026-09-29, below as it was planned. Steps
 colour comparison of step 4 are built and were tried on the Pi 4 and the U1 on 2026-09-29 and
 2026-09-30, released together in 0.28.6 with four colour scales, clips with their own readout, and
 no wait for a U1 print's own clip when the printer is not making one. Step 3, the automatic gain
-switch, is still to build.
+switch, is built as 0.29.0 and 0.29.1 and was tried on the Pi 4; the U1 run is still to do.
 
 **Decided so far.**
 
@@ -2639,7 +2639,7 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
-   **Built on 2026-09-30 as 0.29.0, not yet run on hardware.** Only while the timelapse records a
+   **Built on 2026-09-30 as 0.29.0, tried on the Pi 4, not yet on the U1.** Only while the timelapse records a
    print; the threshold a setting (`timelapse_auto_gain_celsius`, 145 C by default, 30 to 500),
    since only the P1's 150 C ceiling has been measured and a P3 or a later camera may differ. The
    frame tap, which already sees every frame the camera sends, compares each frame's hottest count
@@ -2651,6 +2651,24 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    is never taken for a missing camera. The switch is noted on the recording with its layer, the
    list and the Camera panel say so, a mid-print restart sets it again from the note, and every
    way a print ends clears it. No band in the clip: the note in the list is enough.
+
+   Tried on the Pi 4 with a P1. The switch showed in the live view as it happened, at layer 0, 35 s
+   after the print started, at 145 C. The clip made again with the readout drawn in showed the
+   nozzle at 150 to 168 C, above the high sensitivity ceiling, the room at 9 to 12 C, and a knee
+   ruler from 13.8 to 168.4 C bending at 54.2 C, with no frozen or blank layer. A Klipper shutdown
+   in the middle of a second print ended its recording as Interrupted, "switched to wide range at
+   layer 1", and the Camera panel's line lost the wide range sentence, so the override was cleared.
+   Still to try: the U1, and a print with the box unticked.
+
+   Found on the Pi and fixed in 0.29.1: the note under the Timelapse panel was only drawn with the
+   page, so it went on saying the camera would switch after the box was unticked until a reload;
+   it now comes back with every answer. And every Apply, and every other button, posted the whole
+   form, so an Apply under Image also applied a half finished change under Timelapse. Each Apply
+   now sends its own panel as JSON, which already changes only what it names, the other buttons
+   send only their command, Enter applies the panel its field is in, and an Apply is greyed out,
+   with "Not applied yet" beside it, until its panel has something to apply. An answer updates the
+   panel just applied and anything a button changed, and leaves a change being made in another
+   panel where it is. Without JavaScript the page works as before.
 4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
    and a default chosen. Done for the colour scale, above, by making one print's clip again with
    each; the range mode stays "fixed once the print has started" by default.
@@ -2761,9 +2779,8 @@ What is left, in the order it is worth doing:
 - **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
   only the channel changed.
 - **Phase 9's remainder**, in section 7:
-  - Step 3, the automatic gain switch: wide range at 145 C in high sensitivity, one way for the
-    print, no frame for 5 s after it (the camera's shutter follows a switch 3.7 s later, measured
-    twice), and the chosen gain back at the end.
+  - Step 3, the automatic gain switch, built as 0.29.0 and 0.29.1 and tried on the Pi 4: the U1
+    run, and a print with the box unticked.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
   - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
     layer clips the bed warmed past it, which the knee handles and the stretch does not.

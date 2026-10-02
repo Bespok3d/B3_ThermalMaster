@@ -89,8 +89,8 @@ RECORDING_STATE_DESCRIPTIONS = {
 
 
 HIGH_SENSITIVITY_WARNING = (
-    '<p class="status">The camera is in high sensitivity, which reads nothing above 150 C, so a '
-    "nozzle in view shows as 150 C. Wide range is under Camera, or tick the switch above.</p>"
+    '<p class="status">The camera is in high sensitivity, which is not accurate above about 150 C, '
+    "so a nozzle in view reads too low. Wide range is under Camera, or tick the switch above.</p>"
 )
 
 
@@ -210,8 +210,8 @@ INFO_TEXTS = {
     ),
     "auto_gain": (
         "the switch to wide range",
-        "High sensitivity reads nothing above about 150 C, so a nozzle in view is a flat 150 in "
-        "every layer. With this ticked, while a print is being recorded, the first frame with "
+        "High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low "
+        "in every layer. With this ticked, while a print is being recorded, the first frame with "
         "something past the temperature below switches the camera to wide range for the rest of "
         "the print, and the gain chosen under Camera comes back when the print ends. No frame is "
         "taken for five seconds after the switch, while the camera recalibrates. It usually "
@@ -223,10 +223,10 @@ INFO_TEXTS = {
         "what is drawn into the clips",
         "The clips' readout is their own, so a clip can come out plain while the camera tile "
         "keeps its numbers, or the other way round. \"Copy the readout from the live view\" ticks "
-        "the boxes the Readout section has ticked, and placed spots if any are placed. The "
-        "palette and the colour scale are always the live picture's. The colour scale in the "
-        "corner, or in the name, is for telling apart clips of one print made with different "
-        "scales.",
+        "the boxes ticked in the Readout section as last applied, and placed spots if any are "
+        "placed. The palette and the colour scale are always the live picture's. The colour "
+        "scale in the corner, or in the name, is for telling apart clips of one print made with "
+        "different scales.",
     ),
     "moonraker_key": (
         "the Moonraker key",
@@ -324,6 +324,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     label.info:hover {{ color: #d8752a; }}
     label.info:hover + .about {{ display: block; }}
   }}
+  /* Beside an Apply that has something to apply, put there by the script. */
+  .pending {{ margin-right: 0.5rem; color: #d8752a; font-size: 0.8rem; }}
   .version {{ margin-top: 1.4rem; font-size: 0.75rem; }}
 </style>
 </head>
@@ -462,7 +464,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <button type="submit" name="command" value="{forget_key_command}"
               id="forget-key"{forget_disabled}>Forget the saved key</button>
       <p class="status" id="timelapse-status">{timelapse_status}</p>
-      {gain_warning}
+      <div id="gain-note">{gain_note}</div>
     </fieldset>
   </form>
   <section id="timelapses">
@@ -472,8 +474,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     </div>
     <div id="timelapse-list">{timelapse_list}</div>
   </section>
-  <p>Changes take effect immediately and survive a restart. The picture takes about a second to
-     settle afterwards, while the auto-ranging finds the scene again.</p>
+  <p>Each Apply applies its own section, and changes survive a restart. The picture takes about
+     a second to settle afterwards, while the auto-ranging finds the scene again.</p>
   <p class="version">Thermal Master {plugin_version}</p>
 </main>
 {control_script}
@@ -495,14 +497,25 @@ CONTROL_SCRIPT = """<script>
   var costLine = document.getElementById("plugin-cost");
   var timelapseLine = document.getElementById("timelapse-status");
   var timelapseList = document.getElementById("timelapse-list");
+  var gainNote = document.getElementById("gain-note");
   var listedFor = timelapseLine ? timelapseLine.textContent : "";
-  if (!form || !line || !window.fetch || !window.FormData || !window.URLSearchParams) { return; }
+  if (!form || !line || !window.fetch || !window.JSON || !form.closest) { return; }
   // getAttribute, not form.action. A named control shadows a form property of the same name, so
   // form.action is only the URL as long as nothing in the form is called "action". The attribute
   // is always the attribute.
   var endpoint = form.getAttribute("action");
   var polls = 0;
   var givingUp = false;
+
+  // What each field showed when the plugin last said what it was set to, by name. A panel whose
+  // fields all still show that has nothing to apply, so its Apply is greyed out until one changes.
+  var applied = {};
+  // The panel whose Apply is waiting for its answer. Its fields take the answer whatever they
+  // show; every other panel keeps what is being edited in it.
+  var applying = null;
+  // Whether the answer should empty the key box: only once the key in it has gone up, or after
+  // the saved one was forgotten. Applying another panel leaves a half typed key where it is.
+  var clearsKey = false;
 
   // The pressed button lives in the form itself rather than being appended to one request body,
   // because a programmatic submit does not include the submitter. Anything below that falls back
@@ -512,20 +525,115 @@ CONTROL_SCRIPT = """<script>
   pressed.type = "hidden";
   form.appendChild(pressed);
 
-  form.addEventListener("submit", function (event) {
-    if (givingUp) { return; }
-    if (!event.submitter) { return; }
-    pressed.name = event.submitter.name || "";
-    pressed.value = event.submitter.value || "";
-    event.preventDefault();
-    polls = 0;
-    post(new URLSearchParams(new FormData(form)).toString());
+  function named(scope) {
+    return Array.prototype.filter.call(scope.querySelectorAll("input, select"), function (field) {
+      return field.name && field.type !== "hidden";
+    });
+  }
+
+  function current(field) { return field.type === "checkbox" ? field.checked : field.value; }
+
+  // The page writes temperatures to one decimal and the plugin answers with a number, so "20.0"
+  // and "20" are the same setting and must not count as a change.
+  function same(field, one, other) {
+    if (one === other) { return true; }
+    return field.type === "number" && one !== "" && other !== "" && Number(one) === Number(other);
+  }
+
+  // The key is never sent back, so its box is a change whenever anything is typed into it.
+  function changed(field) {
+    if (field.type === "password") { return field.value !== ""; }
+    return !same(field, current(field), applied[field.name]);
+  }
+
+  function applyButton(panel) { return panel.querySelector("button[type=submit]:not([name])"); }
+
+  var panels = Array.prototype.filter.call(form.querySelectorAll("fieldset"), applyButton);
+  var notes = panels.map(function (panel) {
+    var button = applyButton(panel);
+    var note = document.createElement("span");
+    note.className = "pending";
+    note.textContent = "Not applied yet";
+    note.hidden = true;
+    button.parentNode.insertBefore(note, button.nextSibling);
+    return note;
   });
 
-  function post(body) {
-    ask({ method: "POST", body: body, headers: {
+  function mark() {
+    panels.forEach(function (panel, index) {
+      var waiting = named(panel).some(changed);
+      applyButton(panel).disabled = !waiting;
+      notes[index].hidden = !waiting;
+    });
+  }
+
+  named(form).forEach(function (field) { applied[field.name] = current(field); });
+  mark();
+  form.addEventListener("input", mark);
+  form.addEventListener("change", mark);
+
+  // Each Apply applies its own panel and nothing else, and every other button sends only what it
+  // is for. They used to post the whole form, so pressing Apply under Image also applied whatever
+  // was half changed under Timelapse, and Calibrate now applied both.
+  form.addEventListener("submit", function (event) {
+    if (givingUp || !event.submitter) { return; }
+    var button = event.submitter;
+    var panel = button.closest("fieldset");
+    if (!button.name && !panel) { return; }
+    event.preventDefault();
+    if (button.name) { command(button); } else { applyPanel(panel); }
+  });
+
+  // Enter in a field applies the panel the field is in. Left to the browser it would press the
+  // first button in the form, which is the Image panel's Apply wherever the field was.
+  form.addEventListener("keydown", function (event) {
+    var field = event.target;
+    if (givingUp || event.key !== "Enter" || field.tagName !== "INPUT") { return; }
+    event.preventDefault();
+    var panel = field.name ? field.closest("fieldset") : null;
+    var button = panel ? applyButton(panel) : null;
+    if (button && !button.disabled) { applyPanel(panel); }
+  });
+
+  // A number goes up as a number, because that is what the plugin checks a rotation against. An
+  // empty box goes up empty, which the plugin reads as "leave it as it was".
+  function valueOf(field) {
+    if (field.type === "checkbox") { return field.checked; }
+    var numeric = field.type === "number" || field.tagName === "SELECT";
+    if (numeric && field.value !== "" && isFinite(Number(field.value))) {
+      return Number(field.value);
+    }
+    return field.value;
+  }
+
+  function applyPanel(panel) {
+    var body = {};
+    named(panel).forEach(function (field) {
+      // An empty key box means "keep the saved key"; sent empty it would forget it.
+      if (field.type === "password" && field.value === "") { return; }
+      body[field.name] = valueOf(field);
+    });
+    pressed.name = "";
+    pressed.value = "";
+    clearsKey = "moonraker_api_key" in body;
+    send(body, panel);
+  }
+
+  function command(button) {
+    var body = {};
+    body[button.name] = button.value;
+    pressed.name = button.name;
+    pressed.value = button.value;
+    clearsKey = button.id === "forget-key";
+    send(body, null);
+  }
+
+  function send(body, panel) {
+    applying = panel;
+    polls = 0;
+    ask({ method: "POST", body: JSON.stringify(body), headers: {
       "Accept": "application/json",
-      "Content-Type": "application/x-www-form-urlencoded"
+      "Content-Type": "application/json"
     }});
   }
 
@@ -535,6 +643,8 @@ CONTROL_SCRIPT = """<script>
     }).then(show).catch(giveUp);
   }
 
+  // Posts the whole form, the way the page works without this script. Only for when the plugin
+  // did not answer as expected, and a reload that applies everything beats a page that pretends.
   function giveUp() {
     givingUp = true;
     form.submit();
@@ -546,6 +656,10 @@ CONTROL_SCRIPT = """<script>
     showStream(state);
     showCost(state);
     forgetSecrets(state);
+    if (gainNote && typeof state.gain_note === "string" && gainNote.innerHTML !== state.gain_note) {
+      gainNote.innerHTML = state.gain_note;
+    }
+    mark();
     // A calibration is applied by the capture thread between two frames, so the answer to the post
     // itself is always "requested". Ask again a few times, briefly, for what actually happened.
     if (state.pending && polls < 8) {
@@ -554,22 +668,30 @@ CONTROL_SCRIPT = """<script>
     }
   }
 
-  // The reply carries the whole of the settings, and this page used to throw all of it away
-  // except the status line. That was harmless while every change came from the form itself, and
-  // stopped being harmless the moment a button changed something the form was showing: "hold what
-  // I see now" switched the plugin to a fixed range, the page went on saying "follow the scene",
-  // and the next Apply posted what it was saying and undid the hold. A page that posts in the
-  // background has to accept the answer it gets back.
+  // The reply carries the whole of the settings, and the page has to accept the answer it gets
+  // back: "hold what I see now" switches the plugin to a fixed range, and a page still saying
+  // "follow the scene" would undo the hold at the next Apply. What the answer must not do is wipe
+  // out a change being made in another panel. So a field takes the answer when it is in the panel
+  // just applied, or when the plugin's value is not the one it had before, which is a button
+  // having changed it. Otherwise it keeps what it shows, and only what it is compared with moves.
   function reflect(state) {
-    for (var index = 0; index < form.elements.length; index += 1) {
-      var field = form.elements[index];
-      // Whatever is being typed into belongs to the person typing, not to the last reply.
-      if (!field.name || !(field.name in state) || field === document.activeElement) { continue; }
-      if (field.type === "checkbox") {
-        field.checked = !!state[field.name];
-      } else {
-        choose(field, state[field.name]);
-      }
+    named(form).forEach(function (field) {
+      if (field.type === "password" || !(field.name in state)) { return; }
+      var mine = current(field);
+      put(field, state[field.name]);
+      var saved = current(field);
+      var answered = applying !== null && applying.contains(field);
+      if (!answered && same(field, saved, applied[field.name])) { put(field, mine); }
+      applied[field.name] = saved;
+    });
+    applying = null;
+  }
+
+  function put(field, value) {
+    if (field.type === "checkbox") {
+      field.checked = !!value;
+    } else if (!(field.type === "number" && same(field, field.value, String(value)))) {
+      choose(field, value);
     }
   }
 
@@ -607,9 +729,10 @@ CONTROL_SCRIPT = """<script>
     var forget = document.getElementById("forget-key");
     var saved = !!state.moonraker_api_key_set;
     if (key) {
-      key.value = "";
+      if (clearsKey) { key.value = ""; }
       key.placeholder = saved ? "Saved" : "Not set";
     }
+    clearsKey = false;
     if (forget) { forget.disabled = !saved; }
   }
 
@@ -682,15 +805,23 @@ def option(value: str, label: str, selected: bool) -> str:
     return f'<option value="{value}"{" selected" if selected else ""}>{label}</option>'
 
 
+def gain_note(settings: dict) -> str:
+    """The line under the Timelapse section about the camera's gain, or nothing when there is none.
+
+    Sent with the settings as well as drawn into the page. It was only drawn, so ticking or
+    unticking the switch and applying left it saying what the page had said when it loaded.
+    """
+
+    if not (settings["timelapse"] and settings["gain"] == GAIN_HIGH):
+        return ""
+    if settings["timelapse_auto_gain"]:
+        return AUTO_GAIN_NOTE.format(celsius=settings["timelapse_auto_gain_celsius"])
+    return HIGH_SENSITIVITY_WARNING
+
+
 def timelapse_fields(settings: dict) -> dict:
     """The Timelapse section's placeholders, from the settings a page may be shown."""
 
-    warned = settings["timelapse"] and settings["gain"] == GAIN_HIGH
-    note = (
-        AUTO_GAIN_NOTE.format(celsius=settings["timelapse_auto_gain_celsius"])
-        if settings["timelapse_auto_gain"]
-        else HIGH_SENSITIVITY_WARNING
-    )
     return {
         "timelapse": " checked" if settings["timelapse"] else "",
         "keep_minimum": MIN_TIMELAPSE_KEEP,
@@ -707,7 +838,7 @@ def timelapse_fields(settings: dict) -> dict:
         "key_placeholder": "Saved" if settings["moonraker_api_key_set"] else "Not set",
         "forget_key_command": FORGET_KEY_ACTION,
         "forget_disabled": "" if settings["moonraker_api_key_set"] else " disabled",
-        "gain_warning": note if warned else "",
+        "gain_note": gain_note(settings),
         "auto_gain_minimum": f"{MIN_AUTO_GAIN_CELSIUS:.0f}",
         "auto_gain_maximum": f"{MAX_AUTO_GAIN_CELSIUS:.0f}",
         "auto_gain_celsius": f"{settings['timelapse_auto_gain_celsius']:.0f}",

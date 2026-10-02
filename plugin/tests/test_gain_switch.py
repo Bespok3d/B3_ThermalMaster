@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The timelapse's switch to wide range when something in view passes a temperature.
 
-High sensitivity reads nothing above about 150 C, so a nozzle in view is a flat 150 in every
+High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low in every
 layer of a clip. While a print is recorded, the first frame past the threshold switches the camera
 to wide range for the rest of that print, one way, without changing the gain somebody chose; no
 frame is taken for five seconds after, while the camera recalibrates; and the chosen gain comes

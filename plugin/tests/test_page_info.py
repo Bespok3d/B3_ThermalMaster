@@ -47,7 +47,7 @@ def test_the_explanations_are_no_longer_at_the_foot_of_the_page(thermal_streamer
 
     assert "Calibration closes the camera" not in foot
     assert "Emissivity is how much" not in foot
-    assert "Changes take effect immediately" in foot
+    assert "Each Apply applies its own section" in foot
 
 
 def test_the_version_is_the_manifests(thermal_streamer):

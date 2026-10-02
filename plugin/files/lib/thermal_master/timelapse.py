@@ -110,7 +110,7 @@ class TimelapseSettings:
     # list on the settings page always says, and a name without it sorts beside the firmware's.
     timelapse_scale_label: bool = False
     timelapse_scale_in_name: bool = False
-    # High sensitivity reads nothing above about 150 C, so a nozzle in view is a flat 150 in every
+    # High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low in every
     # layer. While a print is being recorded, the first frame with something past this, in the
     # temperature the readout shows, switches the camera to wide range for the rest of the print.
     # A setting rather than a constant because only the P1's ceiling has been measured.

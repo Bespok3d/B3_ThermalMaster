@@ -264,7 +264,7 @@ chosen now, and puts it back on the Timelapse page in place of the old copy, wit
 the printer's own clip a second time. Only the two newest prints keep their temperatures.
 
 **If the nozzle is in view,** the timelapse switches the camera to wide range by itself. High
-sensitivity reads nothing above about 150 C, so a nozzle in view would be a flat 150 C in every
+sensitivity is not accurate above about 150 C, so a nozzle in view would read too low in every
 layer. While a print is being recorded, the first frame with something past 145 C, or the
 temperature you set beside "Switch to wide range when something passes", switches the camera to
 wide range for the rest of that print. The gain chosen under Camera is not changed, and comes back

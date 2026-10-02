@@ -542,6 +542,41 @@ def test_the_settings_mirror_carries_the_same_device_sentence(thermal_streamer):
         server.server_close()
 
 
+def test_the_gain_note_follows_the_switch_without_a_reload(thermal_streamer):
+    """The note under the Timelapse section comes back with every answer, not only with the page."""
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+    server = thermal_streamer.ThermalServer(
+        ("127.0.0.1", 0), thermal_streamer.LatestFrame(), store,
+        thermal_streamer.build_palettes(), thermal_streamer.DeviceController(store),
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    connection = connect_to(server)
+
+    def sent(change: dict) -> dict:
+        body = json.dumps({"gain": "high", **change})
+        connection.request(
+            "POST", "/settings", body,
+            {"Content-Type": "application/json", "Content-Length": str(len(body)),
+             "Accept": "application/json"},
+        )
+        return json.loads(connection.getresponse().read())
+
+    try:
+        unticked = sent({"timelapse": True, "timelapse_auto_gain": False})
+        ticked = sent({"timelapse_auto_gain": True})
+        off = sent({"timelapse": False})
+
+        assert "reads too low. Wide range is under Camera" in unticked["gain_note"]
+        assert "switches to wide range" in ticked["gain_note"]
+        assert off["gain_note"] == ""
+        assert ticked["gain_note"] == thermal_streamer.gain_note(ticked)
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+
+
 def test_the_frame_endpoint_waits_for_a_frame(serving):
     server, _ = serving
     connection = connect_to(server)
