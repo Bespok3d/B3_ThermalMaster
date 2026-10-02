@@ -567,7 +567,7 @@ def test_the_gain_note_follows_the_switch_without_a_reload(thermal_streamer):
         ticked = sent({"timelapse_auto_gain": True})
         off = sent({"timelapse": False})
 
-        assert "reads too low. Wide range is under Camera" in unticked["gain_note"]
+        assert "stops there. Wide range is under Camera" in unticked["gain_note"]
         assert "switches to wide range" in ticked["gain_note"]
         assert off["gain_note"] == ""
         assert ticked["gain_note"] == thermal_streamer.gain_note(ticked)

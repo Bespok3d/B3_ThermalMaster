@@ -64,9 +64,13 @@ DEFAULT_TIMELAPSE_LOW_CELSIUS = 20.0
 DEFAULT_TIMELAPSE_HIGH_CELSIUS = 120.0
 
 
-# Where the automatic switch to wide range happens, and what it may be set to. 145 C is a margin
-# below the 150 C the P1's high sensitivity tops out at; the bounds only keep a typed number sane.
-DEFAULT_AUTO_GAIN_CELSIUS = 145.0
+# Where the automatic switch to wide range happens, and what it may be set to. The P1's high
+# sensitivity reads nothing above 207.2 C, at the default emissivity: measured on the U1 with a
+# nozzle at 280 and 300 C, where wide range went on to 215 and 228. Below that the two gains agree
+# within about 2 C, and high sensitivity is the better of the two for everything cooler, so the
+# switch waits. 195 C leaves a margin, so a reading on its way up switches before it is stuck at
+# the cap. The bounds only keep a typed number sane.
+DEFAULT_AUTO_GAIN_CELSIUS = 195.0
 MIN_AUTO_GAIN_CELSIUS = 30.0
 MAX_AUTO_GAIN_CELSIUS = 500.0
 
@@ -110,10 +114,10 @@ class TimelapseSettings:
     # list on the settings page always says, and a name without it sorts beside the firmware's.
     timelapse_scale_label: bool = False
     timelapse_scale_in_name: bool = False
-    # High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low in every
-    # layer. While a print is being recorded, the first frame with something past this, in the
-    # temperature the readout shows, switches the camera to wide range for the rest of the print.
-    # A setting rather than a constant because only the P1's ceiling has been measured.
+    # High sensitivity reads nothing above about 205 C, so a hotter nozzle in view stops there in
+    # every layer. While a print is being recorded, the first frame with something past this, in
+    # the temperature the readout shows, switches the camera to wide range for the rest of the
+    # print. A setting rather than a constant because only one P1 has been measured.
     timelapse_auto_gain: bool = True
     timelapse_auto_gain_celsius: float = DEFAULT_AUTO_GAIN_CELSIUS
     moonraker_api_key: str = ""

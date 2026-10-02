@@ -200,7 +200,7 @@ def run_timelapse_checks(page, store) -> list:
     # The note under the panel was only ever drawn with the page, so it went on promising the
     # switch after the box was unticked (found on the Pi).
     checks.append(("the note says the gain stays",
-                   "reads too low. Wide range is under Camera" in page.inner_text("#gain-note"), True))
+                   "stops there. Wide range is under Camera" in page.inner_text("#gain-note"), True))
     page.check("input[name=timelapse_auto_gain]")
     page.click("fieldset#timelapse button[type=submit]:not([name])")
     page.wait_for_timeout(SETTLE_MILLISECONDS)

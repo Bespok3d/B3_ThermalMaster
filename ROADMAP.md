@@ -2197,7 +2197,8 @@ Sketched on 2026-09-28 and planned on 2026-09-29, below as it was planned. Steps
 colour comparison of step 4 are built and were tried on the Pi 4 and the U1 on 2026-09-29 and
 2026-09-30, released together in 0.28.6 with four colour scales, clips with their own readout, and
 no wait for a U1 print's own clip when the printer is not making one. Step 3, the automatic gain
-switch, is built as 0.29.0 and 0.29.1 and was tried on the Pi 4; the U1 run is still to do.
+switch, is built as 0.29.0 and 0.29.1 and was tried on the Pi 4 and the U1, where the camera was
+measured to choose where it switches.
 
 **Decided so far.**
 
@@ -2639,9 +2640,10 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
-   **Built on 2026-09-30 as 0.29.0, tried on the Pi 4, not yet on the U1.** Only while the timelapse records a
-   print; the threshold a setting (`timelapse_auto_gain_celsius`, 145 C by default, 30 to 500),
-   since only the P1's 150 C ceiling has been measured and a P3 or a later camera may differ. The
+   **Built on 2026-09-30 as 0.29.0 and tried on the Pi 4 and the U1; switching at 195 C since
+   0.29.1, from the measurements below.** Only while the timelapse records a print; the threshold
+   a setting (`timelapse_auto_gain_celsius`, 195 C by default, 30 to 500), since only one P1 has
+   been measured and a P3 or a later camera may differ. The
    frame tap, which already sees every frame the camera sends, compares each frame's hottest count
    with the threshold, converted once with the emissivity so it means what the readout shows, and
    only while armed and in high sensitivity. The first frame past it asks `DeviceController` for
@@ -2654,11 +2656,53 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 
    Tried on the Pi 4 with a P1. The switch showed in the live view as it happened, at layer 0, 35 s
    after the print started, at 145 C. The clip made again with the readout drawn in showed the
-   nozzle at 150 to 168 C, above the high sensitivity ceiling, the room at 9 to 12 C, and a knee
+   nozzle at 150 to 168 C, above high sensitivity's rated 150 C, the room at 9 to 12 C, and a knee
    ruler from 13.8 to 168.4 C bending at 54.2 C, with no frozen or blank layer. A Klipper shutdown
    in the middle of a second print ended its recording as Interrupted, "switched to wide range at
    layer 1", and the Camera panel's line lost the wide range sentence, so the override was cleared.
-   Still to try: the U1, and a print with the box unticked.
+   With the box unticked, a third print stayed in high sensitivity from start to end, with no
+   override and 12 clean layers, and one layer read 160.8 C: high sensitivity reads past its
+   rated 150 C.
+
+   Tried on the U1 on 2026-10-02 with the box ticked, at 145 C. The print switched 230.7 s after
+   it started, at layer 0, during the routine before the first layer; the temperatures kept show
+   the first record in high sensitivity and the other 101 in wide range, the next one 9.8 s after
+   the switch reading 169.0 C with the nozzle at the right edge of the picture, under the ruler,
+   which hid its marker. Through the print the hottest pixel read 104 to 131 C, most likely the
+   silicone sock rather than the tip, which is smaller than a pixel and bare metal. The clip was
+   visibly grainier than in high sensitivity, and its colours, fixed at 13.5 to 38.5 C when the
+   print started, made the bed, the part and the nozzle one flat colour from about layer 10.
+
+   Measured on the U1 the same day, to choose where it switches. A 60 x 60 x 0.6 mm patch of
+   black PLA printed in the middle of the bed and left there, read with a box in the viewer, both
+   gains 15 s or more after a switch; the room 24.4 to 24.5 C on a thermometer:
+
+   | Bed reports | High, patch | Wide, patch | High, coldest pixel | Wide, coldest pixel |
+   | --- | --- | --- | --- | --- |
+   | 30 to 31 C | 29.7 C | 24.4 C | 21.5 C | 11.6 C |
+   | 45 C | 44.0 C, bare bed | | | |
+   | 60 C | 58.7 C | 60.1 C | 24.7 C | 15.5 C |
+
+   And the nozzle, set by hand with a sock on, held close to the camera, the hottest pixel:
+
+   | Nozzle set | High | Wide |
+   | --- | --- | --- |
+   | 240 C | 187.5 C | 189.5 C |
+   | 260 C | 201.5 C | 203.5 C |
+   | 280 C | 207.2 C | 215.5 C |
+   | 300 C | 207.2 C | 228.5 C |
+
+   High sensitivity reads about 1 C under the bed throughout, which is what a surface on a heated
+   bed does, and its coldest pixel matched the thermometer within 0.3 C. Wide range's error moves
+   with temperature, about right at 60 C and 5 to 10 C low near the room, so it is not an offset
+   to subtract; the driver converts counts the same way in both gains, since the camera sends
+   them in the same unit, so the error is the camera's. High sensitivity stops at 207.2 C at
+   emissivity 0.95, a raw count of 30410 or 202.0 C before the correction, and agrees with wide
+   range within about 2 C below that. So high sensitivity is the better gain for everything but a
+   nozzle past about 200 C, and 0.29.1 switches at 195 C: past every PLA reading on the U1, 169 C
+   in a print and 194 C held against the camera, and before a reading on its way up is stuck at
+   the cap. Wide range only earns its noise and its cool readings for high temperature
+   materials. The ruler hiding the hottest marker at the right edge is for later.
 
    Found on the Pi and fixed in 0.29.1: the note under the Timelapse panel was only drawn with the
    page, so it went on saying the camera would switch after the box was unticked until a reload;
@@ -2779,8 +2823,9 @@ What is left, in the order it is worth doing:
 - **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
   only the channel changed.
 - **Phase 9's remainder**, in section 7:
-  - Step 3, the automatic gain switch, built as 0.29.0 and 0.29.1 and tried on the Pi 4: the U1
-    run, and a print with the box unticked.
+  - Step 3, the automatic gain switch: built and tried on both printers, and switching at 195 C
+    since 0.29.1. A print with a nozzle past 200 C, to see it switch at the new default.
+  - The hottest pixel's marker is hidden under the ruler at the right edge of the picture.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
   - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
     layer clips the bed warmed past it, which the knee handles and the stretch does not.

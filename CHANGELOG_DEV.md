@@ -24,6 +24,9 @@ Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max. Its public 
 - Found on the Ender 2 Pro Max: the note under the Timelapse panel kept saying the camera would
   switch after the box was unticked, until the page was reloaded, and an Apply applied every
   panel. Fixed in 0.29.1.
+- Measured on the U1: high sensitivity reads up to 207.2 C, not 150, and agrees with wide range
+  within about 2 C below that, while wide range reads the room 5 to 10 C low. 0.29.1 switches at
+  195 C instead of 145.
 
 ## Test builds for 0.28.6, on the test/color-bar branch
 

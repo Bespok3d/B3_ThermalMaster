@@ -89,8 +89,9 @@ RECORDING_STATE_DESCRIPTIONS = {
 
 
 HIGH_SENSITIVITY_WARNING = (
-    '<p class="status">The camera is in high sensitivity, which is not accurate above about 150 C, '
-    "so a nozzle in view reads too low. Wide range is under Camera, or tick the switch above.</p>"
+    '<p class="status">The camera is in high sensitivity, which reads nothing above about 205 C, '
+    "so a hotter nozzle in view stops there. Wide range is under Camera, or tick the switch "
+    "above.</p>"
 )
 
 
@@ -210,14 +211,16 @@ INFO_TEXTS = {
     ),
     "auto_gain": (
         "the switch to wide range",
-        "High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low "
-        "in every layer. With this ticked, while a print is being recorded, the first frame with "
-        "something past the temperature below switches the camera to wide range for the rest of "
-        "the print, and the gain chosen under Camera comes back when the print ends. No frame is "
-        "taken for five seconds after the switch, while the camera recalibrates. It usually "
-        "happens as the nozzle heats, before the first layer. The temperature is the one the "
-        "readout shows; set it at or above what high sensitivity can read and it never switches. "
-        "Wide range reads the room a few degrees cooler and the bed a degree or two warmer.",
+        "High sensitivity reads nothing above about 205 C, so a hotter nozzle in view stops "
+        "there in every layer. With this ticked, while a print is being recorded, the first frame "
+        "with something past the temperature below switches the camera to wide range for the "
+        "rest of the print, and the gain chosen under Camera comes back when the print ends. No "
+        "frame is taken for five seconds after the switch, while the camera recalibrates. It "
+        "waits until it is needed: below about 200 C the two gains agree on a nozzle, and for "
+        "everything cooler high sensitivity is the more accurate. Wide range reads the room 5 to "
+        "10 C low and its picture is noisier. The temperature is the one the readout shows; 195 C "
+        "switches before high sensitivity runs out, and one at or above what it can read never "
+        "switches.",
     ),
     "clip_readout": (
         "what is drawn into the clips",

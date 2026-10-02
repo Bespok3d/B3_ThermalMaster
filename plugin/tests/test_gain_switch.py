@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """The timelapse's switch to wide range when something in view passes a temperature.
 
-High sensitivity is not accurate above about 150 C, so a nozzle in view reads too low in every
+High sensitivity reads nothing above about 205 C, so a hotter nozzle in view stops there in every
 layer of a clip. While a print is recorded, the first frame past the threshold switches the camera
 to wide range for the rest of that print, one way, without changing the gain somebody chose; no
 frame is taken for five seconds after, while the camera recalibrates; and the chosen gain comes
@@ -123,7 +123,7 @@ def test_the_threshold_is_a_setting_kept_in_range(thermal_streamer):
     current = thermal_streamer.TimelapseSettings()
 
     assert current.timelapse_auto_gain is True
-    assert current.timelapse_auto_gain_celsius == 145.0
+    assert current.timelapse_auto_gain_celsius == 195.0
     assert thermal_streamer.clamped_threshold("120", 145.0) == 120.0
     assert thermal_streamer.clamped_threshold("5", 145.0) == thermal_streamer.MIN_AUTO_GAIN_CELSIUS
     assert thermal_streamer.clamped_threshold(9000, 145.0) == (
@@ -209,7 +209,9 @@ def test_a_recorded_print_arms_the_switch_and_a_hot_frame_switches_it_for_the_pr
     service.step()
 
     (recording,) = thermal_streamer.recordings(tmp_path)
-    assert threshold == pytest.approx(thermal_streamer.raw_for_celsius(145.0), abs=0.5)
+    assert threshold == pytest.approx(
+        thermal_streamer.raw_for_celsius(thermal_streamer.DEFAULT_AUTO_GAIN_CELSIUS), abs=0.5
+    )
     assert gain == thermal_streamer.GAIN_HIGH
     assert overrides[0] == thermal_streamer.GAIN_LOW
     assert recording.gain_switch["layer"] == 0

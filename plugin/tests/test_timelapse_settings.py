@@ -142,8 +142,8 @@ def test_the_page_warns_about_high_sensitivity_only_with_the_timelapse_on(
     off = thermal_streamer.render_control_page(shown, ["ironbow"])
     on = thermal_streamer.render_control_page({**shown, "timelapse": True}, ["ironbow"])
 
-    assert "reads too low. Wide range is under Camera" not in off
-    assert "reads too low. Wide range is under Camera" in on
+    assert "stops there. Wide range is under Camera" not in off
+    assert "stops there. Wide range is under Camera" in on
 
 
 def test_with_the_switch_on_the_page_says_what_will_happen_instead(thermal_streamer, settings_dict):
@@ -151,7 +151,7 @@ def test_with_the_switch_on_the_page_says_what_will_happen_instead(thermal_strea
 
     page = thermal_streamer.render_control_page(shown, ["ironbow"])
 
-    assert "reads too low. Wide range is under Camera" not in page
+    assert "stops there. Wide range is under Camera" not in page
     assert "when something passes 140 C" in page
 
 
