@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 import time
+from collections.abc import Callable
 
 import numpy as np
 
@@ -63,6 +64,22 @@ DEFAULT_TIMELAPSE_LOW_CELSIUS = 20.0
 DEFAULT_TIMELAPSE_HIGH_CELSIUS = 120.0
 
 
+# Where the automatic switch to wide range happens, and what it may be set to. 145 C is a margin
+# below the 150 C the P1's high sensitivity tops out at; the bounds only keep a typed number sane.
+DEFAULT_AUTO_GAIN_CELSIUS = 145.0
+MIN_AUTO_GAIN_CELSIUS = 30.0
+MAX_AUTO_GAIN_CELSIUS = 500.0
+
+
+# How long after the gain changes no frame is taken for the timelapse: the camera fires its shutter
+# 3.7 s after a switch, measured twice on the P1 (ROADMAP Phase 9), and the picture jumps with it.
+GAIN_SETTLE_SECONDS = 5.0
+
+
+# How often a wait for a layer's frame looks again at whether a gain switch has lengthened it.
+SETTLE_CHECK_SECONDS = 0.5
+
+
 @dataclasses.dataclass(frozen=True)
 class TimelapseSettings:
     """What the timelapse does, saved with the rest of the settings.
@@ -93,6 +110,12 @@ class TimelapseSettings:
     # list on the settings page always says, and a name without it sorts beside the firmware's.
     timelapse_scale_label: bool = False
     timelapse_scale_in_name: bool = False
+    # High sensitivity reads nothing above about 150 C, so a nozzle in view is a flat 150 in every
+    # layer. While a print is being recorded, the first frame with something past this, in the
+    # temperature the readout shows, switches the camera to wide range for the rest of the print.
+    # A setting rather than a constant because only the P1's ceiling has been measured.
+    timelapse_auto_gain: bool = True
+    timelapse_auto_gain_celsius: float = DEFAULT_AUTO_GAIN_CELSIUS
     moonraker_api_key: str = ""
 
     def public(self) -> dict:
@@ -128,7 +151,18 @@ TIMELAPSE_SWITCHES = (
     "timelapse_spots",
     "timelapse_scale_label",
     "timelapse_scale_in_name",
+    "timelapse_auto_gain",
 )
+
+
+def clamped_threshold(value: object, current: float) -> float:
+    """The temperature the gain switches at, pulled into range rather than refused."""
+
+    try:
+        posted = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return current
+    return min(max(posted, MIN_AUTO_GAIN_CELSIUS), MAX_AUTO_GAIN_CELSIUS)
 
 
 def clamped_keep(value: object, current: int) -> int:
@@ -283,6 +317,47 @@ class FrameTap:
         self._wanted = False
         self._frame: CapturedFrame | None = None
         self._ready = threading.Condition()
+        # The gain switch's watch, set and cleared by the timelapse service: the raw count a frame
+        # in `_watched_gain` must reach, and what to call when one does. Read without the lock,
+        # like `_wanted`, because it is looked at on every frame.
+        self._threshold: float | None = None
+        self._watched_gain: str | None = None
+        self._on_hot: Callable[[], None] | None = None
+        self._last_gain: str | None = None
+        self._settle_until = 0.0
+
+    def arm(
+        self, threshold: float | None, gain: str | None = None,
+        on_hot: Callable[[], None] | None = None,
+    ) -> None:
+        """Watch frames taken in this gain for a count at or past `threshold`, or stop watching.
+
+        The first such frame calls `on_hot`, once, and the watch ends with it: the switch is one
+        way for the print. None stops watching.
+        """
+
+        self._on_hot = on_hot
+        self._watched_gain = gain
+        self._threshold = threshold
+
+    def settling(self) -> bool:
+        """Whether the gain has just changed and the picture is not to be trusted yet."""
+
+        return time.monotonic() < self._settle_until
+
+    def _watch(self, counts: np.ndarray, gain: str | None) -> None:
+        if gain != self._last_gain:
+            # A change between two gains, not a camera coming up in one, is the switch the
+            # shutter follows.
+            if gain is not None and self._last_gain is not None:
+                self._settle_until = time.monotonic() + GAIN_SETTLE_SECONDS
+            self._last_gain = gain
+        threshold = self._threshold
+        if threshold is None or gain != self._watched_gain or float(counts.max()) < threshold:
+            return
+        self._threshold = None
+        if self._on_hot is not None:
+            self._on_hot()
 
     def request(self) -> None:
         """Ask for the next frame. A request not yet answered is simply asked again."""
@@ -299,7 +374,8 @@ class FrameTap:
     def offer(self, counts: np.ndarray, gain: str | None) -> None:
         """Called by the capture loop with every frame it reads."""
 
-        if not self.asked():
+        self._watch(counts, gain)
+        if not self.asked() or self.settling():
             return
         with self._ready:
             # Asked again under the lock: the answer outside it can be a frame out of date.
@@ -311,15 +387,20 @@ class FrameTap:
             self._ready.notify_all()
 
     def collect(self, timeout: float) -> CapturedFrame | None:
-        """The frame asked for, or None when none came in time and the camera is not sending."""
+        """The frame asked for, or None when none came in time and the camera is not sending.
+
+        A gain switch pushes the wait on by the time it takes to settle, so a layer that changes
+        just after one gets the first steady frame rather than being marked missing.
+        """
 
         deadline = time.monotonic() + timeout
         with self._ready:
             while self._frame is None:
+                deadline = max(deadline, self._settle_until + timeout)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                self._ready.wait(remaining)
+                self._ready.wait(min(remaining, SETTLE_CHECK_SECONDS))
             frame = self._frame
             self._frame = None
             self._wanted = False

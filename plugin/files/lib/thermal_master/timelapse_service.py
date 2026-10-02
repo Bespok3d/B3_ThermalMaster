@@ -15,6 +15,7 @@ case it is carried on.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import queue
 import threading
 import time
@@ -22,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .camera import GAIN_HIGH, GAIN_LOW
 from .clip import ClipInputs, make_clip
 from .moonraker import JobInfo, MoonrakerClient, MoonrakerRefusedError
 from .publish import Publisher, published_base
@@ -36,10 +38,12 @@ from .recording import (
     Retention,
     find_recording,
     free_space,
+    gain_switch_sentence,
     named_suffix,
     recordings,
     remove_recording,
 )
+from .temperature import raw_for_celsius
 from .timelapse import (
     INTERRUPTED,
     STOPPED,
@@ -56,6 +60,17 @@ from .timelapse import (
 
 if TYPE_CHECKING:
     from .settings import SettingsStore
+
+
+@functools.lru_cache(maxsize=4)
+def threshold_counts(celsius: float, emissivity: float) -> float:
+    """The raw count the gain switch waits for: the temperature, as the readout would show it.
+
+    Cached, because the conversion is a search through the driver's correction and the switch is
+    armed again at every look at the print.
+    """
+
+    return raw_for_celsius(celsius, emissivity)
 
 POLL_WHILE_PRINTING_SECONDS = 1.0
 
@@ -90,6 +105,9 @@ class TimelapseWiring:
     palettes: dict
     ffmpeg: str | None
     free: Callable[[Path], int] = free_space
+    # The camera's gain for this print, which wins over the stored one: the device controller's
+    # `override_gain`. Nothing by default, for a service with no camera behind it.
+    override_gain: Callable[[str | None], None] = lambda _gain: None
 
 
 def carried_on_by(recording: Recording, job: JobInfo | None, status: PrintStatus) -> bool:
@@ -120,6 +138,9 @@ class TimelapseService:
         self._settled = False
         self._low_disk = False
         self._pruned_keep: int | None = None
+        # Set on the capture thread by the frame tap when something passes the threshold, and
+        # noted on the recording by the next look at the print.
+        self._hot_at: float | None = None
         self._handlers: dict[type, Callable[[PrintEvent, PrintStatus], None]] = {
             PrintStarted: self._started,
             LayerReached: self._layer,
@@ -159,6 +180,7 @@ class TimelapseService:
         for event in self._tracker.update(status):
             self._handlers[type(event)](event, status)
         self._note_firmware(status)
+        self._switch_gain_when_hot(status)
         self._say(self._describe(status))
         return POLL_WHILE_PRINTING_SECONDS if status.active else POLL_WHILE_IDLE_SECONDS
 
@@ -361,10 +383,54 @@ class TimelapseService:
             return
         recording.note_firmware_timelapse(status.firmware_timelapse)
 
+    def _switch_gain_when_hot(self, status: PrintStatus) -> None:
+        """The automatic switch to wide range: watched for while a print is recorded, one way.
+
+        The tap does the watching, on every frame; this arms it, notes a switch it saw on the
+        recording, and keeps the camera in wide range for a print noted as switched, which also
+        puts it back after the plugin restarts in the middle of one.
+        """
+
+        recording = self._recording
+        # Read and left: cleared when the print closes, so a switch seen between this read and
+        # a clear could not be lost.
+        hot_at = self._hot_at
+        settings = self._timelapse_settings()
+        if recording is None:
+            self._wiring.tap.arm(None)
+            return
+        if hot_at is not None and recording.gain_switch is None:
+            recording.note_gain_switch(
+                status.current_layer, hot_at, settings.timelapse_auto_gain_celsius
+            )
+        if recording.gain_switch is not None:
+            self._wiring.tap.arm(None)
+            self._wiring.override_gain(GAIN_LOW)
+        elif settings.timelapse_auto_gain:
+            threshold = threshold_counts(settings.timelapse_auto_gain_celsius, self._emissivity())
+            self._wiring.tap.arm(threshold, GAIN_HIGH, self._hot)
+        else:
+            self._wiring.tap.arm(None)
+
+    def _hot(self) -> None:
+        """The tap saw something past the threshold. Called on the capture thread, so it only
+        asks: the camera is switched between two frames, and the switch is noted by `step`.
+        """
+
+        self._wiring.override_gain(GAIN_LOW)
+        self._hot_at = time.time()
+
+    def _emissivity(self) -> float:
+        return self._wiring.settings_store.snapshot()[2].emissivity
+
     def _close(self, recording: Recording, state: str) -> None:
         recording.finish(state)
         if self._recording is recording:
             self._recording = None
+            # The print is over, so is its gain: the camera goes back to the one chosen.
+            self._wiring.tap.arm(None)
+            self._wiring.override_gain(None)
+            self._hot_at = None
         self._queue(recording.recording_id)
 
     def _newest_job(self) -> JobInfo | None:
@@ -405,4 +471,7 @@ class TimelapseService:
             )
         of_total = f" of {status.total_layer}" if status.total_layer else ""
         frames = int(recording.meta.get("frames") or 0)
-        return f"Recording {name}: layer {status.current_layer}{of_total}, {frames} frames so far."
+        return (
+            f"Recording {name}: layer {status.current_layer}{of_total}, {frames} frames so far."
+            + gain_switch_sentence(recording.gain_switch)
+        )

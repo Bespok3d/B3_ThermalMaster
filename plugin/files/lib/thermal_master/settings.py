@@ -48,6 +48,7 @@ from .timelapse import (
     VALID_TIMELAPSE_RANGES,
     TimelapseSettings,
     clamped_keep,
+    clamped_threshold,
 )
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
@@ -523,6 +524,9 @@ TIMELAPSE_JSON_SETTINGS: dict[str, TimelapseCheck] = {
         value, current.timelapse_range_high_celsius
     ),
     "moonraker_api_key": a_key,
+    "timelapse_auto_gain_celsius": lambda value, current: clamped_threshold(
+        value, current.timelapse_auto_gain_celsius
+    ),
     **{switch: lambda value, _current: bool(value) for switch in TIMELAPSE_SWITCHES},
 }
 
@@ -589,6 +593,7 @@ def timelapse_settings_from_form(form: dict, current: TimelapseSettings) -> Time
                 "timelapse_range_mode": posted("timelapse_range_mode"),
                 "timelapse_range_low_celsius": posted("timelapse_range_low_celsius"),
                 "timelapse_range_high_celsius": posted("timelapse_range_high_celsius"),
+                "timelapse_auto_gain_celsius": posted("timelapse_auto_gain_celsius"),
             },
             current,
         ),

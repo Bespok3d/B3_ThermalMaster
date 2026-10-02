@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.29.0
+
+- **The timelapse switches to wide range by itself when the nozzle is in view.** High
+  sensitivity reads nothing above about 150 C, so a nozzle was a flat 150 C in every layer. While a
+  print is recorded, the first frame with something past 145 C, or a temperature of your own,
+  switches the camera to wide range for the rest of the print, and the gain you chose comes back
+  when it ends. No frame is taken for five seconds after the switch, while the camera
+  recalibrates. On by default; untick it in the Timelapse panel to keep the gain as it is.
+
 ## 0.28.6
 
 - **Four colour scales**, under Range on the settings page: the stretch the picture has always

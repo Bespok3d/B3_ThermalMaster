@@ -61,6 +61,9 @@ class StandInTap:
     def request(self):
         self.requests += 1
 
+    def arm(self, threshold, gain=None, on_hot=None):
+        self.armed = (threshold, gain, on_hot)
+
     def collect(self, _timeout):
         if not self.present:
             return None

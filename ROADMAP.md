@@ -2577,11 +2577,17 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    page is open appears without a reload); and the clip holds its last frame for 2 s, through
    ffmpeg's `tpad=stop_mode=clone`, so the recording and the frame count stay one per layer.
 
-   **For later: Snapmaker's phone app.** Its "Time lapse camera" list shows the firmware's clips
-   by their name without the start stamp, and not the thermal one. A guess, not checked: it reads
-   names that end in the stamp, which ours do not, since `_thermal` comes after it, and it may want
-   a `_cover.jpg`. Cheap to test before any code: upload a renamed copy by hand, as the test pair
-   was, once named `<name>_thermal_<stamp>.mp4` and once with a `_cover.jpg` beside it.
+   **Snapmaker's phone app: tried on the U1 on 2026-09-30, and closed.** Its "Time lapse camera"
+   list shows the firmware's clips by their name without the start stamp, and not the thermal one.
+   The firmware writes three files per clip, `<base>.mp4`, `<base>.jpg` and `<base>_cover.jpg`,
+   the `.mp4` read-only to Moonraker. Four tries, each uploaded or moved through Moonraker and
+   undone afterwards: a `_cover.jpg` beside our clip; a copy named as the firmware names its own,
+   `<name>_thermal_<stamp>` with a `.jpg` and a `_cover.jpg`; our video moved in under the
+   firmware clip's own name, the original set aside and put back; and that swap again with the
+   app's cache cleared. None showed in the app, and with the swap Fluidd played our video while the
+   app still played the original. So the app lists and plays the firmware's own records, or copies
+   of them in Snapmaker's cloud, not the folder, and no name the plugin chooses reaches it. Not
+   worth pursuing: writing into the firmware's records is not something a camera plugin should do.
 
    **The colour bar, decided on 2026-09-30, released in 0.28.6.** Proposed on 2026-09-29: A, the bar spans
    the range where the colours change, with the triangles saying the scene goes past an end; B, a
@@ -2633,6 +2639,18 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
+   **Built on 2026-09-30 as 0.29.0, not yet run on hardware.** Only while the timelapse records a
+   print; the threshold a setting (`timelapse_auto_gain_celsius`, 145 C by default, 30 to 500),
+   since only the P1's 150 C ceiling has been measured and a P3 or a later camera may differ. The
+   frame tap, which already sees every frame the camera sends, compares each frame's hottest count
+   with the threshold, converted once with the emissivity so it means what the readout shows, and
+   only while armed and in high sensitivity. The first frame past it asks `DeviceController` for
+   the override, which the capture thread sends between two frames as it sends the gain, again
+   after a reconnect, and the chosen gain again once cleared. The tap takes no frame for 5 s after
+   it sees the gain change, and a layer's wait for a frame is pushed on by that window, so a switch
+   is never taken for a missing camera. The switch is noted on the recording with its layer, the
+   list and the Camera panel say so, a mid-print restart sets it again from the note, and every
+   way a print ends clears it. No band in the clip: the note in the list is enough.
 4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
    and a default chosen. Done for the colour scale, above, by making one print's clip again with
    each; the range mode stays "fixed once the print has started" by default.
@@ -2711,7 +2729,10 @@ clip with the current colours, no ten minute wait for a U1 print's own clip when
 it is not making one, the settings page's explanations behind an (i) beside each option, a page
 that fits a phone, and the version at its foot. All of it was tried on the U1; the timelapse also
 on the Pi 4. Built on the branch `feature/timelapse`, with the colour scales tried on
-`test/color-bar` as 0.28.1 to 0.28.5 (in `CHANGELOG_DEV.md`).
+`test/color-bar` as 0.28.1 to 0.28.5 (in `CHANGELOG_DEV.md`). Released on 2026-09-30, on the `rc`
+channel, and reinstalled from the store the same day: "Package was unsigned at install" still
+shows under a stage build of the Bespok3d app and not under the stable one, a question for its
+maintainer rather than for this plugin.
 
 What is left, in the order it is worth doing:
 
@@ -2743,7 +2764,6 @@ What is left, in the order it is worth doing:
   - Step 3, the automatic gain switch: wide range at 145 C in high sensitivity, one way for the
     print, no frame for 5 s after it (the camera's shutter follows a switch 3.7 s later, measured
     twice), and the chosen gain back at the end.
-  - Snapmaker's phone app, which does not list the thermal clip: try the two names by hand first.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
   - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
     layer clips the bed warmed past it, which the knee handles and the stretch does not.

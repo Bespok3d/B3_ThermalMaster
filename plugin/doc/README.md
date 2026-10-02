@@ -72,6 +72,7 @@ the next click. The plugin's version is at the foot of the page.
 | Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
 | Timelapse | Record one frame per layer | `timelapse` | `true`, `false`; off until you switch it on |
 | Timelapse | Keep | `timelapse_keep` | 1 to 100 prints, 10 by default |
+| Timelapse | Switch to wide range when something passes | `timelapse_auto_gain`, `timelapse_auto_gain_celsius` | `true`, `false`, on by default; 30 to 500 C, 145 by default |
 | Timelapse | Colours | `timelapse_range_mode` | `from-start`, `whole-print`, `fixed`, `as-displayed` |
 | Timelapse | From, To | `timelapse_range_low_celsius`, `timelapse_range_high_celsius` | degrees Celsius, used by `fixed` |
 | Timelapse | Drawn into the clips: ruler, crosshair, hottest and coldest pixel, placed spots | `timelapse_colorbar`, `timelapse_reticle`, `timelapse_hotspot`, `timelapse_coldspot`, `timelapse_spots` | `true`, `false`; all on by default |
@@ -262,8 +263,17 @@ still has its temperatures, draws its clip again with the palette, colour scale 
 chosen now, and puts it back on the Timelapse page in place of the old copy, without waiting for
 the printer's own clip a second time. Only the two newest prints keep their temperatures.
 
-**If the nozzle is in view,** set the gain to wide range under Camera. High sensitivity reads
-nothing above 150 C, so a nozzle shows as 150 C, and the panel says so while the timelapse is on.
+**If the nozzle is in view,** the timelapse switches the camera to wide range by itself. High
+sensitivity reads nothing above about 150 C, so a nozzle in view would be a flat 150 C in every
+layer. While a print is being recorded, the first frame with something past 145 C, or the
+temperature you set beside "Switch to wide range when something passes", switches the camera to
+wide range for the rest of that print. The gain chosen under Camera is not changed, and comes back
+when the print ends, however it ends. No frame is taken for five seconds after the switch, while
+the camera recalibrates, and a layer that changes then gets the first steady frame. It usually
+happens while the nozzle heats, before the first layer, and the list of timelapses says when it
+did. Wide range reads the room a few degrees cooler and the bed a degree or two warmer than high
+sensitivity does. Untick the box to keep the gain as it is; the panel then warns while the camera
+is in high sensitivity.
 
 **What is kept.** The number of prints you choose, 10 by default; older ones are deleted whole.
 The temperatures are kept only for the two newest prints, and if the printer's disk falls below

@@ -225,8 +225,11 @@ class DeviceController:
         self._shutter_requested = False
         self._shutter_state = SHUTTER_IDLE
         self._shutter_detail: str | None = None
-        self._applied_gain_revision: int | None = None
+        # What was last sent: the settings revision and the override it was sent under, so that
+        # either changing is enough to send again.
+        self._applied_gain: tuple[int, str | None] | None = None
         self._gain_in_effect: str | None = None
+        self._override_gain: str | None = None
 
     @property
     def streaming(self) -> bool:
@@ -246,6 +249,24 @@ class DeviceController:
         with self._lock:
             return self._gain_in_effect
 
+    @property
+    def gain_overridden(self) -> bool:
+        """Whether the gain in effect is one the timelapse chose for this print."""
+
+        with self._lock:
+            return self._override_gain is not None
+
+    def override_gain(self, gain: str | None) -> None:
+        """A gain for this print that wins over the stored one without changing it, or None.
+
+        The timelapse's switch to wide range when something in view passes the threshold, and back
+        when the print ends. Safe from any thread: like everything else here, it is only sent by
+        the capture thread, between two frames.
+        """
+
+        with self._lock:
+            self._override_gain = gain
+
     def request_shutter(self) -> None:
         """Ask for a calibration. Safe from any thread; nothing here touches the camera."""
 
@@ -257,7 +278,7 @@ class DeviceController:
         """A camera that has just been opened is in its own default gain, not the chosen one."""
 
         with self._lock:
-            self._applied_gain_revision = None
+            self._applied_gain = None
             self._gain_in_effect = None
 
     def apply(self, camera: P3Camera) -> None:
@@ -269,12 +290,14 @@ class DeviceController:
     def _apply_gain(self, camera: P3Camera) -> None:
         revision, settings = self._settings_store.camera_snapshot()
         with self._lock:
-            if revision == self._applied_gain_revision:
+            applying = (revision, self._override_gain)
+            if applying == self._applied_gain:
                 return
-        camera.set_gain_mode(GAIN_MODES[settings.gain])
+            gain = self._override_gain or settings.gain
+        camera.set_gain_mode(GAIN_MODES[gain])
         with self._lock:
-            self._applied_gain_revision = revision
-            self._gain_in_effect = settings.gain
+            self._applied_gain = applying
+            self._gain_in_effect = gain
 
     def _apply_shutter(self, camera: P3Camera) -> None:
         with self._lock:
@@ -300,6 +323,7 @@ class DeviceController:
         with self._lock:
             said: dict = {
                 "gain": self._gain_in_effect,
+                "gain_overridden": self._override_gain is not None,
                 "shutter": {"state": self._shutter_state, "detail": self._shutter_detail},
             }
         # Outside the lock: it reads the settings store, which has a lock of its own, and holding

@@ -29,12 +29,14 @@ from .camera import (
 from .colour_scale import SCALE_NAMES, VALID_COLOUR_SCALES
 from .cost import describe_cost
 from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
-from .recording import BYTES_PER_MEGABYTE
+from .recording import BYTES_PER_MEGABYTE, gain_switch_sentence
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 from .timelapse import (
     COPY_READOUT_ACTION,
     FORGET_KEY_ACTION,
+    MAX_AUTO_GAIN_CELSIUS,
     MAX_TIMELAPSE_KEEP,
+    MIN_AUTO_GAIN_CELSIUS,
     MIN_TIMELAPSE_KEEP,
     TIMELAPSE_SWITCHES,
     VALID_TIMELAPSE_RANGES,
@@ -88,7 +90,21 @@ RECORDING_STATE_DESCRIPTIONS = {
 
 HIGH_SENSITIVITY_WARNING = (
     '<p class="status">The camera is in high sensitivity, which reads nothing above 150 C, so a '
-    "nozzle in view shows as 150 C. Wide range is under Camera.</p>"
+    "nozzle in view shows as 150 C. Wide range is under Camera, or tick the switch above.</p>"
+)
+
+
+# Said instead while the automatic switch is on: nothing to fix, only what will happen.
+AUTO_GAIN_NOTE = (
+    '<p class="status">The camera is in high sensitivity. While a print is recorded, it switches '
+    "to wide range for the rest of the print when something passes {celsius:.0f} C.</p>"
+)
+
+
+# Added to the camera's line while the timelapse holds it in wide range for a print.
+OVERRIDDEN_GAIN_SENTENCE = (
+    " Wide range for this print, switched by the timelapse; the chosen gain comes back when the "
+    "print ends."
 )
 
 
@@ -191,6 +207,17 @@ INFO_TEXTS = {
         "Where Moonraker has a Timelapse page, as the U1 does and mainline Klipper does with "
         "moonraker-timelapse, each clip is copied there too, named after the printer's own clip "
         "of the print when it made one.",
+    ),
+    "auto_gain": (
+        "the switch to wide range",
+        "High sensitivity reads nothing above about 150 C, so a nozzle in view is a flat 150 in "
+        "every layer. With this ticked, while a print is being recorded, the first frame with "
+        "something past the temperature below switches the camera to wide range for the rest of "
+        "the print, and the gain chosen under Camera comes back when the print ends. No frame is "
+        "taken for five seconds after the switch, while the camera recalibrates. It usually "
+        "happens as the nozzle heats, before the first layer. The temperature is the one the "
+        "readout shows; set it at or above what high sensitivity can read and it never switches. "
+        "Wide range reads the room a few degrees cooler and the bed a degree or two warmer.",
     ),
     "clip_readout": (
         "what is drawn into the clips",
@@ -389,6 +416,14 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><span>Keep</span>
              <input type="number" name="timelapse_keep" min="{keep_minimum}" max="{keep_maximum}"
                     step="1" value="{timelapse_keep}"> prints</label>
+      <div class="field">
+        <label><input type="checkbox" name="timelapse_auto_gain"{timelapse_auto_gain}>
+               Switch to wide range when something passes</label>
+        {info_auto_gain}
+      </div>
+      <label><span>Passes</span>
+             <input type="number" name="timelapse_auto_gain_celsius" min="{auto_gain_minimum}"
+                    max="{auto_gain_maximum}" step="1" value="{auto_gain_celsius}"> C</label>
       <label><span>Colours</span>
              <select name="timelapse_range_mode">{timelapse_range_options}</select></label>
       <label><span>From</span>
@@ -639,7 +674,8 @@ def describe_device(status: dict | None) -> str:
         SHUTTER_DONE: "Last calibration completed.",
         SHUTTER_FAILED: f"Last calibration failed: {detail}",
     }
-    return said.get(shutter.get("state"), "Camera state is not available.")
+    line = said.get(shutter.get("state"), "Camera state is not available.")
+    return line + OVERRIDDEN_GAIN_SENTENCE if status.get("gain_overridden") else line
 
 
 def option(value: str, label: str, selected: bool) -> str:
@@ -650,6 +686,11 @@ def timelapse_fields(settings: dict) -> dict:
     """The Timelapse section's placeholders, from the settings a page may be shown."""
 
     warned = settings["timelapse"] and settings["gain"] == GAIN_HIGH
+    note = (
+        AUTO_GAIN_NOTE.format(celsius=settings["timelapse_auto_gain_celsius"])
+        if settings["timelapse_auto_gain"]
+        else HIGH_SENSITIVITY_WARNING
+    )
     return {
         "timelapse": " checked" if settings["timelapse"] else "",
         "keep_minimum": MIN_TIMELAPSE_KEEP,
@@ -666,7 +707,10 @@ def timelapse_fields(settings: dict) -> dict:
         "key_placeholder": "Saved" if settings["moonraker_api_key_set"] else "Not set",
         "forget_key_command": FORGET_KEY_ACTION,
         "forget_disabled": "" if settings["moonraker_api_key_set"] else " disabled",
-        "gain_warning": HIGH_SENSITIVITY_WARNING if warned else "",
+        "gain_warning": note if warned else "",
+        "auto_gain_minimum": f"{MIN_AUTO_GAIN_CELSIUS:.0f}",
+        "auto_gain_maximum": f"{MAX_AUTO_GAIN_CELSIUS:.0f}",
+        "auto_gain_celsius": f"{settings['timelapse_auto_gain_celsius']:.0f}",
         "copy_readout_command": COPY_READOUT_ACTION,
         **{switch: " checked" if settings[switch] else "" for switch in TIMELAPSE_SWITCHES},
     }
@@ -710,6 +754,7 @@ def clip_entry(summary: dict) -> str:
     if summary.get("scale"):
         named = SCALE_NAMES.get(str(summary["scale"]), str(summary["scale"]))
         error += f" Colour scale: {html.escape(named)}."
+    error += gain_switch_sentence(summary.get("gain_switch"))
     if summary.get("published_as"):
         error += " Also on the Timelapse page."
     elif summary.get("publish_error"):
