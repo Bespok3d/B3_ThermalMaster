@@ -2672,6 +2672,9 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    silicone sock rather than the tip, which is smaller than a pixel and bare metal. The clip was
    visibly grainier than in high sensitivity, and its colours, fixed at 13.5 to 38.5 C when the
    print started, made the bed, the part and the nozzle one flat colour from about layer 10.
+   While its clip waited for the printer's own, the panel read "On. Waiting for a print to start.
+   Waiting for the printer's own clip of this print before making ours.", two states in one
+   sentence; since 0.29.1 the clip being made is a line of its own and names its print.
 
    Measured on the U1 the same day, to choose where it switches. A 60 x 60 x 0.6 mm patch of
    black PLA printed in the middle of the bed and left there, read with a box in the viewer, both

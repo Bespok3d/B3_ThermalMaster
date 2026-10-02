@@ -185,9 +185,16 @@ class TimelapseService:
         return POLL_WHILE_PRINTING_SECONDS if status.active else POLL_WHILE_IDLE_SECONDS
 
     def status_line(self) -> str:
+        """What the timelapse is doing, and below it, while a clip is being made, which and how far.
+
+        Two lines rather than one sentence after another, because the two are about different
+        prints as often as not: "Waiting for a print to start" and "waiting for the printer's own
+        clip of this print" read as one contradiction when they shared a line.
+        """
+
         with self._lock:
             sentence, encoding, phase = self._sentence, self._encoding, self._clip_phase
-        return f"{sentence} {phase}" if encoding else sentence
+        return f"{sentence}\n{phase}" if encoding else sentence
 
     def summaries(self) -> list[dict]:
         busy = self._busy()
@@ -255,10 +262,13 @@ class TimelapseService:
 
         publishing = recording.has_frames and self._publisher.available()
         base = published_base(recording) if publishing else None
+        # Named, since by now a new print may be the one being recorded, or the clip may be one
+        # made again from the list for a print long finished.
+        name = recording.meta.get("filename") or "the last print"
         if publishing and base is None:
-            self._set_phase("Waiting for the printer's own clip of this print before making ours.")
+            self._set_phase(f"Waiting for the printer's own clip of {name} before making ours.")
             base = self._publisher.base_name(recording)
-        self._set_phase("Making a clip now.")
+        self._set_phase(f"Making the clip of {name} now.")
         outcome = make_clip(recording, self._clip_inputs())
         if base is not None and not outcome.get("error"):
             # The copies from before first: made with another scale, they have another name.

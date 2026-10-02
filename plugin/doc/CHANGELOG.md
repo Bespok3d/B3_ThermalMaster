@@ -15,6 +15,9 @@
   sends its panel only, the other buttons do only what they say, and Enter in a field applies the
   panel it is in. An Apply is greyed out until something in its panel changes, with "Not applied
   yet" beside it once something has.
+- **The Timelapse panel's status puts the clip being made on a line of its own**, naming its
+  print. It used to read "Waiting for a print to start. Waiting for the printer's own clip of this
+  print" as one sentence, and "this print" was the last one, or one made again from the list.
 
 ## 0.28.6
 

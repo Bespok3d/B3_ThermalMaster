@@ -292,6 +292,8 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
             border-radius: 4px; background: #d8752a; color: #14161a; font-weight: 600;
             cursor: pointer; }}
   .status {{ margin: 0.6rem 0 0; font-size: 0.8rem; }}
+  /* The timelapse's state, and the clip being made on a line of its own below it. */
+  #timelapse-status {{ white-space: pre-line; }}
   /* The way back. This page is reached from a link in the viewer, and in a Fluidd tile that link
      navigates the tile itself: there is no browser chrome around an iframe, so without this the
      only way back to the camera was to reload the dashboard. */

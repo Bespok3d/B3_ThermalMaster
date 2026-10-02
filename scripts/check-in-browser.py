@@ -168,7 +168,19 @@ def run_timelapse_refresh_checks(page, service) -> list:
     made.clip_path.write_bytes(b"another clip's bytes")
     service._say("On. Waiting for a print to start, a clip just made.")  # noqa: SLF001
     page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
-    return [("a finished clip appears without a reload", page.locator(".clip").count(), before + 1)]
+    appeared = page.locator(".clip").count()
+    # The clip being made goes on a line of its own, under what the timelapse is doing.
+    service._encoding = made.recording_id  # noqa: SLF001
+    service._set_phase("Making the clip of later.gcode now.")  # noqa: SLF001
+    page.wait_for_timeout(COST_POLL_WAIT_MILLISECONDS)
+    shown = page.inner_text("#timelapse-status").splitlines()
+    service._encoding = None  # noqa: SLF001
+    return [
+        ("a finished clip appears without a reload", appeared, before + 1),
+        ("a clip being made is a line of its own", shown,
+         ["On. Waiting for a print to start, a clip just made.",
+          "Making the clip of later.gcode now."]),
+    ]
 
 
 # The settings page asks for the status line every five seconds; a little over that.

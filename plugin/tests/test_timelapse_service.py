@@ -11,6 +11,7 @@ cut, and one left open by a crash while its print carries on.
 from __future__ import annotations
 
 import dataclasses
+import sys
 
 import fake_camera
 import pytest
@@ -333,3 +334,85 @@ def test_a_printer_with_nothing_to_say_leaves_nothing_noted(
     recording = recorded_with(thermal_streamer, service_for, tmp_path, (None, None, None))
 
     assert recording.firmware_timelapse is None
+
+
+class StandInPublisher:
+    """A Timelapse page with the printer's own clips, noting what the line said while waiting."""
+
+    def __init__(self, service):
+        self.service = service
+        self.said_while_waiting = None
+
+    def available(self):
+        return True
+
+    def base_name(self, _recording):
+        # No clip of its own turns up, so the wait ends with nothing to be named after.
+        self.said_while_waiting = self.service.status_line()
+
+
+def making_clips_seen(service, monkeypatch):
+    """Make clips through a stand-in encoder that notes what the line said while it ran."""
+
+    seen = []
+
+    def make_clip(_recording, _inputs):
+        seen.append(service.status_line())
+        return {"error": "a stand-in encoder"}
+
+    monkeypatch.setattr(sys.modules[type(service).__module__], "make_clip", make_clip)
+    return seen
+
+
+def finished(streamer, root, filename="cube.gcode"):
+    done = streamer.Recording.create(root, STARTED, None, filename)
+    done.append(streamer.LayerRecord(1, streamer.FRAME_RECORD, "high", STARTED,
+                                     fake_camera.thermal_frame()))
+    done.finish("complete")
+    return done
+
+
+def test_a_clip_being_made_is_a_line_of_its_own_that_names_its_print(
+    thermal_streamer, service_for, tmp_path, monkeypatch
+):
+    service, _ = service_for([thermal_streamer.PrintStatus("standby", None, None, None)])
+    service.step()
+    publisher = StandInPublisher(service)
+    service._publisher = publisher  # noqa: SLF001
+    seen = making_clips_seen(service, monkeypatch)
+
+    service.make_clip_now(finished(thermal_streamer, tmp_path).recording_id)
+
+    assert publisher.said_while_waiting == (
+        "On. Waiting for a print to start.\n"
+        "Waiting for the printer's own clip of cube.gcode before making ours."
+    )
+    assert seen == ["On. Waiting for a print to start.\nMaking the clip of cube.gcode now."]
+    assert service.status_line() == "On. Waiting for a print to start."
+
+
+def test_a_print_started_meanwhile_keeps_the_first_line(
+    thermal_streamer, service_for, tmp_path, monkeypatch
+):
+    older = finished(thermal_streamer, tmp_path, "older.gcode")
+    service, _ = service_for([printing(thermal_streamer, 1, filename="next.gcode")])
+    service.step()
+    seen = making_clips_seen(service, monkeypatch)
+
+    service.make_clip_now(older.recording_id)
+
+    (line,) = seen
+    assert line.startswith("Recording next.gcode: layer 1 of 4")
+    assert line.endswith("\nMaking the clip of older.gcode now.")
+
+
+def test_a_print_with_no_file_name_is_the_last_print(
+    thermal_streamer, service_for, tmp_path, monkeypatch
+):
+    service, _ = service_for([thermal_streamer.PrintStatus("standby", None, None, None)])
+    service.step()
+    seen = making_clips_seen(service, monkeypatch)
+
+    service.make_clip_now(finished(thermal_streamer, tmp_path, "").recording_id)
+
+    assert seen == ["On. Waiting for a print to start.\nMaking the clip of the last print now."]
