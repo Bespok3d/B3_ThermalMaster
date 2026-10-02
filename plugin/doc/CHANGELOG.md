@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.30.0
+
+- **Timelapse clips have their own colour scale, the knee by default.** A clip's colours are fixed
+  from a frame with the bed already warm, so the part and the nozzle, hotter than the bed, came
+  out one flat colour in every layer. The knee keeps them in order at the top of the palette. The
+  live picture keeps the stretch, and "The same as the live picture" makes clips follow it.
+- **Clips are enlarged smoothly** instead of in blocks, unless you choose sharp. A clip is made
+  once, after the print, so this costs the printer almost nothing.
+- **The hottest and coldest markers have a dark edge**, so the cross shows wherever it lands,
+  the ruler included, where it used to disappear.
+
 ## 0.29.1
 
 - **The timelapse switches to wide range by itself when a hot nozzle is in view.** High

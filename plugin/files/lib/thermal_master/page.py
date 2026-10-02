@@ -38,8 +38,11 @@ from .timelapse import (
     MAX_TIMELAPSE_KEEP,
     MIN_AUTO_GAIN_CELSIUS,
     MIN_TIMELAPSE_KEEP,
+    TIMELAPSE_SCALE_LIVE,
     TIMELAPSE_SWITCHES,
     VALID_TIMELAPSE_RANGES,
+    VALID_TIMELAPSE_SCALES,
+    VALID_TIMELAPSE_UPSCALE_FILTERS,
 )
 from .version import plugin_version
 
@@ -65,6 +68,13 @@ COLOUR_SCALE_DESCRIPTIONS = {
     "knee": "Knee, hot end squeezed in",
     "log-mild": "Log, gentle",
     "log-strong": "Log, strong",
+}
+
+
+# The clips' colour scales: the same four, and one that follows the live picture.
+TIMELAPSE_SCALE_DESCRIPTIONS = {
+    TIMELAPSE_SCALE_LIVE: "The same as the live picture",
+    **COLOUR_SCALE_DESCRIPTIONS,
 }
 
 
@@ -222,14 +232,24 @@ INFO_TEXTS = {
         "switches before high sensitivity runs out, and one at or above what it can read never "
         "switches.",
     ),
+    "clip_look": (
+        "how the clips are drawn",
+        "The clips have a colour scale of their own, the knee unless you choose another, while the "
+        "live picture keeps its own. A clip's colours are fixed for the whole print, usually from "
+        "a frame with the bed already warm, so the bed is near the top of them and the part and "
+        "the nozzle are hotter still: the knee keeps those in order at the top of the palette, "
+        "where the stretch draws them all in one colour. \"The same as the live picture\" follows "
+        "the scale chosen under Range. Enlarging is smooth unless you choose sharp; a clip is made "
+        "once, after the print, so smooth costs the printer almost nothing. The palette is always "
+        "the live picture's.",
+    ),
     "clip_readout": (
         "what is drawn into the clips",
         "The clips' readout is their own, so a clip can come out plain while the camera tile "
         "keeps its numbers, or the other way round. \"Copy the readout from the live view\" ticks "
         "the boxes ticked in the Readout section as last applied, and placed spots if any are "
-        "placed. The palette and the colour scale are always the live picture's. The colour "
-        "scale in the corner, or in the name, is for telling apart clips of one print made with "
-        "different scales.",
+        "placed. The colour scale in the corner, or in the name, is for telling apart clips of "
+        "one print made with different scales.",
     ),
     "moonraker_key": (
         "the Moonraker key",
@@ -439,6 +459,13 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <label><span>To</span>
              <input type="number" name="timelapse_range_high_celsius" step="0.1"
                     value="{timelapse_high}"> C</label>
+      <div class="field">
+        <label><span>Colour scale</span>
+               <select name="timelapse_colour_scale">{timelapse_scale_options}</select></label>
+        {info_clip_look}
+      </div>
+      <label><span>Enlarging</span>
+             <select name="timelapse_upscale_filter">{timelapse_upscale_options}</select></label>
       <div class="field">
         <p class="status">Drawn into the clips:</p>
         {info_clip_readout}
@@ -837,6 +864,20 @@ def timelapse_fields(settings: dict) -> dict:
                 name, TIMELAPSE_RANGE_DESCRIPTIONS[name], name == settings["timelapse_range_mode"]
             )
             for name in VALID_TIMELAPSE_RANGES
+        ),
+        "timelapse_scale_options": "".join(
+            option(
+                name, TIMELAPSE_SCALE_DESCRIPTIONS[name], name == settings["timelapse_colour_scale"]
+            )
+            for name in VALID_TIMELAPSE_SCALES
+        ),
+        "timelapse_upscale_options": "".join(
+            option(
+                name,
+                UPSCALE_FILTER_DESCRIPTIONS[name],
+                name == settings["timelapse_upscale_filter"],
+            )
+            for name in VALID_TIMELAPSE_UPSCALE_FILTERS
         ),
         "timelapse_low": f"{settings['timelapse_range_low_celsius']:.1f}",
         "timelapse_high": f"{settings['timelapse_range_high_celsius']:.1f}",
