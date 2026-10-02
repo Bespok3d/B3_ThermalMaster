@@ -2817,6 +2817,13 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    (`timelapse_upscale_filter`): they were always drawn in squares, and a clip is made once, at
    the lowest priority, so the live picture's reason to offer sharp hardly applies to it.
 
+   Tried on the U1 on 2026-10-02. Making that print's clip again, 102 layers, took 7.3 s smooth
+   and 7.4 s sharp, and 7.4 s before the change: smooth costs nothing that can be measured. "The
+   same as the live picture" gave the old clip's colours. The hottest marker, with its dark edge,
+   shows on the ruler. With a tile open the plugin used 43.6% of one core, against 41.9% measured
+   at 0.27.0 and about 42% since; the edge is four short lines a frame, a few hundredths of a
+   millisecond, so that is the spread between runs rather than the change.
+
 ## 8. Alternatives considered and rejected
 
 **A v4l2loopback virtual camera.** Upstream ships a UVC driver that presents the camera as
@@ -2925,8 +2932,8 @@ What is left, in the order it is worth doing:
 - **Phase 9's remainder**, in section 7:
   - Step 3, the automatic gain switch: built and tried on both printers, and switching at 195 C
     since 0.29.1. A print with a nozzle past 200 C, to see it switch at the new default.
-  - 0.30.0, built and not yet on hardware: clips with their own colour scale (the knee) and
-    smooth enlarging, and the markers' dark edge.
+  - 0.30.0, tried on the U1 and ready to release: clips with their own colour scale (the knee)
+    and smooth enlarging, and the markers' dark edge.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
