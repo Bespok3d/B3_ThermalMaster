@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.29.1
+
+- **The timelapse switches to wide range by itself when a hot nozzle is in view.** High
+  sensitivity reads nothing above about 205 C, so a hotter nozzle stopped there in every layer.
+  While a print is recorded, the first frame with something past 195 C, or a temperature of your
+  own, switches the camera to wide range for the rest of the print, and the gain you chose comes
+  back when it ends. No frame is taken for five seconds after the switch, while the camera
+  recalibrates. It waits until it is needed, since below about 200 C high sensitivity is the more
+  accurate gain and wide range reads the room 5 to 10 C low. On by default; untick it in the
+  Timelapse panel to keep the gain as it is.
+- **Each Apply applies its own panel.** Apply under Image used to apply every panel on the page,
+  half finished changes included, and so did Calibrate now and the other buttons. Now an Apply
+  sends its panel only, the other buttons do only what they say, and Enter in a field applies the
+  panel it is in. An Apply is greyed out until something in its panel changes, with "Not applied
+  yet" beside it once something has.
+- **The Timelapse panel's status puts the clip being made on a line of its own**, naming its
+  print. It used to read "Waiting for a print to start. Waiting for the printer's own clip of this
+  print" as one sentence, and "this print" was the last one, or one made again from the list.
+
 ## 0.28.6
 
 - **Four colour scales**, under Range on the settings page: the stretch the picture has always

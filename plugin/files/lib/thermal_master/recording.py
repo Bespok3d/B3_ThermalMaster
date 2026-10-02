@@ -266,6 +266,17 @@ class Recording:
             self.save()
 
     @property
+    def gain_switch(self) -> dict | None:
+        """When the timelapse switched the camera to wide range during this print, if it did."""
+
+        switch = self.meta.get("gain_switch")
+        return switch if isinstance(switch, dict) else None
+
+    def note_gain_switch(self, layer: int | None, at: float, celsius: float) -> None:
+        self.meta["gain_switch"] = {"layer": layer, "at": at, "celsius": celsius}
+        self.save()
+
+    @property
     def clip_scale(self) -> str | None:
         """The colour scale the clip was made with, which the list of clips names."""
 
@@ -335,7 +346,20 @@ class Recording:
             "published_as": self.published[0] if self.published else None,
             "publish_error": (clip.get("published") or {}).get("error"),
             "scale": self.clip_scale,
+            "gain_switch": self.gain_switch,
         }
+
+
+def gain_switch_sentence(switch: dict | None) -> str:
+    """What the settings page says about a print the gain was switched during, with a space first.
+    """
+
+    if not switch:
+        return ""
+    layer = switch.get("layer")
+    when = f"at layer {layer}" if layer else "before the first layer"
+    celsius = float(switch.get("celsius") or 0.0)
+    return f" Switched to wide range {when}, when something passed {celsius:.0f} C."
 
 
 def named_suffix(outcome: dict) -> str:

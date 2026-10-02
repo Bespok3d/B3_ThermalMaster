@@ -12,6 +12,23 @@ maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts a
 one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
 behind each change.
 
+## Test builds for 0.29.1, on the feature/auto-sensitivity branch
+
+Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max and the U1. Its public entry is
+0.29.1's.
+
+### 0.29.0
+
+- **The timelapse switches to wide range by itself** when something in view passes 145 C, or a
+  temperature of your own, for the rest of the print, with five seconds of no frames while the
+  camera recalibrates.
+- Found on the Ender 2 Pro Max: the note under the Timelapse panel kept saying the camera would
+  switch after the box was unticked, until the page was reloaded, and an Apply applied every
+  panel. Fixed in 0.29.1.
+- Measured on the U1: high sensitivity reads up to 207.2 C, not 150, and agrees with wide range
+  within about 2 C below that, while wide range reads the room 5 to 10 C low. 0.29.1 switches at
+  195 C instead of 145.
+
 ## Test builds for 0.28.6, on the test/color-bar branch
 
 Built on 2026-09-29 and 2026-09-30 and tried on the U1, to choose how temperatures become colours.

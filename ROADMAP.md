@@ -179,17 +179,97 @@ The path shapes also differ between dialects, which matters for writing service 
 
 ## 4. Review findings
 
-### 4.0 What is still open
+Every finding has a number, given in the order it was found and never changed or reused, because
+code comments, tests, commit messages and other documents name findings by number. The first
+review's findings are the low numbers, and the revisions and the work since went on from there.
+This section groups the findings by subject, so the numbers jump within a subsection, and from F-57
+on most findings sit in the phase, or the part of section 9, where they were found. F-4 was
+superseded by F-33 in revision 2. F-1, F-19 and F-21 were not carried into this revision, and
+nothing here records what they were. The findings are kept as written, so the reasoning stays
+readable, and most carry their own resolution note; the index below is where to look a number up.
 
-Findings below are kept as written, so the reasoning stays readable, and most now carry their own
-resolution note. Closed by Phase 0: F-2, F-3, F-9, F-10, F-12, F-31, F-40 (partly), F-42, F-43, F-48,
-F-49, F-50, F-51. Closed by Phase 1: F-11, F-20, F-22, F-23, F-24, F-32, F-33, F-34, F-35, F-36, F-37,
-F-38, F-39, F-41, F-44, and the rest of F-40; F-45 keeps Apache-2.0 and now ships a per-plugin
-`doc/LICENSE`, and F-46's capability and exclusivity metadata is declared.
+### 4.0 Index, and what is still open
 
-Genuinely still open: F-7 and F-8 (withdrawn, the udev file is gone),
-F-13 through F-18 (runtime correctness, Phase 3), F-25 through F-30 (streamer design, Phase 5), and
-F-47 (mypy, waiting on the streamer being split into an importable module).
+Checked on 2026-10-02 against each finding's own note, the phases in section 7, and the code. Two
+are not closed: F-55, parked until the tile's frame rate decay gets in the way, and F-77, on
+Bespok3d's side and reported to them. Everything else is closed. "Where" is the subsection of this
+section, the phase in section 7, or section 9.
+
+| Finding | What | Where | Status |
+| --- | --- | --- | --- |
+| F-2 | The vendored driver is not pinned | 4.2 | Closed by Phase 0 |
+| F-3 | Runtime wheels are unpinned | 4.2 | Closed by Phase 0: pinned in `requirements.txt` |
+| F-5 | `publisher` is a fingerprint field, and `author` is missing | 4.2 | Closed in 0.27.0, the first signed release |
+| F-6 | Packages ship unsigned | 4.2 | Closed in 0.27.0 |
+| F-7 | The udev rule is world-writable | 4.4, with F-8 | Closed by Phase 1: the udev file is gone |
+| F-8 | The udev rule sleeps inside `RUN+=` | 4.4, with F-7 | Closed by Phase 1: the udev file is gone |
+| F-9 | `scripts/check.sh` is absent | 4.5 | Closed by Phase 0 |
+| F-10 | No Python quality layer | 4.5 | Closed by Phase 0 |
+| F-11 | No `release.yml` | 4.5 | Closed by Phase 1 |
+| F-12 | Detector scoping | 4.5 | Closed by Phase 0 |
+| F-13 | No SIGTERM handling | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-14 | `stop_streaming()` is never called | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-15 | One bad frame tears down the whole camera | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-16 | A `None` frame is a silent permanent freeze | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-17 | Unbounded retry noise | 4.3 | Closed in 0.3.0 (Phase 3) |
+| F-18 | Control commands cannot be issued from HTTP threads | 4.3 | Closed in 0.8.0 (Phase 6) |
+| F-20 | No `plugin/doc/CHANGELOG.md` | 4.6 | Closed by Phase 1 |
+| F-22 | `README.md` describes a vendor fetch and a build that do not exist | 4.6 | Closed by Phase 1, the last part with F-11 |
+| F-23 | The plugin README says only the P1 is enabled | 4.6 | Closed in 0.4.0 (Phase 4) |
+| F-24 | Bind, port and camera details are hardcoded twice | 4.6 | Closed in 0.4.0 (Phase 4): the init script is gone, and the name and aspect are `config[]` |
+| F-25 | The whole frame is converted to Celsius to find two bounds | 4.4 | Closed in 0.5.0 (Phase 5) |
+| F-26 | No smoothing on the auto-gain bounds | 4.4 | Closed in 0.5.0 (Phase 5) |
+| F-27 | A fixed 4x upscale before the JPEG encode | 4.4 | Closed in 0.5.2 |
+| F-28 | `wait_next` re-sends the current frame on timeout | 4.4 | Closed: each frame carries its publication number, which the stream hands back (see F-73) |
+| F-29 | `serve_snapshot` sets no `Cache-Control` | 4.4 | Closed in 0.3.0, at the proxy |
+| F-30 | A `type: ignore` that the mypy gate would not take | 4.4 | Closed in 0.8.5, with F-47 |
+| F-31 | The vendor directory holds drafts and 70 MB of unpacked wheels | 4.4 | Closed by Phase 0 |
+| F-32 | The manifest is in an older dialect than the documentation | 4.1 | Closed by Phase 1 |
+| F-33 | `files` is hand-written and the packed archive is unusable | 4.1 | Closed by Phase 1 |
+| F-34 | The init script duplicates a platform facility | 4.1 | Closed by Phase 1 |
+| F-35 | Nothing registers the camera with Moonraker | 4.1 | Closed by Phase 1 |
+| F-36 | No nginx location file | 4.1 | Closed by Phase 1 |
+| F-37 | The udev rule thought inexpressible | 4.1 | Closed by Phase 1, with F-7 and F-8 |
+| F-38 | `channel` is `lts` on code that has never run | 4.1 | Closed by Phase 1 |
+| F-39 | Manifest fields are missing | 4.1 | Closed by Phase 1 |
+| F-40 | Three hand-rolled scripts duplicate `b3-builder` | 4.2 | Closed by Phase 0 and Phase 1 |
+| F-41 | Releases are documented as push-to-main | 4.2 | Closed by Phase 1 |
+| F-42 | Repo scaffolding is missing | 4.2 | Closed by Phase 0 |
+| F-43 | The vendoring strategy is obsolete | 4.2 | Closed by Phase 1 |
+| F-44 | Attributions are incomplete | 4.2 | Closed by Phase 1 |
+| F-45 | The licence does not match the org's other plugin repos | 4.2 | Closed by Phase 1: Apache-2.0 kept, with a per-plugin `doc/LICENSE` |
+| F-46 | Dependency and capability metadata is empty | 4.2 | Closed by Phase 1 |
+| F-47 | mypy cannot check a single-file streamer | 4.4 | Closed in 0.8.5 |
+| F-48 | The streamer carried pre-existing lint | 4.4 | Closed by Phase 0 |
+| F-49 | The shared tool venv has no runtime libraries | 4.5 | Closed by Phase 0 |
+| F-50 | The vendor directory shadowed installed packages | 4.4 | Closed by Phase 0 |
+| F-51 | The gate venv collided across machines | 4.4 | Closed by Phase 0 |
+| F-52 | Query strings 404ed | 4.4 | Closed in 0.2.1 |
+| F-53 | The service ran under the wrong interpreter | 4.4 | Closed in 0.2.2 |
+| F-54 | The camera worked in Chrome and not in Safari | 4.4 | Closed in 0.4.1 |
+| F-55 | The adaptive tile decays from 15 fps to 5 fps | 4.4 | **Parked**, until the decay gets in the way |
+| F-56 | The numpy pipeline, not the encode, is the cost | 4.4 | Closed in 0.21.0 |
+| F-57 | The driver's `trigger_shutter` cannot work on a P1 | Phase 6 | Closed in 0.8.1, and reported upstream (10.1) |
+| F-58 | The colorbar and the hotspot marker seem to disagree | Phase 6 | Closed in 0.8.1 |
+| F-59 | Every settings change bounced out to the dashboard | Section 9 | Closed in 0.8.2 |
+| F-60 | The calibrate button silently stopped working | Section 9 | Closed in 0.8.3 |
+| F-61 | A camera plugged in after boot | Phase 7e | Closed: never broken |
+| F-62 | The live tile showed its controls and no camera | Phase 7, 0.14.0 round | Closed in 0.14.0 |
+| F-63 | The ruler and the markers disagreed, again | Phase 7, 0.14.0 round | Closed in 0.14.0 |
+| F-64 | The viewer was blank until the pointer crossed it | Phase 7, 0.15.0 round | Closed in 0.15.0 |
+| F-65 | A landscape tile spent its width on nothing | Phase 7, 0.15.0 round | Closed in 0.15.0 |
+| F-66 | Two cameras of the same thing | Phase 7, 0.15.0 round | Closed in 0.16.0 |
+| F-67 | The controls were hidden where they were wanted | Phase 7, 0.15.0 round | Closed in 0.17.0 |
+| F-68 | The settings page was a one way trip | Phase 7, 0.15.0 round | Closed in 0.17.0 |
+| F-69 | Placing a spot before the first frame did nothing | Phase 7e | Closed before 0.19.0 shipped |
+| F-70 | The finder found itself | 4.4 | Closed in `scripts/find-plugin.sh`, which does not ship |
+| F-71 | The page threw away the answer it asked for | Phase 7f | Closed in 0.22.1 |
+| F-72 | The picture froze every thirty-one seconds | Section 9 | Closed: the printer's wifi, off since 2026-09-27; log timestamps in 0.25.2 |
+| F-73 | Two open streams sent each other the same frame | Section 9 | Closed in 0.25.1 |
+| F-74 | A network break froze the picture for good | Section 9 | Closed in 0.26.0 |
+| F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
+| F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
+| F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
 
 ### 4.1 The manifest describes a plugin model that does not exist
 
@@ -2197,7 +2277,8 @@ Sketched on 2026-09-28 and planned on 2026-09-29, below as it was planned. Steps
 colour comparison of step 4 are built and were tried on the Pi 4 and the U1 on 2026-09-29 and
 2026-09-30, released together in 0.28.6 with four colour scales, clips with their own readout, and
 no wait for a U1 print's own clip when the printer is not making one. Step 3, the automatic gain
-switch, is still to build.
+switch, is built as 0.29.0 and 0.29.1 and was tried on the Pi 4 and the U1, where the camera was
+measured to choose where it switches.
 
 **Decided so far.**
 
@@ -2577,11 +2658,17 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
    page is open appears without a reload); and the clip holds its last frame for 2 s, through
    ffmpeg's `tpad=stop_mode=clone`, so the recording and the frame count stay one per layer.
 
-   **For later: Snapmaker's phone app.** Its "Time lapse camera" list shows the firmware's clips
-   by their name without the start stamp, and not the thermal one. A guess, not checked: it reads
-   names that end in the stamp, which ours do not, since `_thermal` comes after it, and it may want
-   a `_cover.jpg`. Cheap to test before any code: upload a renamed copy by hand, as the test pair
-   was, once named `<name>_thermal_<stamp>.mp4` and once with a `_cover.jpg` beside it.
+   **Snapmaker's phone app: tried on the U1 on 2026-09-30, and closed.** Its "Time lapse camera"
+   list shows the firmware's clips by their name without the start stamp, and not the thermal one.
+   The firmware writes three files per clip, `<base>.mp4`, `<base>.jpg` and `<base>_cover.jpg`,
+   the `.mp4` read-only to Moonraker. Four tries, each uploaded or moved through Moonraker and
+   undone afterwards: a `_cover.jpg` beside our clip; a copy named as the firmware names its own,
+   `<name>_thermal_<stamp>` with a `.jpg` and a `_cover.jpg`; our video moved in under the
+   firmware clip's own name, the original set aside and put back; and that swap again with the
+   app's cache cleared. None showed in the app, and with the swap Fluidd played our video while the
+   app still played the original. So the app lists and plays the firmware's own records, or copies
+   of them in Snapmaker's cloud, not the folder, and no name the plugin chooses reaches it. Not
+   worth pursuing: writing into the firmware's records is not something a camera plugin should do.
 
    **The colour bar, decided on 2026-09-30, released in 0.28.6.** Proposed on 2026-09-29: A, the bar spans
    the range where the colours change, with the triangles saying the scene goes past an end; B, a
@@ -2633,6 +2720,82 @@ Bespok3d offers plugins a supported way in is a question for its maintainer.
 3. **The automatic gain switch.** A setting, on by default; a "for this print" gain in
    `DeviceController` that wins over the stored one without changing it; at 145 C in high
    sensitivity, wide range, no frame for 5 s, and the user's gain back at the end.
+   **Built on 2026-09-30 as 0.29.0 and tried on the Pi 4 and the U1; switching at 195 C since
+   0.29.1, from the measurements below.** Only while the timelapse records a print; the threshold
+   a setting (`timelapse_auto_gain_celsius`, 195 C by default, 30 to 500), since only one P1 has
+   been measured and a P3 or a later camera may differ. The
+   frame tap, which already sees every frame the camera sends, compares each frame's hottest count
+   with the threshold, converted once with the emissivity so it means what the readout shows, and
+   only while armed and in high sensitivity. The first frame past it asks `DeviceController` for
+   the override, which the capture thread sends between two frames as it sends the gain, again
+   after a reconnect, and the chosen gain again once cleared. The tap takes no frame for 5 s after
+   it sees the gain change, and a layer's wait for a frame is pushed on by that window, so a switch
+   is never taken for a missing camera. The switch is noted on the recording with its layer, the
+   list and the Camera panel say so, a mid-print restart sets it again from the note, and every
+   way a print ends clears it. No band in the clip: the note in the list is enough.
+
+   Tried on the Pi 4 with a P1. The switch showed in the live view as it happened, at layer 0, 35 s
+   after the print started, at 145 C. The clip made again with the readout drawn in showed the
+   nozzle at 150 to 168 C, above high sensitivity's rated 150 C, the room at 9 to 12 C, and a knee
+   ruler from 13.8 to 168.4 C bending at 54.2 C, with no frozen or blank layer. A Klipper shutdown
+   in the middle of a second print ended its recording as Interrupted, "switched to wide range at
+   layer 1", and the Camera panel's line lost the wide range sentence, so the override was cleared.
+   With the box unticked, a third print stayed in high sensitivity from start to end, with no
+   override and 12 clean layers, and one layer read 160.8 C: high sensitivity reads past its
+   rated 150 C.
+
+   Tried on the U1 on 2026-10-02 with the box ticked, at 145 C. The print switched 230.7 s after
+   it started, at layer 0, during the routine before the first layer; the temperatures kept show
+   the first record in high sensitivity and the other 101 in wide range, the next one 9.8 s after
+   the switch reading 169.0 C with the nozzle at the right edge of the picture, under the ruler,
+   which hid its marker. Through the print the hottest pixel read 104 to 131 C, most likely the
+   silicone sock rather than the tip, which is smaller than a pixel and bare metal. The clip was
+   visibly grainier than in high sensitivity, and its colours, fixed at 13.5 to 38.5 C when the
+   print started, made the bed, the part and the nozzle one flat colour from about layer 10.
+   While its clip waited for the printer's own, the panel read "On. Waiting for a print to start.
+   Waiting for the printer's own clip of this print before making ours.", two states in one
+   sentence; since 0.29.1 the clip being made is a line of its own and names its print.
+
+   Measured on the U1 the same day, to choose where it switches. A 60 x 60 x 0.6 mm patch of
+   black PLA printed in the middle of the bed and left there, read with a box in the viewer, both
+   gains 15 s or more after a switch; the room 24.4 to 24.5 C on a thermometer:
+
+   | Bed reports | High, patch | Wide, patch | High, coldest pixel | Wide, coldest pixel |
+   | --- | --- | --- | --- | --- |
+   | 30 to 31 C | 29.7 C | 24.4 C | 21.5 C | 11.6 C |
+   | 45 C | 44.0 C, bare bed | | | |
+   | 60 C | 58.7 C | 60.1 C | 24.7 C | 15.5 C |
+
+   And the nozzle, set by hand with a sock on, held close to the camera, the hottest pixel:
+
+   | Nozzle set | High | Wide |
+   | --- | --- | --- |
+   | 240 C | 187.5 C | 189.5 C |
+   | 260 C | 201.5 C | 203.5 C |
+   | 280 C | 207.2 C | 215.5 C |
+   | 300 C | 207.2 C | 228.5 C |
+
+   High sensitivity reads about 1 C under the bed throughout, which is what a surface on a heated
+   bed does, and its coldest pixel matched the thermometer within 0.3 C. Wide range's error moves
+   with temperature, about right at 60 C and 5 to 10 C low near the room, so it is not an offset
+   to subtract; the driver converts counts the same way in both gains, since the camera sends
+   them in the same unit, so the error is the camera's. High sensitivity stops at 207.2 C at
+   emissivity 0.95, a raw count of 30410 or 202.0 C before the correction, and agrees with wide
+   range within about 2 C below that. So high sensitivity is the better gain for everything but a
+   nozzle past about 200 C, and 0.29.1 switches at 195 C: past every PLA reading on the U1, 169 C
+   in a print and 194 C held against the camera, and before a reading on its way up is stuck at
+   the cap. Wide range only earns its noise and its cool readings for high temperature
+   materials. The ruler hiding the hottest marker at the right edge is for later.
+
+   Found on the Pi and fixed in 0.29.1: the note under the Timelapse panel was only drawn with the
+   page, so it went on saying the camera would switch after the box was unticked until a reload;
+   it now comes back with every answer. And every Apply, and every other button, posted the whole
+   form, so an Apply under Image also applied a half finished change under Timelapse. Each Apply
+   now sends its own panel as JSON, which already changes only what it names, the other buttons
+   send only their command, Enter applies the panel its field is in, and an Apply is greyed out,
+   with "Not applied yet" beside it, until its panel has something to apply. An answer updates the
+   panel just applied and anything a button changed, and leaves a change being made in another
+   panel where it is. Without JavaScript the page works as before.
 4. **The colour range comparison.** One real print rendered every way from its kept temperatures,
    and a default chosen. Done for the colour scale, above, by making one print's clip again with
    each; the range mode stays "fixed once the print has started" by default.
@@ -2711,7 +2874,10 @@ clip with the current colours, no ten minute wait for a U1 print's own clip when
 it is not making one, the settings page's explanations behind an (i) beside each option, a page
 that fits a phone, and the version at its foot. All of it was tried on the U1; the timelapse also
 on the Pi 4. Built on the branch `feature/timelapse`, with the colour scales tried on
-`test/color-bar` as 0.28.1 to 0.28.5 (in `CHANGELOG_DEV.md`).
+`test/color-bar` as 0.28.1 to 0.28.5 (in `CHANGELOG_DEV.md`). Released on 2026-09-30, on the `rc`
+channel, and reinstalled from the store the same day: "Package was unsigned at install" still
+shows under a stage build of the Bespok3d app and not under the stable one, a question for its
+maintainer rather than for this plugin.
 
 What is left, in the order it is worth doing:
 
@@ -2740,10 +2906,9 @@ What is left, in the order it is worth doing:
 - **Promotion to `stable`**, once somebody other than the maintainer has run it: a release with
   only the channel changed.
 - **Phase 9's remainder**, in section 7:
-  - Step 3, the automatic gain switch: wide range at 145 C in high sensitivity, one way for the
-    print, no frame for 5 s after it (the camera's shutter follows a switch 3.7 s later, measured
-    twice), and the chosen gain back at the end.
-  - Snapmaker's phone app, which does not list the thermal clip: try the two names by hand first.
+  - Step 3, the automatic gain switch: built and tried on both printers, and switching at 195 C
+    since 0.29.1. A print with a nozzle past 200 C, to see it switch at the new default.
+  - The hottest pixel's marker is hidden under the ruler at the right edge of the picture.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
   - Whether "fixed once the print has started" stays the timelapse's default range: in the 252
     layer clips the bed warmed past it, which the knee handles and the stretch does not.
