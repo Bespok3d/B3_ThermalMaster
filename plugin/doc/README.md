@@ -396,7 +396,7 @@ As a share of one core, read from the kernel.
 | The viewer, pointer moving | 45.7% | 36.4% |
 
 The U1 is the printer this plugin is developed on, installed through Bespok3d, and every release is
-confirmed on it. The Raspberry Pi 4 drives an Ender 2 Pro Max; the plugin was started there by hand
+confirmed on it. The Raspberry Pi 4 drives an Ender 2 Pro; the plugin was started there by hand
 on 2026-09-29, since the Bespok3d app does not support that printer yet. Each figure is one state
 held for 30 seconds with nothing else open, "nothing" read a minute after the last page closed, as
 on the U1. Both open states cost less on the Pi because an A72 core is faster than an A53; idle and
@@ -500,7 +500,7 @@ and the pointer moving, 41.9% with a dashboard tile visible, 4.6% with nothing w
 with the camera switched off. The settings page reports the same figure for itself, so you do not
 have to take this table's word for it.
 
-It has also run on a second Klipper printer, an Ender 2 Pro Max driven by a Raspberry Pi 4 on
+It has also run on a second Klipper printer, an Ender 2 Pro driven by a Raspberry Pi 4 on
 Debian 12, started by hand rather than installed through Bespok3d, since the app does not support
 that printer yet. The camera connected on the first try, the picture and the viewer worked, and an
 unplug and replug recovered on its own. What it costs there is in the table under

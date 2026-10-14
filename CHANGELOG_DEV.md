@@ -14,7 +14,7 @@ behind each change.
 
 ## Test builds for 0.29.1, on the feature/auto-sensitivity branch
 
-Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max and the U1. Its public entry is
+Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro and the U1. Its public entry is
 0.29.1's.
 
 ### 0.29.0
@@ -22,7 +22,7 @@ Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro Max and the U1. 
 - **The timelapse switches to wide range by itself** when something in view passes 145 C, or a
   temperature of your own, for the rest of the print, with five seconds of no frames while the
   camera recalibrates.
-- Found on the Ender 2 Pro Max: the note under the Timelapse panel kept saying the camera would
+- Found on the Ender 2 Pro: the note under the Timelapse panel kept saying the camera would
   switch after the box was unticked, until the page was reloaded, and an Apply applied every
   panel. Fixed in 0.29.1.
 - Measured on the U1: high sensitivity reads up to 207.2 C, not 150, and agrees with wide range

@@ -2402,7 +2402,7 @@ measured to choose where it switches.
   installed. And, when Moonraker's `/server/files/roots` has a `timelapse` root, a copy there too,
   so it appears in the Timelapse page of Fluidd and of Mainsail. Asked on 2026-09-29: the U1 has
   one, at `/oem/printer_data/camera`, writable, from `fluidd-timelapse` (a second root, `camera`, is
-  the same folder read only); the Pi 4 printer, an Ender 2 Pro Max on mainline Klipper, has none,
+  the same folder read only); the Pi 4 printer, an Ender 2 Pro on mainline Klipper, has none,
   and neither front end shows a Timelapse page there. On mainline the Timelapse page therefore needs
   `moonraker-timelapse` installed, which becomes an optional requirement, documented as such: only
   for the clip to show up there, not for the timelapse itself, and without its own capture turned
@@ -2857,7 +2857,7 @@ use: it installs itself as a camera, renders in Fluidd and Mainsail, carries
 an interactive viewer, holds a display range, measures spots and regions, records clips, switches
 itself off, and reports what it costs.
 
-**Validated on a second printer on 2026-09-29, without Bespok3d.** An Ender 2 Pro Max driven by a
+**Validated on a second printer on 2026-09-29, without Bespok3d.** An Ender 2 Pro driven by a
 Raspberry Pi 4 Model B (four Cortex-A72 cores, Debian 12, Python 3.11.2, aarch64), which the
 Bespok3d adapter does not support yet, so the plugin was started by hand: `plugin/files` and
 `requirements.txt` copied over, a venv built from the very wheels the U1 package bakes, and the
