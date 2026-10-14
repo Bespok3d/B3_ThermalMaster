@@ -16,9 +16,9 @@ Clone with the submodule. The gate lives in `lib_bespok3d`, so a clone without i
 git clone --recurse-submodules https://github.com/Bespok3d/B3_ThermalMaster.git
 ```
 
-`lib_bespok3d` is private to the Bespok3d organisation. From outside it, clone without
-`--recurse-submodules` and run the tests on their own with `sh plugin/tests/run.sh`, which is what CI
-runs on every pull request; a maintainer runs the rest of the gate.
+`lib_bespok3d` is public, so anyone can run the full gate. It is fetched over SSH, so cloning it
+needs an SSH key added to your GitHub account. To run only the test suite, as CI does on every pull
+request, use `sh plugin/tests/run.sh`.
 
 If you already cloned without it:
 
