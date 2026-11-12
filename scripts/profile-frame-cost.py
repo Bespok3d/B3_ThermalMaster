@@ -66,7 +66,24 @@ def load_streamer(entry: Path):
         import thermal_master
     except ImportError as error:
         raise SystemExit(f"cannot import the plugin from {plugin_files}: {error}") from error
+    start_allocator_as_the_service_does(thermal_master)
     return thermal_master
+
+
+def start_allocator_as_the_service_does(streamer) -> None:
+    """Ask the C library to keep freed memory, if the plugin under test does so when it starts.
+
+    The service asks once, in `main`, which nothing here calls (F-79). Left out, every number
+    below would be for a process set up differently from the one that serves the picture. A
+    version from before 0.30.3 has nothing to ask with and is measured as it runs, unasked.
+    """
+
+    ask = getattr(streamer, "keep_freed_memory", None)
+    if ask is None:
+        return
+    kept = ask(streamer.glibc_mallopt())
+    print(f"allocator: {'keeps' if kept else 'was not asked to keep'} freed memory, "
+          "as the service on this machine does", file=sys.stderr)
 
 
 def synthetic_frame(width: int, height: int):
@@ -106,15 +123,36 @@ def bare_settings(streamer, rotation: int, **overrides):
     )
 
 
+def readout_scale(streamer, frame, rotation: int):
+    """How far the plugin under test enlarges this frame once the readout is on.
+
+    Read off a frame it rendered rather than asked of `encode_upscale`, whose answer depends on
+    how the picture is enlarged and whose arguments differ between versions. This runs against
+    whichever plugin the printer has, and a profiler that works the size out for itself is a
+    second implementation: up to 0.30.0 a P3 is doubled, after it a smoothly enlarged P3 is
+    one and a quarter times. A whole number comes back as one, for the versions that multiply
+    the picture's size by it without rounding.
+    """
+
+    renderer = streamer.ThermalRenderer(
+        streamer.build_palettes()["ironbow"], streamer.RenderSettings(rotation=rotation)
+    )
+    encoded_width = Image.open(io.BytesIO(renderer.render_frame(frame).jpeg)).size[0]
+    oriented_width = frame.shape[0] if rotation % 180 else frame.shape[1]
+    scale = encoded_width / oriented_width
+    return int(scale) if scale == int(scale) else scale
+
+
 def stages(streamer, frame, rotation: int):
     palette = streamer.build_palettes()["ironbow"]
+    scale = readout_scale(streamer, frame, rotation)
     plain = streamer.ThermalRenderer(palette, bare_settings(streamer, rotation))
-    doubled = streamer.ThermalRenderer(palette, bare_settings(streamer, rotation, upscale=2))
+    enlarged = streamer.ThermalRenderer(palette, bare_settings(streamer, rotation, upscale=scale))
     marked = streamer.ThermalRenderer(palette, streamer.RenderSettings(rotation=rotation))
     return [
         ("pipeline and statistics only", lambda: plain.render_image(frame)),
         ("plus encode at 1x, no readout", lambda: plain.render_frame(frame)),
-        ("plus encode at 2x, no readout", lambda: doubled.render_frame(frame)),
+        (f"plus encode at {scale:g}x, no readout", lambda: enlarged.render_frame(frame)),
         ("plus the readout drawn on it", lambda: marked.render_frame(frame)),
     ]
 
@@ -140,9 +178,9 @@ def steps(streamer, frame, rotation: int):
         denoised, bounds, rotation, settings.mirrors, settings.emissivity
     )
     overlay = streamer.Overlay(palette, stats, settings.units)
-    upscale = streamer.encode_upscale((oriented.shape[1], oriented.shape[0]), 1, True)
+    upscale = readout_scale(streamer, frame, rotation)
     picture = Image.fromarray(oriented, mode="RGB")
-    enlarged = (oriented.shape[1] * upscale, oriented.shape[0] * upscale)
+    enlarged = (round(oriented.shape[1] * upscale), round(oriented.shape[0] * upscale))
     # One scratch image, drawn onto over and over. Copying it per call would put a memcpy of the
     # whole picture inside every readout measurement, which is the kind of overhead that gets
     # mistaken for the thing being measured.
@@ -173,15 +211,17 @@ def steps(streamer, frame, rotation: int):
         ("of which the 3x3 blur", lambda: streamer.blur_3x3(normalized)),
         ("palette lookup, take", lambda: np.take(palette, detailed, axis=0)),
         ("palette lookup, indexing", lambda: palette[detailed]),
-        ("orient", lambda: streamer.orient(coloured, rotation, False, False)),
+        ("orient, the palette indices", lambda: streamer.orient(detailed, rotation, False, False)),
+        ("orient, the coloured picture",
+         lambda: streamer.orient(coloured, rotation, False, False)),
         ("encode at 1x", lambda: streamer.encode_jpeg(oriented, 1, settings.jpeg_quality)),
-        (f"encode at {upscale}x", lambda: streamer.encode_jpeg(
+        (f"encode at {upscale:g}x", lambda: streamer.encode_jpeg(
             oriented, upscale, settings.jpeg_quality)),
-        (f"  of which the {upscale}x resize",
+        (f"  of which the {upscale:g}x resize",
          lambda: picture.resize(enlarged, Image.Resampling.BILINEAR)),
         ("  the same resize, nearest",
          lambda: picture.resize(enlarged, Image.Resampling.NEAREST)),
-        (f"  of which saving the {upscale}x jpeg", save_jpeg),
+        (f"  of which saving the {upscale:g}x jpeg", save_jpeg),
         ("draw the readout", lambda: streamer.draw_overlay(scratch, overlay)),
         ("  of which the colorbar", lambda: streamer.draw_colorbar(scratch, overlay, style)),
         ("  of which the markers", draw_markers),

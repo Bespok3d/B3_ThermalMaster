@@ -12,6 +12,62 @@ maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts a
 one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
 behind each change.
 
+## Test builds after 0.30.0, for what a P3 costs
+
+Written on 2026-11-12, the evening the first P3 met the plugin. 0.30.1 passed the gate and was
+never built: 0.30.2 followed it within the hour, and was built, installed on the U1 and measured
+the same evening. 0.30.3 came out of what that measurement found, and was built, installed and
+measured the same evening too. The measurements behind all three are F-78 and F-79 in
+`ROADMAP.md`.
+Their public entry is still to be written, with the release they lead to.
+
+### 0.30.3
+
+- **The plugin asks the C library, as it starts, to keep the memory it frees.** 0.30.2's smaller
+  picture had glibc handing a P3's whole-frame arrays back and fetching them again on every
+  frame. In the profiler on the U1, with glibc told the same thing through its environment, the
+  pipeline is 10.08 ms against 13.33 ms and a frame 19.94 ms against 22.68 ms. It says so in the
+  log when it has asked, does nothing where the C library is not glibc, and holds a few megabytes
+  more than it did.
+- The profiling scripts ask too, when the plugin they are measuring does, so that they time a
+  process set up like the service.
+- Measured on the U1, with a P3 turned a quarter and one tile open: 62.3% of one core enlarged
+  smoothly and 64.9% sharply, and 55.0% and 56.0% with "Sharpen edges" unticked. 0.30.0 was
+  81.9%, and a P1 is 41.9%. The pipeline is 10.07 ms in the profiler.
+- Found on the U1: sharp enlarging now costs a P3 more than smooth, so "Sharp, cheaper" is wrong
+  for it; and a P3's first picture is slow to appear in the Fluidd tile, with either enlarging.
+  Neither is looked into yet.
+
+### 0.30.2
+
+- **The picture is turned before it is coloured**, not after. The same picture, byte for byte, in
+  every rotation and mirroring, and what is copied through the rotated view is one byte a pixel
+  instead of three: for a P3 turned a quarter, 3.67 ms for the two steps against 1.70 ms on the
+  U1. An upright camera gains nothing, since it was never turned.
+- The profiler times turning the indices and turning the coloured picture as two lines, so it
+  says which one the plugin under test is paying for.
+- Measured on the U1, with a P3 turned a quarter and one tile open: 68.6% of one core against
+  0.30.0's 81.9%, and 59.2% with "Sharpen edges" unticked. A frame is 22.68 ms in the profiler
+  against 30.63 ms. How Enlarging was set for the two process figures was not noted, and it was
+  found on Sharp later that evening; 0.30.3's figures say which is which.
+- Found on the U1: about a third of the saving was lost on the way. With the picture smaller,
+  the C library stopped keeping the memory of a P3's whole-frame arrays, and gave it back and
+  fetched it again on every frame: the pipeline read 13.33 ms where 0.30.0's read 11.56 ms, and
+  10.08 ms once the allocator was told to keep what it frees. Not fixed in this build; F-79.
+
+### 0.30.1
+
+- **A P3 is enlarged one and a quarter times instead of twice** when enlarging is smooth and some
+  part of the readout is on. That is as far as the text needs, 320x240 instead of 512x384, and the
+  doubled encode was 12.46 ms of a 29.98 ms frame on the U1. Sharp enlarging still doubles it, so
+  its squares stay even, and a P1 is doubled either way, as before.
+- **"Sharpen edges" is a switch**, in the Image panel, ticked unless you untick it. The unsharp
+  mask is the largest step in making the picture: 3.83 ms of a P3 frame and 1.70 ms of a P1's.
+  Clips follow it.
+- The profiling scripts pass the sensor's size and the rotation to the pipeline candidates too,
+  which ran at a P1's size whatever was asked for; the profiler reads the enlargement off a frame
+  the plugin rendered; and turning the palette indices before the colour lookup is a new candidate.
+
 ## Test builds for 0.29.1, on the feature/auto-sensitivity branch
 
 Built on 2026-09-30 and 2026-10-02 and tried on the Ender 2 Pro and the U1. Its public entry is

@@ -59,12 +59,12 @@ DEFAULT_JPEG_QUALITY = 88
 VALID_ROTATIONS = (0, 90, 180, 270)
 
 
-# The picture is doubled before the readout is drawn, so the text has pixels to land on, and on the
-# printer that one resize is the most expensive operation in the frame: 3.05 ms bilinear against
-# 0.60 ms nearest, of a 14.85 ms frame. What the extra 2.45 ms buys is smoothing that every browser
-# then resamples again, and that the viewer throws away outright by asking for the picture
-# pixelated. Whether it is worth it is a question about a particular scene on a particular screen,
-# so it is a setting rather than a decision taken here.
+# The picture is enlarged before the readout is drawn, so the text has pixels to land on, and on the
+# printer that one resize is the most expensive operation in the frame: for a P1, which is doubled,
+# 3.05 ms bilinear against 0.60 ms nearest, of a 14.85 ms frame. What the extra 2.45 ms buys is
+# smoothing that every browser then resamples again, and that the viewer throws away outright by
+# asking for the picture pixelated. Whether it is worth it is a question about a particular scene
+# on a particular screen, so it is a setting rather than a decision taken here.
 # How the display range is decided. Auto follows the scene, which is right when you do not know
 # what you are looking at and wrong when you do: a toolhead crossing the view re-maps every colour
 # and moves the ruler with it. Fixed is told two temperatures and stays there, so a colour means
@@ -260,6 +260,12 @@ class RenderSettings:
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
     upscale_filter: str = SMOOTH_UPSCALE
+    # Whether the unsharp mask runs at all. A switch beside the strength rather than a strength of
+    # nought, so that switching it off and on again gives back whatever strength a settings file
+    # was edited to. On unless somebody says otherwise, so that upgrading changes nobody's
+    # picture. Off, the largest single step of the pipeline is not run: 3.83 ms of a P3 frame on
+    # the U1 and 1.70 ms of a P1's, measured on 2026-11-12.
+    edge_sharpening: bool = True
     range_mode: str = AUTO_RANGE
     range_low_celsius: float = DEFAULT_RANGE_LOW_CELSIUS
     range_high_celsius: float = DEFAULT_RANGE_HIGH_CELSIUS
@@ -284,6 +290,12 @@ class RenderSettings:
         return bool(
             self.colorbar or self.reticle or self.hotspot or self.coldspot or self.spots
         )
+
+    @property
+    def applied_detail_strength(self) -> float:
+        """How much edge the unsharp mask adds back: the strength, or none with the switch off."""
+
+        return self.detail_strength if self.edge_sharpening else 0.0
 
     @property
     def fixed_range(self) -> bool:
@@ -394,18 +406,19 @@ class ThermalRenderer:
         # `take` rather than fancy indexing, for byte-identical output at a third of the cost:
         # 1.44 ms against 0.48 ms on the printer. Not on anybody's list of suspects, which is the
         # argument for timing every step rather than the ones that look expensive.
-        coloured = np.take(
-            self._palette, enhance_detail(normalized, self._settings.detail_strength), axis=0
-        )
-        # Last, so everything before it works in the sensor's own orientation and the frame kept for
-        # noise reduction cannot change shape when the setting does.
-        oriented = orient(
-            coloured,
+        # Turned last of the steps that look at the scene, so everything before it works in the
+        # sensor's own orientation and the frame kept for noise reduction cannot change shape when
+        # the setting does. And before the colours rather than after them: a lookup does not care
+        # where a pixel is, so the picture is the same either way, and what is copied through the
+        # rotated view is one byte a pixel instead of three. For a P3 turned a quarter, 3.67 ms
+        # for the two steps against 1.70 ms on the U1, measured on 2026-11-12.
+        oriented_indices = orient(
+            enhance_detail(normalized, self._settings.applied_detail_strength),
             self._settings.rotation,
             self._settings.flip_horizontal,
             self._settings.flip_vertical,
         )
-        return oriented, stats, denoised
+        return np.take(self._palette, oriented_indices, axis=0), stats, denoised
 
     def _palette_indices(self, frame: np.ndarray, bounds: tuple[float, float]) -> np.ndarray:
         """The stretch, or the curve and the mapping it used, kept for the ruler."""
@@ -465,7 +478,10 @@ class ThermalRenderer:
         settings = self._settings
         overlay = self.overlay_for(stats)
         upscale = encode_upscale(
-            (image.shape[1], image.shape[0]), settings.upscale, settings.readout
+            (image.shape[1], image.shape[0]),
+            settings.upscale,
+            settings.readout,
+            whole_steps=settings.upscale_filter == SHARP_UPSCALE,
         )
         # The denoised counts rather than the picture: this is what a viewer reads temperatures
         # out of, and it is stored unconverted because converting is four float passes over the
@@ -507,7 +523,7 @@ def resampling(upscale_filter: str) -> Image.Resampling:
 
 def encode_jpeg(
     rgb_frame: np.ndarray,
-    upscale: int,
+    upscale: float,
     quality: int,
     overlay: Overlay | None = None,
     upscale_filter: str = SMOOTH_UPSCALE,
@@ -515,8 +531,9 @@ def encode_jpeg(
     image = Image.fromarray(rgb_frame, mode="RGB")
     height, width = rgb_frame.shape[0], rgb_frame.shape[1]
     if upscale != 1:
+        # Rounded, because smooth enlarging may be a fraction: a P3 at one and a quarter times.
         image = image.resize(
-            (width * upscale, height * upscale), resampling(upscale_filter)
+            (round(width * upscale), round(height * upscale)), resampling(upscale_filter)
         )
     # After the resize, so the text is drawn at the size it will be looked at rather than resampled.
     if overlay is not None:

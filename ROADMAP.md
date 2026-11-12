@@ -192,7 +192,8 @@ readable, and most carry their own resolution note; the index below is where to 
 
 Checked on 2026-10-02 against each finding's own note, the phases in section 7, and the code. Two
 are not closed: F-55, parked until the tile's frame rate decay gets in the way, and F-77, on
-Bespok3d's side and reported to them. Everything else is closed. "Where" is the subsection of this
+Bespok3d's side and reported to them. Everything else is closed. F-78 and F-79 were added on
+2026-11-12; F-79 is closed and F-78 is open. "Where" is the subsection of this
 section, the phase in section 7, or section 9.
 
 | Finding | What | Where | Status |
@@ -270,6 +271,8 @@ section, the phase in section 7, or section 9.
 | F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
 | F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
 | F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
+| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3, against a P1's 41.9% |
+| F-79 | The C library gives a P3's working arrays back every frame | 4.4 | Closed in test build 0.30.3 |
 
 ### 4.1 The manifest describes a plugin model that does not exist
 
@@ -890,6 +893,173 @@ the `http` context, and a `web-location` file is included inside a `server` bloc
 cannot be shipped from this plugin at all as the install classes stand. `protocol_version = "HTTP/1.1"`
 on our side alone does not help, because nginx closes the upstream connection per request without it.
 Lowering `target_fps` is the only lever we actually hold.
+
+**F-78. A P3 costs twice what a P1 does, and its largest single step is an enlargement the text
+does not need.** Open: three changes are in test build 0.30.2, measured at the end of this
+finding, and what they did not deliver is F-79.
+
+The first P3 met this plugin on 2026-11-12, on the U1 at 0.30.0 (section 9). The maintainer saw
+80 to 83% of one core with the ruler and the markers on, against the P1's 42%, and expected a
+higher frame rate to be part of it. Measured the same evening with this section's own scripts:
+
+- `/health` counted 728 frames across a 30 s wait, 24.3 a second. The P3 runs at the P1's rate, so
+  the difference is pixels: 256x192 is 2.56 times 160x120. Whether the 3% short of 25 is the
+  camera's real rate or dropped frames is not known; the driver counts drops and nothing shows
+  them.
+- The process used 81.9% of one core watched and 10.3% with nothing watching, against the P1's
+  41.9% and 4.6%. A first idle run read 81.6%, because a browser nobody could see held two streams
+  open. The driver reads a frame in 16 KiB pieces, 5 for a P1 and 13 for a P3, which fits the
+  idle figures and has not been tested as their cause.
+- The profiler, at 256x192 rotated 270 as the camera is mounted, beside a P1 run of the same
+  evening, upright:
+
+| step | P3, rotated 270 | P1, upright |
+| --- | --- | --- |
+| pipeline and statistics | 12.48 ms | 5.29 ms |
+| of which the unsharp mask | 3.83 ms | 1.70 ms |
+| of which turning the picture | 2.49 ms | 0.00 ms |
+| encode at 2x | 12.46 ms | 5.35 ms |
+| of which the resize, bilinear | 7.77 ms | 3.11 ms |
+| of which saving the JPEG | 4.10 ms | 1.92 ms |
+| the readout | 4.00 ms | 3.17 ms |
+| the whole frame | 29.98 ms | 14.29 ms |
+
+The render alone is 75% of a core at 25 fps, and with the read it is about 34 ms of work in a
+40 ms frame period, on one thread. There is little room left before frames are dropped.
+
+**The enlargement.** With any part of the readout on, the encode was raised in whole steps until
+the short side reached 240. A P1's short side is 120, so twice is exact. A P3's is 192, so it
+needed one and a quarter times and got twice: 512x384, two and a half times the pixels of a
+doubled P1, for text no easier to read. Two real frames, a cool scene and a print with the nozzle
+at 195 C, were drawn by the plugin's own code at 2x, 1.25x and 1x and put side by side; the text
+in a portrait picture is 30, 19 and 15 pixels tall. The maintainer chose 1.25x. So smooth
+enlarging now asks for the exact figure, and sharp keeps whole steps, because a sensor pixel
+repeated one and a quarter times is a grid of uneven squares. A P1 is encoded exactly as before
+either way. What it saves is an estimate until the printer says: the P1's doubled encode, the
+same 320x240 out, is 5.35 ms against the 12.46 ms this replaces.
+
+**The unsharp mask** is the largest step in the pipeline and was never a setting. On the same two
+frames, with it off, 60% of pixels change by 0.7 of 255 on average: visible in a close-up, hard
+to see in a tile. It is now a switch, "Sharpen edges", on by default so that upgrading changes
+nobody's picture, beside the strength rather than instead of it, so a strength edited into the
+settings file survives being switched off.
+
+**Turning the picture before colouring it. Taken, in 0.30.2.** The picture was coloured and then
+turned, which copies three bytes a pixel through a rotated view; turned first, as palette
+indices, it is one. The output is identical in all sixteen orientations, so it was taken the way
+the three in 0.20.0 were, without argument, once the printer had been asked: with
+`scripts/bench-pipeline-candidates.py` at 256x192 rotated 270, the lookup and the turn together
+were 3.67 ms one way and 1.70 ms the other, and 3.77 against 1.75 in a second run on a busier
+printer. An upright camera gains nothing.
+
+**The other candidates at a P3's size, measured the same evening and not taken:**
+
+- The range from a quarter of the pixels: 2.25 ms to 1.12 ms, with the range ends moving by up to
+  0.109 C, against 0.047 C on a P1.
+- The unsharp mask in integers: 3.46 ms to 2.69 ms, one pixel differing by one of 255. It matters
+  to nobody who unticks the switch.
+- The ruler: 2.05 ms as it ships against about 0.7 ms for its measured pieces, still unexplained,
+  and redrawing it only when its numbers change is already in section 9's list.
+
+**The scripts were part of it.** `scripts/profile-on-printer.sh` passed its arguments to the
+profiler and the readout bench and not to the pipeline candidates, so the first three runs that
+evening measured those at 160x120 whatever was asked for. It passes them to all three now, which
+is where the P3 numbers above come from. The profiler also asked `encode_upscale` how far
+the picture is enlarged, which after this change depends on how; it reads the size off a frame
+the plugin rendered instead, so it is right for whichever version the printer has. And it times
+turning the indices and turning the coloured picture as two lines, as it does the two palette
+lookups, since which of them is being paid depends on the version.
+
+**Noticed, and left:** a viewer screenshot or recording is the size of the picture it was sent,
+so a smoothly enlarged P3's are now 240 by 320 rather than 384 by 512, which the maintainer took
+as a fair price. A timelapse clip is sized by its own rule and is not affected. And where three
+markers crowd together their labels are laid out differently at the smaller size, since the
+layout works in pixels.
+
+**Measured on the printer, 0.30.2, 2026-11-12,** the same P3 turned a quarter, one tile open:
+
+| | 0.30.0 | 0.30.2 |
+| --- | --- | --- |
+| the process, watched | 81.9% of a core | 68.6% |
+| the same with "Sharpen edges" unticked | | 59.2% |
+| the whole frame | 30.63 ms | 22.68 ms |
+| encode with the readout on | 12.33 ms, at 2x | 6.14 ms, at 1.25x |
+| turning the picture | 2.43 ms | 0.39 ms |
+| pipeline and statistics | 11.56 ms | 13.33 ms |
+
+The encode and the turn fell by what the bench said they would, and unticking the switch is worth
+the mask's 3.7 ms. The process saved 13.3 points where the steps promised about 20, and the last
+row is why: F-79.
+
+A caution on the two process figures for 0.30.2. Nobody noted how Enlarging was set when they
+were taken, and later that evening it was found on Sharp, left there from an earlier try, under
+which a P3 is still doubled. The profiler's rows do not depend on it, since the profiler builds
+its own settings. The process figures to quote are 0.30.3's, at the end of F-79, where the
+setting is written beside each one.
+
+**Two more things 0.30.3's figures say.** Sharp enlarging costs a P3 more than smooth now, 64.9%
+against 62.3%, since sharp still doubles it: the option reads "Sharp, cheaper", and its (i)
+gives a P1's figure. Both want to follow the camera that is connected, which the page can know
+from the size of the last frame. And in the Fluidd tile, which is the viewer's page in a frame, a
+P3's first picture takes much longer to appear than a P1's did, with either enlarging, and not
+on the settings page. Reported by the maintainer on 2026-11-12 and not looked into.
+
+**F-79. The smaller picture made the pipeline slower: the C library gives a P3's working arrays
+back on every frame.** Closed in test build 0.30.3, which asks glibc to keep them. Found,
+confirmed and measured on the printer on 2026-11-12.
+
+In 0.30.2's profile the pipeline stage rose, 13.33 ms against 0.30.0's 11.56 ms, although the
+turn inside it had become 2 ms cheaper, and the unsharp mask timed alone read 5.08 ms against
+3.67 ms for code nobody had touched. Nothing in the pipeline explains that. What had changed was
+the size of the largest thing the process allocates.
+
+The reading that fits, and it is fitted to the numbers rather than traced: glibc keeps freed
+memory for reuse up to a threshold, raises that threshold to the largest block freed so far, and
+hands the top of the heap back to the system once more than twice that much is free. Up to 0.30.0
+the largest block was the doubled picture, about 786 KB for a P3, so numpy's whole-frame arrays,
+about 196 KB each, stayed and were reused. With the picture at 320x240 the largest block is about
+307 KB, and the arrays are handed back and their pages faulted in again on every frame. A P1's
+arrays are about 77 KB, under the threshold glibc starts at, so a P1 never met this.
+
+What was measured: the same profiler on the same build with `MALLOC_MMAP_THRESHOLD_=8388608` and
+`MALLOC_TRIM_THRESHOLD_=67108864` in its environment, which tells glibc to keep what is freed.
+
+| | as installed | told to keep its memory |
+| --- | --- | --- |
+| pipeline and statistics | 13.33 ms | 10.08 ms |
+| unsharp mask, on its own | 5.08 ms | 3.93 ms |
+| the whole frame | 22.68 ms | 19.94 ms |
+
+No other step moved, so this is not why a P3's noise reduction costs four times a P1's for two
+and a half times the pixels; that is still unexplained. On a development machine the mask alone
+showed the same shape, 0.09 ms on 0.30.0, 0.17 ms on 0.30.2 and 0.09 ms again with the two
+variables set, and the pipeline stage did not move at all, so once more the size of it was the
+printer's to say.
+
+There were three ways to fix it: ask glibc once, at start-up, to keep what is freed; set the two
+variables in the service's environment, if a manifest can say so; or reuse the pipeline's arrays
+from frame to frame, which does not depend on the C library at all and is the largest change of
+the three. **The maintainer took the first, in 0.30.3.** `allocator.py` looks `mallopt` up in the
+process itself and sets the same two thresholds the measurement used, `main` calls it before
+anything is rendered and says so in the log, and where there is no glibc, macOS and musl among
+them, it does nothing. The price is a few megabytes the process no longer returns. The profiling
+scripts ask as the service does when the plugin they are measuring can, so they time a process
+set up the same way.
+
+**Measured on the running service, 0.30.3, 2026-11-12,** the P3 turned a quarter, one tile open.
+The log carries the line saying glibc was asked, and the profiler reads 10.07 ms for the pipeline,
+where the run with the two variables read 10.08 ms.
+
+| Enlarging | "Sharpen edges" ticked | unticked |
+| --- | --- | --- |
+| smooth, a P3 at 1.25x | 62.3% of a core | 55.0% |
+| sharp, a P3 at 2x | 64.9% | 56.0% and 57.4% |
+
+Against 0.30.0's 81.9%, a P3 costs 19.6 points less with nothing changed on the settings page,
+and 26.9 points less with the switch off. A P1 is at 41.9%. How much of that is this finding's
+cannot be read off cleanly, because of the caution on 0.30.2's figures in F-78: 6.3 points if
+they were taken on Smooth, which is what the profiler's 2.7 ms a frame would come to, and 3.7 if
+on Sharp, where the doubled picture is back and this finding would hardly have applied.
 
 ### 4.5 Gate and CI
 
@@ -2903,6 +3073,12 @@ channel, and reinstalled from the store the same day: "Package was unsigned at i
 shows under a stage build of the Bespok3d app and not under the stable one, a question for its
 maintainer rather than for this plugin.
 
+**2026-11-12, at 0.30.0: a P3 met the plugin.** On the U1: it was detected and streamed, a video
+and a still were saved from it, and a print ran normally beside the live view and the timelapse.
+Still to meet the device: the gain switch, calibration, a finished timelapse clip, and the
+readings checked against a known temperature. It costs about twice what a P1 does, which is F-78
+in section 4.4.
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
@@ -2941,8 +3117,9 @@ What is left, in the order it is worth doing:
   outside the repo, since a message addressed to another project is spent once it is sent; section
   10 is the version that stays. The installer dropping `userEditable` values was retested on
   2026-09-18, did not reproduce, and is closed.
-- **The P3 hardware trial**, whenever one turns up. Everything for it is implemented and none of it
-  has met the device.
+- **The rest of the P3 hardware trial.** It streams, as of 2026-11-12. The gain switch,
+  calibration, a timelapse clip and the readings have not met the device, and F-78 is what it
+  costs.
 - **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
   wait on somebody actually wanting them.
 

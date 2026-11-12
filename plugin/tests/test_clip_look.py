@@ -127,6 +127,19 @@ def test_a_clip_is_drawn_with_its_own_scale_and_enlarging(thermal_streamer, pale
     assert settings.upscale_filter == thermal_streamer.SMOOTH_UPSCALE
 
 
+def test_a_clip_follows_the_live_pictures_sharpening(thermal_streamer, palettes, tmp_path):
+    """The settings page says clips follow the switch, so they have to."""
+
+    recording = recording_of(thermal_streamer, tmp_path)
+    live = inputs(thermal_streamer, palettes)
+    unsharpened = dataclasses.replace(
+        live, live=dataclasses.replace(live.live, edge_sharpening=False)
+    )
+
+    assert thermal_streamer.clip_render_settings(recording, live).edge_sharpening is True
+    assert thermal_streamer.clip_render_settings(recording, unsharpened).edge_sharpening is False
+
+
 def test_the_same_as_the_live_picture_follows_it(thermal_streamer, palettes, tmp_path):
     recording = recording_of(thermal_streamer, tmp_path)
     following = inputs(

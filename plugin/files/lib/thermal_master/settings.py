@@ -333,6 +333,7 @@ def settings_from_form(
         emissivity=posted_emissivity(form, current.emissivity),
         upscale_filter=posted_filter if posted_filter in VALID_UPSCALE_FILTERS
         else current.upscale_filter,
+        edge_sharpening="edge_sharpening" in form,
     )
     return (
         palette_name if palette_name in palettes else None,
@@ -373,6 +374,7 @@ JSON_SETTINGS: dict[str, Callable[[Any, RenderSettings], Any]] = {
     "reticle": a_switch("reticle"),
     "hotspot": a_switch("hotspot"),
     "coldspot": a_switch("coldspot"),
+    "edge_sharpening": a_switch("edge_sharpening"),
 }
 
 

@@ -149,9 +149,19 @@ INFO_TEXTS = {
     "enlarging": (
         "enlarging",
         "Enlarging is how the picture is made bigger before the readout is drawn on it, which only "
-        "happens while some part of the readout is switched on. Smooth blends the sensor's pixels; "
-        "sharp leaves them as squares and is about a sixth less work for the printer per frame. "
-        "Which one looks better depends on the scene and the screen.",
+        "happens while some part of the readout is switched on. Smooth blends the sensor's pixels "
+        "and enlarges only as far as the text needs: twice for a P1, one and a quarter times for "
+        "a P3. Sharp leaves them as squares, in whole steps, so twice for both. With a P1, sharp "
+        "is about a sixth less work for the printer per frame. Which one looks better depends on "
+        "the scene and the screen.",
+    ),
+    "sharpening": (
+        "sharpening",
+        "Sharpening adds back a little of what a slight blur removes, which is the edges, so a "
+        "part reads as a part rather than as a warm blob. It is the largest single step in making "
+        "the picture: switched off, edges come out slightly softer and the printer saves about a "
+        "tenth of a core with a P3, about half that with a P1. It changes the picture, never the "
+        "numbers, and timelapse clips follow it.",
     ),
     "range": (
         "the colours",
@@ -371,6 +381,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
         <label><span>Enlarging</span>
                <select name="upscale_filter">{upscale_filter_options}</select></label>
         {info_enlarging}
+      </div>
+      <div class="field">
+        <label><input type="checkbox" name="edge_sharpening"{edge_sharpening}>
+               Sharpen edges</label>
+        {info_sharpening}
       </div>
       <button type="submit">Apply</button>
     </fieldset>
@@ -1015,6 +1030,7 @@ def render_control_page(
         ),
         flip_horizontal=" checked" if settings["flip_horizontal"] else "",
         flip_vertical=" checked" if settings["flip_vertical"] else "",
+        edge_sharpening=" checked" if settings["edge_sharpening"] else "",
         colorbar=" checked" if settings["colorbar"] else "",
         reticle=" checked" if settings["reticle"] else "",
         hotspot=" checked" if settings["hotspot"] else "",

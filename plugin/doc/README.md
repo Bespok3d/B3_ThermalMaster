@@ -60,7 +60,8 @@ the next click. The plugin's version is at the foot of the page.
 | Image | Palette | `palette` | `ironbow`, `rainbow`, `white-hot`, `black-hot`, `military`, `sepia` |
 | Image | Rotate | `rotation` | `0`, `90`, `180`, `270` |
 | Image | Mirror left to right, top to bottom | `flip_horizontal`, `flip_vertical` | `true`, `false` |
-| Image | Enlarging | `upscale_filter` | `smooth`, `sharp` |
+| Image | Enlarging | `upscale_filter` | `smooth`, `sharp`; smooth enlarges a P1 twice and a P3 one and a quarter times, sharp enlarges both twice |
+| Image | Sharpen edges | `edge_sharpening` | `true`, `false`; `true` by default |
 | Range | Colours | `range_mode` | `auto` follows the scene, `fixed` holds the two numbers below |
 | Range | Colour scale | `colour_scale` | `stretch`, `knee`, `log-mild`, `log-strong`; see [Colour scales](#colour-scales) |
 | Range | From, To | `range_low_celsius`, `range_high_celsius` | degrees Celsius, whatever the display units |

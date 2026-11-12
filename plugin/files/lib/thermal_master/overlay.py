@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import math
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -648,13 +649,27 @@ def with_banner(picture: Image.Image, text: str) -> Image.Image:
     return Image.alpha_composite(picture.convert("RGBA"), band).convert("RGB")
 
 
-def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:
+def encode_upscale(
+    frame_size: tuple[int, int],
+    upscale: float,
+    readout_enabled: bool,
+    whole_steps: bool = True,
+) -> float:
     """The upscale actually used, which the overlay can raise but never lower.
 
     Text is the only part of the picture that does not survive being drawn at the sensor's own size
     and scaled up by a browser, so the overlay pays for its own resolution and nothing else does.
+
+    In whole steps, that is the first whole number of times that reaches the edge the text needs:
+    twice for a P1, whose short side is 120, and twice for a P3, whose short side is 192 and needs
+    only one and a quarter. Twice a P3 is two and a half times the pixels of a doubled P1 to
+    resize and encode, for text no easier to read: 12.46 ms of a 29.98 ms frame on the U1,
+    measured on 2026-11-12. So smooth enlarging asks for the exact figure instead, and sharp
+    keeps to whole steps, because a sensor pixel repeated one and a quarter times is a grid of
+    uneven squares.
     """
 
     if not readout_enabled:
         return upscale
-    return max(upscale, -(-OVERLAY_MIN_ENCODE_EDGE // min(frame_size)))
+    needed = OVERLAY_MIN_ENCODE_EDGE / min(frame_size)
+    return max(upscale, math.ceil(needed) if whole_steps else needed)

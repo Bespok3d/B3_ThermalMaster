@@ -45,7 +45,24 @@ def load_streamer(entry: Path):
         import thermal_master
     except ImportError as error:
         raise SystemExit(f"cannot import the plugin from {plugin_files}: {error}") from error
+    start_allocator_as_the_service_does(thermal_master)
     return thermal_master
+
+
+def start_allocator_as_the_service_does(streamer) -> None:
+    """Ask the C library to keep freed memory, if the plugin under test does so when it starts.
+
+    The service asks once, in `main`, which nothing here calls (F-79). Left out, every number
+    below would be for a process set up differently from the one that serves the picture. A
+    version from before 0.30.3 has nothing to ask with and is measured as it runs, unasked.
+    """
+
+    ask = getattr(streamer, "keep_freed_memory", None)
+    if ask is None:
+        return
+    kept = ask(streamer.glibc_mallopt())
+    print(f"allocator: {'keeps' if kept else 'was not asked to keep'} freed memory, "
+          "as the service on this machine does", file=sys.stderr)
 
 
 def synthetic_frame(width: int, height: int):
