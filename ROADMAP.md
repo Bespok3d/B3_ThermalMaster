@@ -271,7 +271,7 @@ section, the phase in section 7, or section 9.
 | F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
 | F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
 | F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
-| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3, against a P1's 41.9%. The camera read is 3.51 ms a frame as the driver does it and 0.88 ms a whole frame at a time, benched on 2026-11-13 and built into test build 0.30.4, which has still to be measured on the printer |
+| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3 and to 55.0% in 0.30.4, which reads a frame in two USB reads, in the plugin's own code beside the driver; a P1 goes from 44.0% to 41.4%. With nothing watching a P3 goes from 9.6% to 2.5%. Measured on the running service on 2026-11-13 |
 | F-79 | The C library gives a P3's working arrays back every frame | 4.4 | Closed in test build 0.30.3 |
 
 ### 4.1 The manifest describes a plugin model that does not exist
@@ -3252,8 +3252,10 @@ core, all of it on the thread that reads the camera and four fifths of it user t
 other ways to read a frame, beside the vendored driver, ran on the U1 the same day: the driver
 makes 14 reads a frame and spends 3.51 ms on it, and a whole frame read at once is 2 reads and
 0.88 ms, 6.6 points of a core less; a P1 goes from 6 reads and 1.85 ms to 0.69 ms. Test build
-0.30.4 reads that way, with the driver's reader kept as the fallback, and has still to be
-measured on the printer. F-78 in section 4.4 has the figures.
+0.30.4 reads that way, with the driver's reader kept as the fallback. Measured on the running
+service the same day: a P3 with nothing watching went from 9.6% of a core to 2.5%, and with one
+tile open from 62.3% to 55.0%; a P1 with one tile open went from 44.0% to 41.4%, and costs 2.1%
+with nothing watching. The fallback never engaged. F-78 in section 4.4 has the figures.
 
 What is left, in the order it is worth doing:
 
@@ -3293,9 +3295,9 @@ What is left, in the order it is worth doing:
   outside the repo, since a message addressed to another project is spent once it is sent; section
   10 is the version that stays. The installer dropping `userEditable` values was retested on
   2026-09-18, did not reproduce, and is closed.
-- **The rest of the P3 hardware trial.** It streams, as of 2026-11-12. The gain switch,
-  calibration, a timelapse clip and the readings have not met the device, and F-78 is what it
-  costs.
+- **The rest of the P3 hardware trial.** It streams, as of 2026-11-12, and on 2026-11-13 a
+  calibration pressed with the stream open did not interrupt the picture. The gain switch, a
+  timelapse clip and the readings have not met the device, and F-78 is what it costs.
 - **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
   wait on somebody actually wanting them.
 

@@ -120,7 +120,7 @@ imported, tested and type checked like any other package (ROADMAP F-47).
 
 ## Vendored upstream
 
-The USB protocol layer is **not** reimplemented here. `plugin/files/vendor/p3_camera.py` is checked
+The USB protocol driver is not ours. `plugin/files/vendor/p3_camera.py` is checked
 in verbatim at a pinned commit from
 [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera) (Apache-2.0), with its sha256 and
 the update procedure in [VENDORING.md](VENDORING.md). Protocol reverse-engineering credit:
@@ -130,6 +130,11 @@ pages, the timelapse and the service around them.
 The driver is not ours to edit, so where it is wrong for a P1 the plugin works around it: its
 `trigger_shutter` reads back a frame at offsets measured on a P3, which run past the end of a P1's
 smaller frame, so the plugin sends the calibration command itself. That is reported upstream.
+
+It also reads a frame its own way, in `frame_reader.py`: two USB reads through the device the
+driver opened, where the driver makes fourteen for a P3 and six for a P1, with the driver's
+reader kept as the fallback. Everything else said to the camera goes through the driver.
+`VENDORING.md` lists both and what to read again when the pin moves.
 
 `numpy`, `Pillow` and `pyusb` are pinned in `plugin/requirements.txt`. The build downloads them as
 arm64 wheels, and the daemon installs them into a virtual environment belonging to this plugin

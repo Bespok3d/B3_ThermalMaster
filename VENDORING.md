@@ -9,7 +9,10 @@ What this repo ships that it did not write, where it came from, and how to verif
 
 ## p3_camera.py
 
-The USB protocol layer for the Thermal Master P1 and P3. It is not reimplemented here.
+The USB protocol driver for the Thermal Master P1 and P3. The plugin uses it for everything it
+says to the camera except two things, reading a frame and firing the calibration shutter, which
+are the plugin's own code beside the driver: see
+[What this repo does beside the driver](#what-this-repo-does-beside-the-driver).
 
 | | |
 | --- | --- |

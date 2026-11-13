@@ -52,6 +52,10 @@ Their public entry is still to be written, with the release they lead to.
   same day and settings for both builds, 44.0% to 41.4% ticked and 39.1% to 36.3% without. The
   bench predicted 6.6 points for a P3 and 2.9 for a P1. Calibration with the stream open carried
   on for both cameras, and the fallback to the driver's reader never engaged (0 log lines).
+- The attributions now say what is used from the vendored driver and what the plugin implements
+  itself beside it, the frame read and the calibration shutter, instead of "the USB protocol
+  layer is not reimplemented here": the manifest, `ATTRIBUTIONS.md`, `VENDORING.md` and the root
+  README. The package was rebuilt for it; nothing that runs on the printer changed.
 
 ### 0.30.3
 
