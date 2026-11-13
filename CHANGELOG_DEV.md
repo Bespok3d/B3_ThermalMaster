@@ -17,9 +17,41 @@ behind each change.
 Written on 2026-11-12, the evening the first P3 met the plugin. 0.30.1 passed the gate and was
 never built: 0.30.2 followed it within the hour, and was built, installed on the U1 and measured
 the same evening. 0.30.3 came out of what that measurement found, and was built, installed and
-measured the same evening too. The measurements behind all three are F-78 and F-79 in
-`ROADMAP.md`.
+measured the same evening too. 0.30.4 is the next day's, 2026-11-13, and is about reading the
+camera where the first three are about drawing the picture. The measurements behind all four are
+F-78 and F-79 in `ROADMAP.md`.
 Their public entry is still to be written, with the release they lead to.
+
+### 0.30.4
+
+- **A frame comes off the camera in two USB reads instead of fourteen**, or instead of six for a
+  P1. The plugin now reads the frame itself, a whole frame at a time, through the device the
+  vendored driver opened. Finding the camera, starting the stream, the gain and the shutter are
+  still the driver's, and its file is not touched: the reader is the plugin's own code beside
+  it, `frame_reader.py`. The picture and the temperatures are the same; the tests read the same
+  bytes through the vendored driver and through the new reader and compare them.
+- What it is worth, from a bench of the read alone on the U1, in processor time a frame: a P3
+  went from 3.51 ms to 0.88 ms and a P1 from 1.85 ms to 0.69 ms, which is 6.6 and 2.9 points of
+  one core, paid whether anybody is watching or not. The number of reads was most of it, about
+  0.16 ms each; the rest is two copies of the whole frame, and an infrared picture the driver
+  built for every frame and the plugin threw away.
+- **The driver's reader is kept as the fallback.** A camera the new reader cannot get in step
+  with ten times in a row is read the old way until it is next reconnected, and the log says so
+  once. Both cameras were counted on the printer sending a frame the way the reader expects.
+- Two scripts for the printer came with it: `scripts/measure-threads-on-printer.sh`, which
+  splits what the service costs by thread and into user and kernel time, and
+  `scripts/bench-read-on-printer.sh`, which times six ways of reading a frame. The second opens
+  the camera, so the stream has to be switched off first, and it refuses to run otherwise.
+- The tests' stand-in camera now plays its script through a stand-in USB endpoint, in packets,
+  so every capture test runs the new reader, and its geometry is held against the vendored
+  driver's.
+- Measured on the running service, the U1, 2026-11-13, against 0.30.3, as a share of one core.
+  P3: nothing watching 9.6% to 2.5%, the capture thread's waits 350.2 a second to 50.0; one tile
+  open, smooth enlarging, 62.3% to 55.0% with "Sharpen edges" ticked and 55.0% to 48.2% without.
+  P1: nothing watching 2.1% (no 0.30.3 figure; 4.6% on 0.23.0 in September); one tile open, the
+  same day and settings for both builds, 44.0% to 41.4% ticked and 39.1% to 36.3% without. The
+  bench predicted 6.6 points for a P3 and 2.9 for a P1. Calibration with the stream open carried
+  on for both cameras, and the fallback to the driver's reader never engaged (0 log lines).
 
 ### 0.30.3
 

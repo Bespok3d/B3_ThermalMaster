@@ -271,7 +271,7 @@ section, the phase in section 7, or section 9.
 | F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
 | F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
 | F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
-| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3, against a P1's 41.9% |
+| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3, against a P1's 41.9%. The camera read is 3.51 ms a frame as the driver does it and 0.88 ms a whole frame at a time, benched on 2026-11-13 and built into test build 0.30.4, which has still to be measured on the printer |
 | F-79 | The C library gives a P3's working arrays back every frame | 4.4 | Closed in test build 0.30.3 |
 
 ### 4.1 The manifest describes a plugin model that does not exist
@@ -909,7 +909,8 @@ higher frame rate to be part of it. Measured the same evening with this section'
 - The process used 81.9% of one core watched and 10.3% with nothing watching, against the P1's
   41.9% and 4.6%. A first idle run read 81.6%, because a browser nobody could see held two streams
   open. The driver reads a frame in 16 KiB pieces, 5 for a P1 and 13 for a P3, which fits the
-  idle figures and has not been tested as their cause.
+  idle figures and has not been tested as their cause. (It is 6 and 14 once the short reads that
+  end a frame are counted: corrected on 2026-11-13, under "The read" below.)
 - The profiler, at 256x192 rotated 270 as the camera is mounted, beside a P1 run of the same
   evening, upright:
 
@@ -1003,6 +1004,173 @@ gives a P1's figure. Both want to follow the camera that is connected, which the
 from the size of the last frame. And in the Fluidd tile, which is the viewer's page in a frame, a
 P3's first picture takes much longer to appear than a P1's did, with either enlarging, and not
 on the settings page. Reported by the maintainer on 2026-11-12 and not looked into.
+
+**The read, with nothing watching. Measured on 2026-11-13, at 0.30.3; open.** With nobody
+watching, reading the camera is all the plugin does, and it is where a P3 and a P1 are furthest
+apart: 10.3% of a core against 4.6% at 0.30.0. The maintainer chose to look there next, and to
+make any change beside the vendored driver and never in it (`VENDORING.md`); what proves itself
+is then what gets proposed upstream.
+
+`scripts/measure-threads-on-printer.sh` is new. It reads each thread's user and kernel time from
+`/proc/<pid>/task` over a window, as `measure-cpu-on-printer.sh` does for the process, with how
+often the thread stopped to wait, and the camera's USB link from sysfs. Two runs of 60 s on the
+U1, each after 70 s with nothing open, the same P3 and the same service:
+
+| | stream switched off | on, nothing watching |
+| --- | --- | --- |
+| the whole process | 0.2% of a core | 9.6% |
+| the thread that reads the camera | under 0.1% | 9.4%: 7.7% user and 1.7% kernel |
+| that thread's waits | | 350.2 a second |
+
+What that says:
+
+- **It is the read and nothing else.** One thread has 9.4 of the 9.6 points, and with the stream
+  off the process is at 0.2%.
+- **It is user time, four parts in five**: Python, pyusb and libusb's own code, not the kernel's
+  USB work. The split comes from the kernel's tick accounting, a sample a hundred times a second,
+  so it is rougher than the total. It does not clear the number of reads: every read is a trip
+  through pyusb's Python and a ctypes call before the kernel sees it.
+- **350.2 waits a second is 14 reads a frame at 25.0 frames a second**, if a read waits once.
+  Fourteen is what the arithmetic gives. Upstream's `P3_PROTOCOL.md` has a frame as one transfer
+  of the start marker and the pixels, 197,644 bytes for a P3, and then a 12 byte end marker; in
+  the driver's 16 KiB requests that is twelve full reads, one of 1,036 bytes and one of 12. A
+  P1's 77,452 bytes come to 6. The 13 and 5 written above were the bytes divided by the request
+  size. Fourteen to six is 2.33; the idle costs at 0.30.0 are 2.24 apart and the bytes 2.55, so
+  the cost follows the reads more closely than the bytes, at about 0.27 ms of processor a read.
+  Counted on the printer only through the waits so far, and not tested as the cause.
+- **If the reader gets 25.0 a second idle**, the 24.3 that `/health` counted while watched on
+  2026-11-12 would be frames lost behind the render and not the camera's rate. Not confirmed: the
+  driver's count of dropped frames is still shown nowhere.
+- **The link**: high speed, 480 Mbit/s, with 512 byte packets on the stream's endpoint, 0x81.
+  That endpoint is only there while the stream is on; switched off, interface 1 has none.
+
+Read off the driver the same day, and not timed yet: besides the 14 reads, a P3 frame is copied
+whole three times on its way out (each piece into the frame buffer, the buffer into a new
+`bytes`, and a slice of that in `extract_both`, about 590 KB in all), and `read_frame_both`,
+which the plugin calls, builds the infrared picture too, about 245 KB more of copying, which the
+plugin throws away. The driver's own `extract_thermal_data` returns the temperatures alone.
+
+Upstream, looked at on 2026-11-13: `P3_PROTOCOL.md` gives the rate as about 25 frames a second
+and knows no command or register that sets it, so asking the camera for fewer frames is not on
+offer. `p3_camera.py` on its main branch is the length of the pinned file, 1073 lines, and its
+`read_frame` reads the same, 16 KiB requests included. Nothing about what reading costs was found
+in the issues and pull requests that could be read; the lists of them, and the commit list,
+could not be fetched.
+
+`scripts/bench-read-on-printer.sh` is the bench of it, new the same day. Unlike every other
+script here it opens the camera, and the driver's `connect` takes the
+interfaces from whoever holds them, so it asks the running service's `/health` first and refuses
+unless the stream is switched off. It reads through the camera object the driver opened, six
+ways: the driver as shipped, the driver's read with `extract_thermal_data`, a loop of its own
+asking for 16 KiB, 64 KiB and a whole frame at a time, and a whole frame read with no copy
+between buffers. Every request is a whole number of packets, because a bulk read that ends inside
+a packet is an overflow on Linux, which may be the "overflow" the driver's docstring reports from
+whole frame reads on macOS. Before timing anything it prints what each read of one frame
+returned, which is what turns the fourteen above from arithmetic into a count. It was rehearsed
+against the real driver over a simulated endpoint, where all six returned the same temperatures
+frame for frame for both cameras.
+
+**Run on the U1 on 2026-11-13,** the P3, the stream switched off, two rounds of 200 frames a
+candidate, the second in the opposite order. Processor time is the reading thread's own clock:
+
+| candidate | reads a frame | processor a frame, both rounds | of a core |
+| --- | --- | --- | --- |
+| the driver as shipped, both pictures | 14 | 3.54 and 3.48 ms | 8.8% |
+| the driver's read, temperatures only | 14 | 3.17 and 3.26 ms | 8.0% |
+| a loop of our own, 16 KiB requests | 14 | 2.94 and 2.98 ms | 7.4% |
+| the same loop, 64 KiB requests | 5 | 1.70 and 1.65 ms | 4.2% |
+| the same loop, whole frame requests | 2 | 1.09 and 1.10 ms | 2.7% |
+| a whole frame, no copy between buffers | 2 | 0.88 and 0.88 ms | 2.2% |
+
+- **The fourteen is counted.** The driver's reads of one frame returned 16384 twelve times, then
+  1036, then 12. Asked for a whole frame, the camera returned 197,644 bytes and then 12: two
+  transfers, as `P3_PROTOCOL.md` has it, and Linux hands the first over in one read.
+- **The number of reads is most of the cost.** The same loop with 2 reads instead of 14 is
+  1.86 ms a frame cheaper, about 0.16 ms for each read not made. The rest is smaller: 0.29 ms
+  for the infrared picture nobody looks at, 0.26 ms between the driver's loop and ours at the
+  same request size (two of its whole frame copies and its marker bookkeeping), and 0.21 ms
+  for the last copy between buffers.
+- **From first row to last is 2.63 ms a frame, 6.6 points of a core,** for the same
+  temperatures, and it is paid watched or not. The service's reading thread measured 9.4% idle
+  where the bench's first row is 8.8%; the difference is the capture loop around the read. So
+  an idle P3 should come to about 3% and a watched one to about 56%. Both are sums until the
+  service has been measured with the change in it.
+- **The camera sends 25.0 frames a second and every reader keeps up.** All twelve runs took
+  40.00 ms a frame within 0.01, with no frame dropped, none out of step and no bad marker. So
+  the 24.3 a second counted through `/health` on 2026-11-12 was not the camera's rate.
+- The kernel's share of the reading thread's time was between 12% and 30% from run to run,
+  which is the tick sampling over eight seconds, and about a fifth as in the idle measurement.
+  The whole machine spent at most 0.6% of a core in interrupts during any run.
+
+**And with the P1, the same afternoon,** same printer, same protocol:
+
+| candidate | reads a frame | processor a frame, both rounds | of a core |
+| --- | --- | --- | --- |
+| the driver as shipped, both pictures | 6 | 1.84 and 1.86 ms | 4.6% |
+| the driver's read, temperatures only | 6 | 1.63 and 1.70 ms | 4.2% |
+| a loop of our own, 16 KiB requests | 6 | 1.45 and 1.46 ms | 3.6% |
+| the same loop, 64 KiB requests | 3 | 0.96 and 1.03 ms | 2.5% |
+| the same loop, whole frame requests | 2 | 0.81 and 0.81 ms | 2.0% |
+| a whole frame, no copy between buffers | 2 | 0.69 and 0.69 ms | 1.7% |
+
+The six is counted too: 16384 four times, then 11916, then 12, and 77,452 then 12 when a whole
+frame is asked for. So a P1 frames as a P3 does, two transfers, and the driver's docstring, which
+has three, does not describe either. Again 40.00 ms a frame in every run and no fault of any
+kind. A read not made is worth 0.16 ms here as well, and first row to last is 1.17 ms a frame,
+2.9 points of a core: a P1 that costs 4.6% idle and 41.9% watched should come to about 1.7% and
+39%.
+
+**The maintainer took the last row, for both cameras. Built as 0.30.4.** The reader is
+`frame_reader.py`, the plugin's own, and the vendored file is as it was: the driver still finds
+the camera, starts the stream, sets the gain and sends the shutter command, and only the frame is
+read around it, through `camera.dev`. Two reads a frame: the marked frame into the buffer the
+temperatures are copied out of, and the end marker into a small buffer of its own. A read that is
+not the size it should be is a frame given up, and since every request is larger than the
+transfer it is for, the next read starts on a transfer boundary whatever happened. The capture
+loop sees such a frame as it sees a glitched one, and counts it towards a stall in the same way.
+
+The driver's reader is the fallback, as agreed. Out of step ten times in a row, the session is
+handed to `read_frame_both` until the camera is next reconnected, and the log says so once. Ten
+is half of what the capture loop allows before it calls a camera stalled, so the driver's reader
+has its turn first.
+
+The tests changed shape to carry it. The stand-in camera plays its script through a stand-in USB
+endpoint that hands data over in packets and ends a read at a short one, so every capture test
+that was there now runs the new reader. `test_frame_reader.py` loads the vendored file itself and
+reads the same bytes through the driver and through the reader, for both cameras, and puts the
+reader out of step the ways a camera does: a stream joined mid frame, an emission longer than a
+frame, markers that disagree, and a camera that never frames as expected. 701 tests, 13 of them
+new. `VENDORING.md` now lists what the plugin does beside the driver and what to read again when
+the pin moves.
+
+**Measured on the running service, the U1, 2026-11-13.** Whole process, as a share of one core.
+Nothing watching is `scripts/measure-threads-on-printer.sh U1 60 70`; watched is one tile open and
+nothing else, smooth enlarging, `scripts/measure-cpu-on-printer.sh U1 30`. The P1's two builds were
+measured the same day on the same mount, with the same rotation and readout (the P3's). The P3's
+watched figures for 0.30.3 are from 2026-11-12.
+
+| | P3, 0.30.3 | P3, 0.30.4 | P1, 0.30.3 | P1, 0.30.4 |
+| --- | --- | --- | --- | --- |
+| nothing watching, whole process | 9.6% | 2.5% | not taken | 2.1% |
+| the capture thread | 9.4% | 2.4% | not taken | 1.9% |
+| of that, user and kernel | 7.7 and 1.7 | 2.3 and 0.1 | not taken | 1.4 and 0.6 |
+| its waits a second | 350.2 | 50.0 | not taken | 50.0 |
+| watched, "Sharpen edges" ticked | 62.3% | 55.0% | 44.0% | 41.4% |
+| watched, unticked | 55.0% | 48.2% | 39.1% | 36.3% |
+
+- P3: 7.1 points less with nothing watching, 7.3 less watched (6.8 with sharpening off). The bench
+  predicted 6.6.
+- P1: 2.6 points less watched (2.8 with sharpening off). The bench predicted 2.9. With nothing
+  watching there is no 0.30.3 figure for a P1; the nearest is 4.6% on 0.23.0 in September, 2.5
+  points above today's.
+- 50.0 waits a second is 2 reads a frame at 25.0 frames a second, for both cameras.
+- The 41.9% recorded for a watched P1 on 0.30.0 is not a baseline for this. It is lower than the
+  same camera on 0.30.3 today, although 0.30.3 does less work a frame, so it was taken under other
+  settings that nobody noted.
+- "Sharpen edges" costs about 5 points on a P1 (4.9 on 0.30.3, 5.1 on 0.30.4) and about 7 on a P3.
+- Calibration pressed several times with the stream open, on both cameras: the picture carried on.
+- The fallback never engaged: the log line "reading as the driver does" was counted 0 times after
+  each camera's run.
 
 **F-79. The smaller picture made the pipeline slower: the C library gives a P3's working arrays
 back on every frame.** Closed in test build 0.30.3, which asks glibc to keep them. Found,
@@ -3078,6 +3246,14 @@ and a still were saved from it, and a print ran normally beside the live view an
 Still to meet the device: the gain switch, calibration, a finished timelapse clip, and the
 readings checked against a known temperature. It costs about twice what a P1 does, which is F-78
 in section 4.4.
+
+**2026-11-13, at 0.30.3: the camera read, measured.** With nothing watching a P3 costs 9.6% of a
+core, all of it on the thread that reads the camera and four fifths of it user time. A bench of
+other ways to read a frame, beside the vendored driver, ran on the U1 the same day: the driver
+makes 14 reads a frame and spends 3.51 ms on it, and a whole frame read at once is 2 reads and
+0.88 ms, 6.6 points of a core less; a P1 goes from 6 reads and 1.85 ms to 0.69 ms. Test build
+0.30.4 reads that way, with the driver's reader kept as the fallback, and has still to be
+measured on the printer. F-78 in section 4.4 has the figures.
 
 What is left, in the order it is worth doing:
 

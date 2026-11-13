@@ -12,6 +12,7 @@ fails here rather than on hardware.
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import types
 from pathlib import Path
@@ -22,6 +23,7 @@ import pytest
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 LIB_DIR = PLUGIN_DIR / "files" / "lib"
+VENDORED_DRIVER = PLUGIN_DIR / "files" / "vendor" / "p3_camera.py"
 
 
 def install_stand_in_usb() -> None:
@@ -47,7 +49,7 @@ def install_stand_in_driver() -> ModuleType:
     driver.raw_to_celsius_corrected = fake_camera.raw_to_celsius_corrected
     driver.EnvParams = fake_camera.EnvParams
     driver.GainMode = fake_camera.GainMode
-    driver.FrameMarkerMismatchError = type("FrameMarkerMismatchError", (Exception,), {})
+    driver.FrameMarkerMismatchError = fake_camera.FrameMarkerMismatchError
     sys.modules["p3_camera"] = driver
     return driver
 
@@ -71,6 +73,39 @@ def load_streamer() -> ModuleType:
 @pytest.fixture(scope="session")
 def thermal_streamer() -> ModuleType:
     return load_streamer()
+
+
+def usb_module_names() -> list[str]:
+    return [name for name in sys.modules if name == "usb" or name.startswith("usb.")]
+
+
+@pytest.fixture(scope="session")
+def vendored_driver() -> ModuleType:
+    """The real driver, loaded from the vendored file under a name that is not the stand-in's.
+
+    For the tests that hold the plugin's own frame reader, and this suite's stand-in camera,
+    against the thing they stand beside. Nothing here opens a device: the driver is only asked
+    for its geometry and to read from an endpoint a test hands it.
+
+    The driver imports pyusb when it loads, and the stand-in `usb` the other tests run against is
+    not a package it can import from. So the stand-ins step aside for the length of the import and
+    are put back after it, and the real pyusb goes back out of `sys.modules`, where the driver no
+    longer needs it to be.
+    """
+
+    stand_ins = {name: sys.modules.pop(name) for name in usb_module_names()}
+    spec = importlib.util.spec_from_file_location("vendored_p3_camera", VENDORED_DRIVER)
+    assert spec is not None and spec.loader is not None
+    driver = importlib.util.module_from_spec(spec)
+    # Registered before it runs, because the driver's dataclasses look their own module up.
+    sys.modules[spec.name] = driver
+    try:
+        spec.loader.exec_module(driver)
+    finally:
+        for name in usb_module_names():
+            del sys.modules[name]
+        sys.modules.update(stand_ins)
+    return driver
 
 
 @pytest.fixture

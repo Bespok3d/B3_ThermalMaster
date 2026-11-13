@@ -103,10 +103,12 @@ scripts/
   check-in-browser.py    drives both pages in a real browser; not in the gate, needs playwright
   fetch-vendor.sh        verify the vendored driver still matches its pin, in both directions
   measure-cpu-on-printer.sh   what the plugin costs, read from the kernel over ssh
+  measure-threads-on-printer.sh   the same split by thread, into user and kernel time
   profile-on-printer.sh       where the time inside a frame goes, measured on the printer
+  bench-read-on-printer.sh    ways of reading a frame off the camera; opens it, so stream off first
   refresh-facade.py      keep the package facade in step with what the modules export
   tag_version_guard.sh   refuse a release tag whose version the manifest does not declare
-  bench-*.py, compare-rendering.py, profile-frame-cost.py
+  bench-*.py, compare-rendering.py, measure-thread-cost.py, profile-frame-cost.py
                          one-off measurements behind decisions in the roadmap
 .github/workflows/tests.yml     CI on every pull request and branch push: the tests, no secrets
 .github/workflows/release.yml   CI on a release tag: bake, test, pack, sign, release, register

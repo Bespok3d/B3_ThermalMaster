@@ -14,7 +14,7 @@ import contextlib
 import dataclasses
 import threading
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 # The vendored driver and pyusb ship no annotations, and neither is ours to annotate: the
 # driver is pinned upstream source (VENDORING.md). Everything they hand back is therefore
@@ -24,12 +24,13 @@ import usb.core  # type: ignore[import-untyped]
 from p3_camera import (  # type: ignore[import-not-found]
     COMMANDS,
     VID,
-    FrameMarkerMismatchError,
     GainMode,
     Model,
     P3Camera,
     get_model_config,
 )
+
+from .frame_reader import ThermalFrameReader
 
 # The placeholder for the switched off state. Rendering is the other half of this module's job,
 # so importing it here is the direction the dependencies already run: pipeline knows nothing about
@@ -183,9 +184,11 @@ def fire_shutter(camera: P3Camera) -> None:
 
     The command itself is model independent, a fixed control transfer and its acknowledgement, and
     those two lines are all a calibration actually needs. The frame afterwards is the part we did
-    not want anyway, and the driver's ordinary reader already copes with it: `read_frame` spots an
-    end marker arriving before the end of a frame, drops what it has and starts again, so the next
-    read or two resynchronises by itself.
+    not want anyway, and whichever reader the session is using copes with it. The plugin's own
+    (`frame_reader.py`) is handed a transfer that is not the size of a frame, gives that frame up,
+    and is on a transfer boundary again with its next read. The driver's `read_frame` spots an end
+    marker arriving before the end of a frame, drops what it has and starts again. Either way the
+    next read or two resynchronises by itself.
 
     Reaching past the underscore is deliberate and is the smaller of two couplings. The alternative
     is issuing the control transfers here, which would copy the endpoint, the request numbers and
@@ -365,19 +368,13 @@ def detect_camera_model() -> Model | None:
     return None
 
 
-def next_thermal_frame(camera: P3Camera) -> np.ndarray | None:
-    """One thermal frame, or None when the camera returned nothing usable.
+def publish_frame(
+    thermal_raw: np.ndarray, renderer_source: RendererSource, frame_store: LatestFrame
+) -> None:
+    """Render one frame as the settings stand now, and make it the current one."""
 
-    A marker mismatch is a glitched frame, not a dead camera: the driver raises on it, and letting
-    that reach the reconnect path costs seconds of dead video for a fault the next read clears.
-    """
-
-    try:
-        _, thermal_raw = camera.read_frame_both()
-    except FrameMarkerMismatchError:
-        return None
-    # The driver carries no annotations, so this is the boundary where its Any becomes a frame.
-    return cast("np.ndarray | None", thermal_raw)
+    rendered = renderer_source.current().render_frame(thermal_raw)
+    frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
 
 
 def stream_frames(
@@ -398,6 +395,9 @@ def stream_frames(
 
     consecutive_failures = 0
     idling = False
+    # One reader for the session: it reads a whole frame at a time, and hands the session to the
+    # driver's own reader if this camera turns out not to send frames that way (frame_reader.py).
+    reader = ThermalFrameReader(camera)
     while not shutdown.is_set():
         # Checked here as well as between sessions, so Stop is acted on within one frame. Returning
         # unwinds through `run_capture_session`, which releases the device on the way out: that is
@@ -409,7 +409,7 @@ def stream_frames(
         # camera into the gain the user chose, ahead of any frame being published from the default.
         if device is not None:
             device.apply(camera)
-        thermal_raw = next_thermal_frame(camera)
+        thermal_raw = reader.next_frame()
         if thermal_raw is not None:
             consecutive_failures = 0
             # Offered before the idle check, because the timelapse takes its frame whether or not
@@ -429,8 +429,7 @@ def stream_frames(
                 # as a ghost; the range would ease away from wherever the scene has got to since.
                 renderer_source.restart()
                 idling = False
-            rendered = renderer_source.current().render_frame(thermal_raw)
-            frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+            publish_frame(thermal_raw, renderer_source, frame_store)
             continue
         consecutive_failures += 1
         if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:
