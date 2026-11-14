@@ -32,25 +32,71 @@ of a camera plugin that does not use V4L2; for the concepts, see the Bespok3d do
 
 ### What it costs the printer
 
-Measured on both printers with `scripts/measure-cpu-on-printer.sh`, as a share of one core:
+A printer has a print to run, so what the plugin takes from the processor is measured rather than
+guessed, and most of it is yours to turn down. As installed, one dashboard tile costs about a
+third of one core with a P1 and about half of one with a P3; with nothing open, under 3%.
 
-| State | Snapmaker U1 (Cortex-A53) | Raspberry Pi 4 (Cortex-A72) |
+Measured on a Snapmaker U1 on 2026-11-13 and 2026-11-14 with `scripts/measure-cpu-on-printer.sh`,
+each state held for 30 seconds, as a share of one of its four Cortex-A53 cores. One dashboard
+tile open in Fluidd and nothing else, smooth enlarging, "Sharpen edges" on, the whole readout on,
+unless the row says otherwise.
+
+**What is open**
+
+| State | P1 | P3 |
 | --- | --- | --- |
-| Camera switched off | 0.0% | 0.1% |
-| Nothing watching | 4.6% | 4.1% |
-| A dashboard tile visible | 41.9% | 37.5% |
-| The viewer open, pointer moving | 45.7% | 36.4% |
+| Camera stopped | 0.0% | not measured |
+| Nothing watching | 2.1% | 2.5% |
+| A tile open, live view Off (the timelapse still records) | 2.6% | 2.8% |
+| A tile open, as installed: 25 FPS, readout twice a second | 34.4% | 49.4% |
 
-It was 62.5% before the rendering pipeline was profiled, and 40.6% at rest before the plugin
-learned to stop working when nobody is looking; ROADMAP sections 5 and 7g tell how it got here. The
-settings page shows the plugin's own share live.
+**Live view frame rate**, with the readout drawn on every frame
+
+| Live view frame rate | P1 | P3 |
+| --- | --- | --- |
+| 25 FPS (Max) | 40.4% | 56.3% |
+| 20 FPS | 33.8% | 45.5% |
+| 15 FPS | 25.9% | 34.9% |
+| 10 FPS | 17.9% | 23.9% |
+| 5 FPS | 10.2% | 13.3% |
+| Off | 2.6% | 2.8% |
+
+Each picture a second is about 1.5 points for a P1 and 2.1 for a P3.
+
+**Readout refresh**, at 25 FPS
+
+| Readout refresh | P1 | saved | P3 | saved |
+| --- | --- | --- | --- | --- |
+| Every frame | 38.9% | | 54.5% | |
+| 5 times a second | 36.4% | 2.5 | 51.6% | 2.9 |
+| Twice a second, as installed | 34.4% | 4.5 | 49.4% | 5.1 |
+| Once a second | 33.7% | 5.2 | 49.1% | 5.4 |
+
+**The other switches**, at 25 FPS with the readout drawn on every frame
+
+| Change | P1 | P3 |
+| --- | --- | --- |
+| "Sharpen edges" off | about 5 points less | about 7 points less |
+| Enlarging set to Sharp | not measured | about 2.6 points more |
+
+The two "every frame at 25 FPS" figures for each camera, a day apart, differ by a point or two:
+that is how far two runs of the same thing can be apart, so read a difference smaller than that
+as none. A figure measured on one printer says little about another; the settings page's own line
+is the one to trust on yours.
+
+A P1 was 62.5% before the rendering pipeline was profiled and 40.6% at rest before the plugin
+learned to stop working when nobody is looking, and a P3 was 81.9% on the first day it met a
+printer; ROADMAP sections 5 and 7g and finding F-78 tell how it got here. The plugin's own
+documentation has the older figures from a Raspberry Pi 4. The settings page shows the plugin's
+own share live.
 
 ## Sponsorship
 
 Thermal Master supports this project with hardware and an affiliate arrangement. It does not fund
 it, and it does not buy any of the technical content: the figures above are measurements from a
-printer, the [hardware status](#hardware-status) says plainly that the P3 has not been tested, and
-anything that stops being true about either camera gets written here whatever the arrangement is.
+printer, the [hardware status](#hardware-status) says plainly what has and has not been checked
+on each camera, and anything that stops being true about either one gets written here whatever
+the arrangement is.
 
 ### Where to buy a P1
 
@@ -79,9 +125,11 @@ with Debian 12, since 2026-09-29. Bespok3d does not support that printer yet, so
 started by hand, from the same wheels the U1 package ships. The camera, the viewer and the
 timelapse work, and a replug recovers. ROADMAP section 9 has the details.
 
-**P3:** driven by the same code, protocol and driver configuration, and not yet tested on a
-printer. Its 256x192 sensor size is read from the driver rather than assumed. If you have a P3, it
-should work, and a report either way is welcome.
+**P3 on a Snapmaker U1:** running since 2026-11-12, from 0.30.x test builds to this release. The
+picture, the viewer, the settings page and the timelapse work, a calibration pressed with the
+stream open does not interrupt it, and every figure in the P3 column above was measured with one.
+Not checked yet: the wide range gain, and its readings against a known temperature. It costs about
+half as much again as a P1, because its sensor has two and a half times the pixels.
 
 ## Layout
 

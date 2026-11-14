@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.0.0
+
+The first release with a P3 on a printer, and the one that lets you choose what the live view
+costs. Everything here was measured on a Snapmaker U1 with both cameras; the figures are in the
+README under "What each setting costs".
+
+- **The P3 runs on a printer.** It was written from the driver's description and had never met
+  one. It now streams on a U1, with the viewer, calibration and the timelapse working. Its wide
+  range gain and its readings against a known temperature are still to be checked.
+- **A P3 costs a third less than it did.** One dashboard tile was 81.9% of one core on 0.30.0 and
+  is 54.5% with the same settings, and 49.4% as installed. A P3's picture is enlarged one and a
+  quarter times instead of twice when enlarging is smooth, which is as far as the text needs;
+  the picture is turned before it is coloured; and the plugin keeps the memory it works in
+  instead of fetching it again on every frame.
+- **A frame comes off the camera in two USB reads** instead of fourteen for a P3 and six for a
+  P1. The camera is read whether or not anybody is watching, so this is paid all day: with
+  nothing open, a P3 costs 2.5% of one core where reading it the old way cost 9.6%, and a P1
+  costs 2.1%.
+- **"Live view frame rate"**, in the Camera panel: 25 FPS (Max), which is every frame the camera
+  sends and what the plugin always did, or 20, 15, 10 or 5 FPS, or Off. Making pictures is nearly
+  all of what the plugin costs while a page is showing one, so the cost follows the number: a P1
+  goes from 40.4% at 25 to 10.2% at 5, a P3 from 56.3% to 13.3%.
+- **Off keeps the timelapse.** With the live view off the camera stays connected and every layer
+  is still recorded; everything that shows the camera shows a "Live view off" picture instead,
+  for under 3% of one core. It is for a dashboard left open by somebody who wants the clips and
+  not the tile. Stop the camera is still the deeper switch, and takes the timelapse with it.
+- **"Readout refresh"**, in the Readout panel, and **the readout now refreshes twice a second
+  unless you say otherwise.** The ruler's numbers and the markers are worked out twice a second
+  and hold still in between; the colours follow every frame as before. That takes about 5
+  points of one core off either camera. A spot you place or a setting you change shows at once,
+  and timelapse clips are not affected. This changes the picture for everybody who upgrades:
+  choose "Every frame" to have the readout as it was, or 5 times or once a second.
+- **"Sharpen edges" is a switch**, in the Image panel, on as before. Sharpening is the largest
+  single step in making the picture: off, edges are slightly softer and the plugin costs about
+  5 points less with a P1 and about 7 with a P3. Clips follow it.
+- **"Sharp" enlarging is no longer called cheaper**, because for a P3 it is not: it enlarges a
+  P3 twice where smooth enlarges it one and a quarter times. Its (i) says which is which.
+- **Safari.** With the live view off, the tile in Fluidd stayed black in Safari on a Mac, where
+  Chrome shows the "Live view off" picture. The settings page shows it in both.
+
 ## 0.30.0
 
 - **Timelapse clips have their own colour scale, the knee by default.** A clip's colours are fixed

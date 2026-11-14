@@ -60,7 +60,7 @@ from .version import plugin_version
 # interpolation.
 UPSCALE_FILTER_DESCRIPTIONS = {
     "smooth": "Smooth",
-    "sharp": "Sharp, cheaper",
+    "sharp": "Sharp",
 }
 
 
@@ -185,8 +185,9 @@ INFO_TEXTS = {
         "happens while some part of the readout is switched on. Smooth blends the sensor's pixels "
         "and enlarges only as far as the text needs: twice for a P1, one and a quarter times for "
         "a P3. Sharp leaves them as squares, in whole steps, so twice for both. With a P1, sharp "
-        "is about a sixth less work for the printer per frame. Which one looks better depends on "
-        "the scene and the screen.",
+        "is about a sixth less work for the printer per frame. With a P3 it is the other way "
+        "round: smooth is slightly less work, because it enlarges less. Which one looks better "
+        "depends on the scene and the screen.",
     ),
     "sharpening": (
         "sharpening",

@@ -62,3 +62,15 @@ def test_the_foot_of_the_page_names_the_version(thermal_streamer, palettes):
     version = json.loads(MANIFEST.read_text())["version"]
 
     assert f'<p class="version">Thermal Master {version}</p>' in page(thermal_streamer, palettes)
+
+
+def test_sharp_enlarging_is_not_called_cheaper(thermal_streamer, palettes):
+    """It is for a P1 and it is not for a P3, which it enlarges twice where smooth stops short."""
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+
+    page = thermal_streamer.render_control_page(store.as_dict(), list(palettes))
+
+    assert '<option value="sharp">Sharp</option>' in page
+    assert "cheaper" not in page
+    assert "With a P3 it is the other way round" in page

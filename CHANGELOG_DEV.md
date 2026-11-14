@@ -12,6 +12,27 @@ maintainer's printers. The public changelog, `plugin/doc/CHANGELOG.md`, starts a
 one that ships in the package; this file stays in the repository. `ROADMAP.md` has the reasoning
 behind each change.
 
+## 1.0.0, prepared on 2026-11-14
+
+The release the test builds below lead to. Its public entry is in `plugin/doc/CHANGELOG.md`
+and covers 0.30.1 to 0.30.7 in one. What 1.0.0 itself changes on the printer is two texts:
+
+- **"Sharp" is no longer "Sharp, cheaper"** in the Enlarging list, and its (i) says that for a
+  P3 smooth is the cheaper one (0.30.3 on the U1: 62.3% smooth against 64.9% sharp).
+- The manifest's description says what a P3 has and has not been run through, instead of
+  "has not been run on a printer yet"; `updated_at` is 2026-11-14.
+- 0.30.7 on the U1, a P3, one tile, twice a second: 49.4%, as 0.30.6 read at that setting.
+- Docs: both READMEs carry the measured cost of each setting as tables (the state, the live
+  view's rate, the readout refresh, sharpening and enlarging), and the P3's hardware status.
+  The Raspberry Pi 4 table stays, dated September 2026.
+- `plugin/doc/images/settings.jpg` was made again, since it lacked three settings. It is NOT a
+  photograph of the printer: the plugin's own page in Chromium on a development machine, fed a
+  real P3 frame saved from the U1 on 2026-11-12 (`p3-frame-hot.bin`), and its cost line was
+  given the figure measured on the U1 for a P3 as installed, 49.4%, for both of its numbers.
+  The one before is in `_trash/before-1.0.0/plugin-doc/`.
+- The channel stays `rc`. Promoting to stable later is a change of `channel` in the manifest,
+  which the builder's README says is independent of the release kind the Action is given.
+
 ## Test builds after 0.30.0, for what a P3 costs
 
 Written on 2026-11-12, the evening the first P3 met the plugin. 0.30.1 passed the gate and was
@@ -23,7 +44,7 @@ that gives the owner something to choose: how many pictures a second the live vi
 0.30.6, the same day, is the second: how often the numbers on it are worked out. 0.30.7 makes
 twice a second the answer nobody has to give.
 The measurements behind all of them are F-78 and F-79 in `ROADMAP.md`.
-Their public entry is still to be written, with the release they lead to.
+Their public entry is 1.0.0's.
 
 ### 0.30.7
 

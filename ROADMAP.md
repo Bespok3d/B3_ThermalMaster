@@ -3372,6 +3372,12 @@ the live view off; in Chrome it shows the off screen. 0.30.6 adds the "Readout r
 setting and the live view's list in FPS. Measured the same day, it saves about 5 points of a
 core at twice a second for either camera, and 0.30.7 makes that the default. 808 tests.
 
+**2026-11-14, evening: 1.0.0 prepared.** 0.30.7 read 49.4% on the U1 with a P3. The public
+changelog has one entry for everything since 0.30.0, both READMEs have the measured cost of
+each setting and the P3's status, "Sharp, cheaper" is "Sharp", and the settings screenshot was
+made again. Still `rc`. Not done for it: the P3's wide range gain and either camera's readings
+against a known temperature, the Safari tile with the live view off, and the upstream report.
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet

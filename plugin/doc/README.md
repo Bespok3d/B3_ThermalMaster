@@ -34,8 +34,8 @@ applies:
 - Discount code: `THERMALYML01`, at that shop
 
 It is an affiliate link, so the project earns a commission, at no extra cost to you. It changes
-nothing about what this documentation says: the P3 still has not been tested, which is worth knowing
-before buying one.
+nothing about what this documentation says: [Hardware status](#hardware-status) lists what has not
+been checked on a P3 yet, which is worth knowing before buying one.
 
 ## Setting it up
 
@@ -53,7 +53,7 @@ recalibrate the sensor. Changes take effect immediately and are remembered acros
 beside an option explains it: hover over it to read, or click it to keep the explanation open until
 the next click. The plugin's version is at the foot of the page.
 
-![The settings page on a phone: the live picture and the Image, Range and Readout panels, then the Camera and Timelapse panels](images/settings.jpg)
+![The settings page on a phone, with a P3 looking at a hot nozzle: the live picture and the Image, Range and Readout panels, then the Camera and Timelapse panels](images/settings.jpg)
 
 | Panel | Setting | JSON field | Values |
 | --- | --- | --- | --- |
@@ -127,9 +127,14 @@ Where two markers land close together, the second one moves its number rather th
 first.
 
 Burned into the picture rather than drawn over it, so the stream and the still carry their own
-readout wherever they are opened, including anything that fetches them outside this plugin. The cost is that switching the readout on doubles
-the encoded size, so the text survives being scaled by a browser. Switching it off returns the
-plugin to what it cost without a readout.
+readout wherever they are opened, including anything that fetches them outside this plugin. The
+cost is that switching the readout on enlarges the encoded picture, so the text survives being
+scaled by a browser: twice for a P1, and one and a quarter times for a P3 with smooth enlarging.
+Switching it off returns the plugin to what it cost without a readout.
+
+In the live view the ruler's numbers and the markers are worked out twice a second and hold still
+in between, while the colours follow every frame. "Readout refresh" changes that, up to every
+frame; [What each setting costs](#what-each-setting-costs) has what each choice is worth.
 
 `/thermal/stats` serves the same numbers as JSON, along with the frame average and the coldest
 pixel, and the pixel coordinates of both extremes in the orientation you are looking at.
@@ -220,9 +225,9 @@ Temperatures remain the camera's own readings with an emissivity correction appl
 watching a nozzle warm up or finding a cold corner of a bed; not metrology.
 
 The P1 is the camera this has been developed and run against, on a printer, every step of the way.
-The P3 is implemented from the same driver and its own model configuration, and has never been run
-on a printer: the resolution, the model detection and the gain modes are all in place and none of
-them have met the hardware. If you have a P3, it should work, and a report either way is welcome.
+The P3 has run on the same printer since November 2026: the model detection, the resolution, the
+picture and the calibration have met the hardware. Its wide range gain has not been tried yet, and
+neither camera's readings have been checked against a known temperature.
 
 ## Timelapse
 
@@ -364,8 +369,8 @@ written for was most of them.
 **Off is the deeper version of the same idea, and it is a button.** Stop, on the settings page or
 in the camera view's toolbar, releases the USB device: nothing is read, nothing is rendered, and
 the camera can be unplugged. Start brings it back. Measured on the U1 with the camera off and
-nothing open, the plugin used 0.0% of a core over half a minute, against 4.6% idling and 40.6%
-before any of this existed.
+nothing open, the plugin used 0.0% of a core over half a minute, against 2.1% idling with a P1
+today and 40.6% before any of this existed.
 
 While it is off, everything that shows the camera shows a "Stream off" picture naming the button
 that restarts it, rather than a broken image or an error, because that picture travels the same
@@ -387,9 +392,60 @@ Both printers measured below have four cores, so 100% of one core is a quarter o
 the figure can pass 100% because the plugin has more than one thread. It reads highest on the
 settings page itself, which holds a live stream open and is therefore somebody watching.
 
-### Measured on two printers
+### What each setting costs
 
-As a share of one core, read from the kernel.
+Measured on a Snapmaker U1 on 2026-11-13 and 2026-11-14 with `scripts/measure-cpu-on-printer.sh`,
+each state held for 30 seconds, as a share of one of its four Cortex-A53 cores. One dashboard
+tile open in Fluidd and nothing else, smooth enlarging, "Sharpen edges" on, the whole readout on,
+unless the row says otherwise.
+
+**What is open**
+
+| State | P1 | P3 |
+| --- | --- | --- |
+| Camera stopped | 0.0% | not measured |
+| Nothing watching | 2.1% | 2.5% |
+| A tile open, live view Off (the timelapse still records) | 2.6% | 2.8% |
+| A tile open, as installed: 25 FPS, readout twice a second | 34.4% | 49.4% |
+
+**Live view frame rate**, with the readout drawn on every frame
+
+| Live view frame rate | P1 | P3 |
+| --- | --- | --- |
+| 25 FPS (Max) | 40.4% | 56.3% |
+| 20 FPS | 33.8% | 45.5% |
+| 15 FPS | 25.9% | 34.9% |
+| 10 FPS | 17.9% | 23.9% |
+| 5 FPS | 10.2% | 13.3% |
+| Off | 2.6% | 2.8% |
+
+Each picture a second is about 1.5 points for a P1 and 2.1 for a P3.
+
+**Readout refresh**, at 25 FPS
+
+| Readout refresh | P1 | saved | P3 | saved |
+| --- | --- | --- | --- | --- |
+| Every frame | 38.9% | | 54.5% | |
+| 5 times a second | 36.4% | 2.5 | 51.6% | 2.9 |
+| Twice a second, as installed | 34.4% | 4.5 | 49.4% | 5.1 |
+| Once a second | 33.7% | 5.2 | 49.1% | 5.4 |
+
+**The other switches**, at 25 FPS with the readout drawn on every frame
+
+| Change | P1 | P3 |
+| --- | --- | --- |
+| "Sharpen edges" off | about 5 points less | about 7 points less |
+| Enlarging set to Sharp | not measured | about 2.6 points more |
+
+The two "every frame at 25 FPS" figures for each camera, a day apart, differ by a point or two:
+that is how far two runs of the same thing can be apart, so read a difference smaller than that
+as none. A figure measured on one printer says little about another; the settings page's own line
+is the one to trust on yours.
+
+### Measured on two printers, in September 2026
+
+Older figures, from before the changes above, kept because they are the only ones from a second
+printer. A P1, as a share of one core, read from the kernel.
 
 | What is open | Snapmaker U1, four Cortex-A53 cores | Raspberry Pi 4, four Cortex-A72 cores |
 | --- | --- | --- |
@@ -498,10 +554,10 @@ Run end to end on a U1 with a P1 attached, and every release has been confirmed 
 tile renders in Fluidd and Mainsail, the control page changes palette, orientation and the readout
 live, the viewer works inside a dashboard tile, and the settings survive a restart.
 
-Measured on that printer, as a share of one of its four Cortex-A53 cores: 45.7% with the viewer open
-and the pointer moving, 41.9% with a dashboard tile visible, 4.6% with nothing watching, and 0.0%
-with the camera switched off. The settings page reports the same figure for itself, so you do not
-have to take this table's word for it.
+Measured on that printer, as a share of one of its four Cortex-A53 cores: 34.4% with a dashboard
+tile visible as installed, 2.1% with nothing watching, and 0.0% with the camera stopped.
+[What each setting costs](#what-each-setting-costs) has the rest. The settings page reports the
+same figure for itself, so you do not have to take a table's word for it.
 
 It has also run on a second Klipper printer, an Ender 2 Pro driven by a Raspberry Pi 4 on
 Debian 12, started by hand rather than installed through Bespok3d, since the app does not support
@@ -510,7 +566,10 @@ unplug and replug recovered on its own. What it costs there is in the table unde
 [What it costs when you are not looking](#what-it-costs-when-you-are-not-looking): 36.4% of one
 core with the viewer open, 4.1% with nothing watching.
 
-The P3 is driven by the same code path and the same protocol but has not been in front of one yet.
+A P3 has run on the same U1 since 2026-11-12: the picture, the viewer, the settings page and the
+timelapse work, and a calibration pressed with the stream open does not interrupt it. One tile
+costs 49.4% of a core as installed and 2.5% with nothing watching. Not checked yet: the wide range
+gain, and its readings against a known temperature.
 
 Worth checking after an install:
 
