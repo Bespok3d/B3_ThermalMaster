@@ -24,7 +24,7 @@ turns its 16-bit temperature frame into a colour thermal image, and serves it as
 - Settings and camera state: `/thermal/settings`, which also accepts a JSON POST to change
   individual settings without disturbing the rest
 
-## Where to buy a P1
+## Where to buy one
 
 Thermal Master supports this project with hardware and an affiliate arrangement. If you are buying a
 camera and want the project to benefit, buy it through the shop link below, where the discount code
@@ -34,8 +34,8 @@ applies:
 - Discount code: `THERMALYML01`, at that shop
 
 It is an affiliate link, so the project earns a commission, at no extra cost to you. It changes
-nothing about what this documentation says: [Hardware status](#hardware-status) lists what has not
-been checked on a P3 yet, which is worth knowing before buying one.
+nothing about what this documentation says: [Hardware status](#hardware-status) lists what has and
+has not been checked on each camera.
 
 ## Setting it up
 

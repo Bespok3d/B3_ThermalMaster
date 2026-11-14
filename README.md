@@ -98,7 +98,7 @@ printer, the [hardware status](#hardware-status) says plainly what has and has n
 on each camera, and anything that stops being true about either one gets written here whatever
 the arrangement is.
 
-### Where to buy a P1
+### Where to buy one
 
 If you are buying one and want the project to benefit, buy it through the shop link below. It costs
 you nothing extra, and the discount code applies there.
@@ -108,7 +108,8 @@ you nothing extra, and the discount code applies there.
 | Official shop | https://thermalmaster.com/BESPOKD |
 | Discount code | `THERMALYML01`, at that shop |
 
-Before buying a P3, read the [hardware status](#hardware-status) below.
+Both cameras run on a Snapmaker U1; the [hardware status](#hardware-status) below says what has
+been checked on each.
 
 Disclosure: the shop link is an affiliate link, so the project earns a commission on purchases made
 through it, at no extra cost to you.
