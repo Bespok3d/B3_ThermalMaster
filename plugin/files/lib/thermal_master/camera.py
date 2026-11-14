@@ -14,7 +14,7 @@ import contextlib
 import dataclasses
 import threading
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 # The vendored driver and pyusb ship no annotations, and neither is ours to annotate: the
 # driver is pinned upstream source (VENDORING.md). Everything they hand back is therefore
@@ -24,18 +24,24 @@ import usb.core  # type: ignore[import-untyped]
 from p3_camera import (  # type: ignore[import-not-found]
     COMMANDS,
     VID,
-    FrameMarkerMismatchError,
     GainMode,
     Model,
     P3Camera,
     get_model_config,
 )
 
+from .frame_reader import ThermalFrameReader
+
 # The placeholder for the switched off state. Rendering is the other half of this module's job,
 # so importing it here is the direction the dependencies already run: pipeline knows nothing about
 # the camera, and this is the one picture the capture loop produces without one.
 from .log import log_line
-from .pipeline import stream_off_jpeg
+from .pipeline import (
+    CAMERA_FRAMES_A_SECOND,
+    LIVE_VIEW_OFF,
+    live_view_off_jpeg,
+    stream_off_jpeg,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -183,9 +189,11 @@ def fire_shutter(camera: P3Camera) -> None:
 
     The command itself is model independent, a fixed control transfer and its acknowledgement, and
     those two lines are all a calibration actually needs. The frame afterwards is the part we did
-    not want anyway, and the driver's ordinary reader already copes with it: `read_frame` spots an
-    end marker arriving before the end of a frame, drops what it has and starts again, so the next
-    read or two resynchronises by itself.
+    not want anyway, and whichever reader the session is using copes with it. The plugin's own
+    (`frame_reader.py`) is handed a transfer that is not the size of a frame, gives that frame up,
+    and is on a transfer boundary again with its next read. The driver's `read_frame` spots an end
+    marker arriving before the end of a frame, drops what it has and starts again. Either way the
+    next read or two resynchronises by itself.
 
     Reaching past the underscore is deliberate and is the smaller of two couplings. The alternative
     is issuing the control transfers here, which would copy the endpoint, the request numbers and
@@ -365,19 +373,101 @@ def detect_camera_model() -> Model | None:
     return None
 
 
-def next_thermal_frame(camera: P3Camera) -> np.ndarray | None:
-    """One thermal frame, or None when the camera returned nothing usable.
+def publish_frame(
+    thermal_raw: np.ndarray, renderer_source: RendererSource, frame_store: LatestFrame
+) -> None:
+    """Render one frame as the settings stand now, and make it the current one."""
 
-    A marker mismatch is a glitched frame, not a dead camera: the driver raises on it, and letting
-    that reach the reconnect path costs seconds of dead video for a fault the next read clears.
+    rendered = renderer_source.current().render_frame(thermal_raw)
+    frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+
+
+class LiveViewPace:
+    """Which of the camera's frames become pictures, for a live view slower than the camera.
+
+    A count rather than a clock, because the camera is the clock: it sends 25 frames a second
+    whatever is asked of it, so 20 pictures a second is four frames in five. Every frame adds the
+    wanted rate to what is owed, and a picture is drawn each time a whole camera second's worth
+    has built up. The rates that do not divide 25 come out uneven by one frame, 10 a second as
+    gaps of 80 and 120 ms in turn, which is the price of offering round numbers.
+
+    It starts owed a picture, so the first frame of a session, or after a silence, is drawn.
     """
 
-    try:
-        _, thermal_raw = camera.read_frame_both()
-    except FrameMarkerMismatchError:
-        return None
-    # The driver carries no annotations, so this is the boundary where its Any becomes a frame.
-    return cast("np.ndarray | None", thermal_raw)
+    def __init__(self) -> None:
+        self._owed = CAMERA_FRAMES_A_SECOND
+
+    def due(self, pictures_a_second: int) -> bool:
+        """Whether this frame is one to draw. Asked once for every frame the camera sends."""
+
+        if self._owed < CAMERA_FRAMES_A_SECOND:
+            self._owed += pictures_a_second
+            return False
+        self._owed += pictures_a_second - CAMERA_FRAMES_A_SECOND
+        return True
+
+
+class LiveView:
+    """What becomes of each frame the camera sends: a picture, a frame passed over, or nothing.
+
+    There are three reasons not to draw one, and they are asked cheapest first: nobody is
+    looking, the live view is switched off, or it is set slower than the camera and this frame is
+    not one of its pictures. None of them stops the frame being read, or being offered to the
+    timelapse, both of which have happened before it gets here.
+    """
+
+    def __init__(self, frame_store: LatestFrame, renderer_source: RendererSource) -> None:
+        self._frame_store = frame_store
+        self._renderer_source = renderer_source
+        self._pace = LiveViewPace()
+        # Whether the renderer is holding a scene from before a silence: nobody was looking, or
+        # the live view was off.
+        self._silent = False
+        self._said_off_at = float("-inf")
+
+    def take(self, thermal_raw: np.ndarray) -> None:
+        """Draw this frame, or do not, as the settings and the audience stand now."""
+
+        # The frame is read either way, because the camera streams whether or not anyone is
+        # watching and a reader that stops reading falls out of step with it. What is skipped
+        # is the expensive half: nine tenths of this plugin's cost was rendering frames into
+        # an empty room.
+        if not self._frame_store.wanted():
+            self._frame_store.note_read()
+            self._silent = True
+            return
+        pictures_a_second = self._renderer_source.live_view_rate
+        if pictures_a_second == LIVE_VIEW_OFF:
+            self._silent = True
+            self._say_it_is_off()
+            return
+        if self._silent:
+            # Coming back after a silence. The renderer is holding a frame and a smoothed
+            # range from before it, and averaging the new frame with a minute old one shows up
+            # as a ghost; the range would ease away from wherever the scene has got to since.
+            self._renderer_source.restart()
+            self._pace = LiveViewPace()
+            self._silent = False
+        if not self._pace.due(pictures_a_second):
+            self._frame_store.note_read()
+            self._renderer_source.pass_over(thermal_raw)
+            return
+        publish_frame(thermal_raw, self._renderer_source, self._frame_store)
+
+    def _say_it_is_off(self) -> None:
+        """Publish the "Live view off" picture, as often as the "Stream off" one and no oftener.
+
+        To somebody looking, which is the only time this is reached. It is what keeps a request
+        answered at once and an open stream ticking over, for the price of handing over bytes
+        that were encoded once.
+        """
+
+        now = time.monotonic()
+        if now - self._said_off_at < OFF_REFRESH_SECONDS:
+            self._frame_store.note_read()
+            return
+        self._said_off_at = now
+        self._frame_store.publish(live_view_off_jpeg())
 
 
 def stream_frames(
@@ -397,7 +487,10 @@ def stream_frames(
     """
 
     consecutive_failures = 0
-    idling = False
+    live_view = LiveView(frame_store, renderer_source)
+    # One reader for the session: it reads a whole frame at a time, and hands the session to the
+    # driver's own reader if this camera turns out not to send frames that way (frame_reader.py).
+    reader = ThermalFrameReader(camera)
     while not shutdown.is_set():
         # Checked here as well as between sessions, so Stop is acted on within one frame. Returning
         # unwinds through `run_capture_session`, which releases the device on the way out: that is
@@ -409,28 +502,13 @@ def stream_frames(
         # camera into the gain the user chose, ahead of any frame being published from the default.
         if device is not None:
             device.apply(camera)
-        thermal_raw = next_thermal_frame(camera)
+        thermal_raw = reader.next_frame()
         if thermal_raw is not None:
             consecutive_failures = 0
             # Offered before the idle check, because the timelapse takes its frame whether or not
             # anybody is watching, and taking it costs a copy only when a layer asked for one.
             frame_store.offer_raw(thermal_raw, gain_in_effect(device))
-            # The frame is read either way, because the camera streams whether or not anyone is
-            # watching and a reader that stops reading falls out of step with it. What is skipped
-            # is the expensive half: nine tenths of this plugin's cost was rendering frames into
-            # an empty room.
-            if not frame_store.wanted():
-                frame_store.note_read()
-                idling = True
-                continue
-            if idling:
-                # Coming back after a silence. The renderer is holding a frame and a smoothed
-                # range from before it, and averaging the new frame with a minute old one shows up
-                # as a ghost; the range would ease away from wherever the scene has got to since.
-                renderer_source.restart()
-                idling = False
-            rendered = renderer_source.current().render_frame(thermal_raw)
-            frame_store.publish(rendered.jpeg, rendered.stats, rendered.thermal)
+            live_view.take(thermal_raw)
             continue
         consecutive_failures += 1
         if consecutive_failures >= MAX_CONSECUTIVE_FRAME_FAILURES:

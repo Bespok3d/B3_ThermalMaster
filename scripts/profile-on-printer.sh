@@ -15,9 +15,11 @@
 #
 #   scripts/profile-on-printer.sh lava
 #   scripts/profile-on-printer.sh lava --rotate 270
+#   scripts/profile-on-printer.sh lava --width 256 --height 192 --rotate 270
 #
-# Any extra arguments are passed to the profiler. The candidate bench takes none of them, so it is
-# run without.
+# Any extra arguments are passed to all three scripts, which take the same ones: the sensor's size,
+# the rotation and the number of repeats. The pipeline candidates used to be run without them, so
+# a profile asked for at a P3's size came back with its candidates measured at a P1's.
 set -eu
 
 HOST="${1:-}"
@@ -47,5 +49,5 @@ run_remote() {
 }
 
 run_remote "$HERE/profile-frame-cost.py" "$@"
-run_remote "$HERE/bench-pipeline-candidates.py"
+run_remote "$HERE/bench-pipeline-candidates.py" "$@"
 run_remote "$HERE/bench-readout-candidates.py" "$@"

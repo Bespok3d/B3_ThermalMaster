@@ -67,4 +67,4 @@ def test_a_session_uses_the_geometry_of_the_camera_it_found(
 
     camera = fake_camera.StandInCamera.instances[-1]
     assert camera.config.model == "p3"
-    assert (camera.config.sensor_width, camera.config.sensor_height) == (256, 192)
+    assert (camera.config.sensor_w, camera.config.sensor_h) == (256, 192)

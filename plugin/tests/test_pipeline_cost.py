@@ -91,3 +91,34 @@ def test_the_palette_lookup_is_the_one_it_replaced(thermal_streamer, scene):
     expected = thermal_streamer.orient(palette[detailed], 90, False, False)
 
     assert np.array_equal(image, expected)
+
+
+@pytest.mark.parametrize("rotation", [0, 90, 180, 270])
+@pytest.mark.parametrize("mirrors", [(False, False), (True, False), (False, True), (True, True)])
+def test_turning_the_indices_is_the_picture_turning_the_colours_gave(
+    thermal_streamer, scene, rotation, mirrors
+):
+    """The picture used to be coloured and then turned; now it is turned and then coloured.
+
+    Byte for byte the same in every orientation, and in one piece of memory, which is what Pillow
+    needs to read it.
+    """
+
+    palette = thermal_streamer.build_palettes()["ironbow"]
+    settings = thermal_streamer.RenderSettings(
+        rotation=rotation, flip_horizontal=mirrors[0], flip_vertical=mirrors[1]
+    )
+    renderer = thermal_streamer.ThermalRenderer(palette, settings)
+
+    image, _, denoised = renderer.render_image(scene)
+
+    bounds = renderer.bounds
+    assert bounds is not None
+    normalized = thermal_streamer.normalize_to_bytes(denoised, *bounds)
+    detailed = thermal_streamer.enhance_detail(normalized, settings.detail_strength)
+    coloured_then_turned = thermal_streamer.orient(
+        np.take(palette, detailed, axis=0), rotation, *mirrors
+    )
+
+    assert np.array_equal(image, coloured_then_turned)
+    assert image.flags.c_contiguous

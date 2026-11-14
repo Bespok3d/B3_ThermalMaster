@@ -475,6 +475,10 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
         still somebody watching: without this the capture would idle under it after a minute, the
         count would stop, and the watchdog would blame the camera for its own dead stream instead
         of reopening it. A hidden page does not ask, so the capture still idles behind that.
+
+        `live_view` is the other way a picture can be still on purpose: the camera running for
+        the timelapse and nothing drawn. The watchdog treats that placeholder as it does the
+        "Stream off" one, and `streaming` stays what it was, whether the camera is on.
         """
 
         self.frames.note_interest()
@@ -484,8 +488,17 @@ class ThermalRequestHandler(BaseHTTPRequestHandler):
                 "frame": self.frames.published_count,
                 "frame_age_seconds": None if age is None else round(age, 3),
                 "streaming": streaming_wanted(self.device),
+                "live_view": self.live_view_wanted(),
             }
         )
+
+    def live_view_wanted(self) -> bool:
+        """Whether the live view is switched on. With no settings, nothing can have said off."""
+
+        if self.settings_store is None:
+            return True
+        _, _, settings = self.settings_store.snapshot()
+        return settings.live_view
 
     def settings_payload(self, settings_store: SettingsStore) -> dict:
         """The settings, plus one sentence on what the camera is doing and whether to ask again.

@@ -10,6 +10,7 @@ import signal
 import threading
 from pathlib import Path
 
+from .allocator import glibc_mallopt, keep_freed_memory
 from .camera import (
     DEFAULT_GAIN,
     VALID_GAINS,
@@ -113,6 +114,9 @@ def install_shutdown_handlers(shutdown: threading.Event, server: ThermalServer) 
 
 def main() -> None:
     options = parse_args()
+    # Before anything is rendered, so the first frame's arrays are already kept (F-79).
+    if keep_freed_memory(glibc_mallopt()):
+        log_line("asked the C library to keep the memory it frees")
     palettes = build_palettes()
     # The command line supplies the starting point; anything saved from the control page overrides
     # it, so a restart keeps whatever the last person chose.

@@ -192,7 +192,8 @@ readable, and most carry their own resolution note; the index below is where to 
 
 Checked on 2026-10-02 against each finding's own note, the phases in section 7, and the code. Two
 are not closed: F-55, parked until the tile's frame rate decay gets in the way, and F-77, on
-Bespok3d's side and reported to them. Everything else is closed. "Where" is the subsection of this
+Bespok3d's side and reported to them. Everything else is closed. F-78 and F-79 were added on
+2026-11-12; F-79 is closed and F-78 is open. "Where" is the subsection of this
 section, the phase in section 7, or section 9.
 
 | Finding | What | Where | Status |
@@ -270,6 +271,8 @@ section, the phase in section 7, or section 9.
 | F-75 | A fresh store counted as watched after boot | Section 9 | Closed before 0.27.0 |
 | F-76 | The first release's page showed no documentation | Section 9 | Closed in 0.27.1 |
 | F-77 | The Bespok3d app's Doc tab shows no images | Section 9 | **Open**, on Bespok3d's side; reported (10.6) |
+| F-78 | A P3 costs twice what a P1 does | 4.4 | **Open**: 81.9% of a core down to 62.3% in test build 0.30.3 and to 55.0% in 0.30.4, which reads a frame in two USB reads, in the plugin's own code beside the driver; a P1 goes from 44.0% to 41.4%. With nothing watching a P3 goes from 9.6% to 2.5%. Measured on the running service on 2026-11-13 |
+| F-79 | The C library gives a P3's working arrays back every frame | 4.4 | Closed in test build 0.30.3 |
 
 ### 4.1 The manifest describes a plugin model that does not exist
 
@@ -890,6 +893,442 @@ the `http` context, and a `web-location` file is included inside a `server` bloc
 cannot be shipped from this plugin at all as the install classes stand. `protocol_version = "HTTP/1.1"`
 on our side alone does not help, because nginx closes the upstream connection per request without it.
 Lowering `target_fps` is the only lever we actually hold.
+
+**F-78. A P3 costs twice what a P1 does, and its largest single step is an enlargement the text
+does not need.** Open: three changes are in test build 0.30.2, measured at the end of this
+finding, and what they did not deliver is F-79.
+
+The first P3 met this plugin on 2026-11-12, on the U1 at 0.30.0 (section 9). The maintainer saw
+80 to 83% of one core with the ruler and the markers on, against the P1's 42%, and expected a
+higher frame rate to be part of it. Measured the same evening with this section's own scripts:
+
+- `/health` counted 728 frames across a 30 s wait, 24.3 a second. The P3 runs at the P1's rate, so
+  the difference is pixels: 256x192 is 2.56 times 160x120. Whether the 3% short of 25 is the
+  camera's real rate or dropped frames is not known; the driver counts drops and nothing shows
+  them.
+- The process used 81.9% of one core watched and 10.3% with nothing watching, against the P1's
+  41.9% and 4.6%. A first idle run read 81.6%, because a browser nobody could see held two streams
+  open. The driver reads a frame in 16 KiB pieces, 5 for a P1 and 13 for a P3, which fits the
+  idle figures and has not been tested as their cause. (It is 6 and 14 once the short reads that
+  end a frame are counted: corrected on 2026-11-13, under "The read" below.)
+- The profiler, at 256x192 rotated 270 as the camera is mounted, beside a P1 run of the same
+  evening, upright:
+
+| step | P3, rotated 270 | P1, upright |
+| --- | --- | --- |
+| pipeline and statistics | 12.48 ms | 5.29 ms |
+| of which the unsharp mask | 3.83 ms | 1.70 ms |
+| of which turning the picture | 2.49 ms | 0.00 ms |
+| encode at 2x | 12.46 ms | 5.35 ms |
+| of which the resize, bilinear | 7.77 ms | 3.11 ms |
+| of which saving the JPEG | 4.10 ms | 1.92 ms |
+| the readout | 4.00 ms | 3.17 ms |
+| the whole frame | 29.98 ms | 14.29 ms |
+
+The render alone is 75% of a core at 25 fps, and with the read it is about 34 ms of work in a
+40 ms frame period, on one thread. There is little room left before frames are dropped.
+
+**The enlargement.** With any part of the readout on, the encode was raised in whole steps until
+the short side reached 240. A P1's short side is 120, so twice is exact. A P3's is 192, so it
+needed one and a quarter times and got twice: 512x384, two and a half times the pixels of a
+doubled P1, for text no easier to read. Two real frames, a cool scene and a print with the nozzle
+at 195 C, were drawn by the plugin's own code at 2x, 1.25x and 1x and put side by side; the text
+in a portrait picture is 30, 19 and 15 pixels tall. The maintainer chose 1.25x. So smooth
+enlarging now asks for the exact figure, and sharp keeps whole steps, because a sensor pixel
+repeated one and a quarter times is a grid of uneven squares. A P1 is encoded exactly as before
+either way. What it saves is an estimate until the printer says: the P1's doubled encode, the
+same 320x240 out, is 5.35 ms against the 12.46 ms this replaces.
+
+**The unsharp mask** is the largest step in the pipeline and was never a setting. On the same two
+frames, with it off, 60% of pixels change by 0.7 of 255 on average: visible in a close-up, hard
+to see in a tile. It is now a switch, "Sharpen edges", on by default so that upgrading changes
+nobody's picture, beside the strength rather than instead of it, so a strength edited into the
+settings file survives being switched off.
+
+**Turning the picture before colouring it. Taken, in 0.30.2.** The picture was coloured and then
+turned, which copies three bytes a pixel through a rotated view; turned first, as palette
+indices, it is one. The output is identical in all sixteen orientations, so it was taken the way
+the three in 0.20.0 were, without argument, once the printer had been asked: with
+`scripts/bench-pipeline-candidates.py` at 256x192 rotated 270, the lookup and the turn together
+were 3.67 ms one way and 1.70 ms the other, and 3.77 against 1.75 in a second run on a busier
+printer. An upright camera gains nothing.
+
+**The other candidates at a P3's size, measured the same evening and not taken:**
+
+- The range from a quarter of the pixels: 2.25 ms to 1.12 ms, with the range ends moving by up to
+  0.109 C, against 0.047 C on a P1.
+- The unsharp mask in integers: 3.46 ms to 2.69 ms, one pixel differing by one of 255. It matters
+  to nobody who unticks the switch.
+- The ruler: 2.05 ms as it ships against about 0.7 ms for its measured pieces, still unexplained,
+  and redrawing it only when its numbers change is already in section 9's list.
+
+**The scripts were part of it.** `scripts/profile-on-printer.sh` passed its arguments to the
+profiler and the readout bench and not to the pipeline candidates, so the first three runs that
+evening measured those at 160x120 whatever was asked for. It passes them to all three now, which
+is where the P3 numbers above come from. The profiler also asked `encode_upscale` how far
+the picture is enlarged, which after this change depends on how; it reads the size off a frame
+the plugin rendered instead, so it is right for whichever version the printer has. And it times
+turning the indices and turning the coloured picture as two lines, as it does the two palette
+lookups, since which of them is being paid depends on the version.
+
+**Noticed, and left:** a viewer screenshot or recording is the size of the picture it was sent,
+so a smoothly enlarged P3's are now 240 by 320 rather than 384 by 512, which the maintainer took
+as a fair price. A timelapse clip is sized by its own rule and is not affected. And where three
+markers crowd together their labels are laid out differently at the smaller size, since the
+layout works in pixels.
+
+**Measured on the printer, 0.30.2, 2026-11-12,** the same P3 turned a quarter, one tile open:
+
+| | 0.30.0 | 0.30.2 |
+| --- | --- | --- |
+| the process, watched | 81.9% of a core | 68.6% |
+| the same with "Sharpen edges" unticked | | 59.2% |
+| the whole frame | 30.63 ms | 22.68 ms |
+| encode with the readout on | 12.33 ms, at 2x | 6.14 ms, at 1.25x |
+| turning the picture | 2.43 ms | 0.39 ms |
+| pipeline and statistics | 11.56 ms | 13.33 ms |
+
+The encode and the turn fell by what the bench said they would, and unticking the switch is worth
+the mask's 3.7 ms. The process saved 13.3 points where the steps promised about 20, and the last
+row is why: F-79.
+
+A caution on the two process figures for 0.30.2. Nobody noted how Enlarging was set when they
+were taken, and later that evening it was found on Sharp, left there from an earlier try, under
+which a P3 is still doubled. The profiler's rows do not depend on it, since the profiler builds
+its own settings. The process figures to quote are 0.30.3's, at the end of F-79, where the
+setting is written beside each one.
+
+**Two more things 0.30.3's figures say.** Sharp enlarging costs a P3 more than smooth now, 64.9%
+against 62.3%, since sharp still doubles it: the option reads "Sharp, cheaper", and its (i)
+gives a P1's figure. Both want to follow the camera that is connected, which the page can know
+from the size of the last frame. And in the Fluidd tile, which is the viewer's page in a frame, a
+P3's first picture takes much longer to appear than a P1's did, with either enlarging, and not
+on the settings page. Reported by the maintainer on 2026-11-12 and not looked into.
+
+**The read, with nothing watching. Measured on 2026-11-13, at 0.30.3; open.** With nobody
+watching, reading the camera is all the plugin does, and it is where a P3 and a P1 are furthest
+apart: 10.3% of a core against 4.6% at 0.30.0. The maintainer chose to look there next, and to
+make any change beside the vendored driver and never in it (`VENDORING.md`); what proves itself
+is then what gets proposed upstream.
+
+`scripts/measure-threads-on-printer.sh` is new. It reads each thread's user and kernel time from
+`/proc/<pid>/task` over a window, as `measure-cpu-on-printer.sh` does for the process, with how
+often the thread stopped to wait, and the camera's USB link from sysfs. Two runs of 60 s on the
+U1, each after 70 s with nothing open, the same P3 and the same service:
+
+| | stream switched off | on, nothing watching |
+| --- | --- | --- |
+| the whole process | 0.2% of a core | 9.6% |
+| the thread that reads the camera | under 0.1% | 9.4%: 7.7% user and 1.7% kernel |
+| that thread's waits | | 350.2 a second |
+
+What that says:
+
+- **It is the read and nothing else.** One thread has 9.4 of the 9.6 points, and with the stream
+  off the process is at 0.2%.
+- **It is user time, four parts in five**: Python, pyusb and libusb's own code, not the kernel's
+  USB work. The split comes from the kernel's tick accounting, a sample a hundred times a second,
+  so it is rougher than the total. It does not clear the number of reads: every read is a trip
+  through pyusb's Python and a ctypes call before the kernel sees it.
+- **350.2 waits a second is 14 reads a frame at 25.0 frames a second**, if a read waits once.
+  Fourteen is what the arithmetic gives. Upstream's `P3_PROTOCOL.md` has a frame as one transfer
+  of the start marker and the pixels, 197,644 bytes for a P3, and then a 12 byte end marker; in
+  the driver's 16 KiB requests that is twelve full reads, one of 1,036 bytes and one of 12. A
+  P1's 77,452 bytes come to 6. The 13 and 5 written above were the bytes divided by the request
+  size. Fourteen to six is 2.33; the idle costs at 0.30.0 are 2.24 apart and the bytes 2.55, so
+  the cost follows the reads more closely than the bytes, at about 0.27 ms of processor a read.
+  Counted on the printer only through the waits so far, and not tested as the cause.
+- **If the reader gets 25.0 a second idle**, the 24.3 that `/health` counted while watched on
+  2026-11-12 would be frames lost behind the render and not the camera's rate. Not confirmed: the
+  driver's count of dropped frames is still shown nowhere.
+- **The link**: high speed, 480 Mbit/s, with 512 byte packets on the stream's endpoint, 0x81.
+  That endpoint is only there while the stream is on; switched off, interface 1 has none.
+
+Read off the driver the same day, and not timed yet: besides the 14 reads, a P3 frame is copied
+whole three times on its way out (each piece into the frame buffer, the buffer into a new
+`bytes`, and a slice of that in `extract_both`, about 590 KB in all), and `read_frame_both`,
+which the plugin calls, builds the infrared picture too, about 245 KB more of copying, which the
+plugin throws away. The driver's own `extract_thermal_data` returns the temperatures alone.
+
+Upstream, looked at on 2026-11-13: `P3_PROTOCOL.md` gives the rate as about 25 frames a second
+and knows no command or register that sets it, so asking the camera for fewer frames is not on
+offer. `p3_camera.py` on its main branch is the length of the pinned file, 1073 lines, and its
+`read_frame` reads the same, 16 KiB requests included. Nothing about what reading costs was found
+in the issues and pull requests that could be read; the lists of them, and the commit list,
+could not be fetched.
+
+`scripts/bench-read-on-printer.sh` is the bench of it, new the same day. Unlike every other
+script here it opens the camera, and the driver's `connect` takes the
+interfaces from whoever holds them, so it asks the running service's `/health` first and refuses
+unless the stream is switched off. It reads through the camera object the driver opened, six
+ways: the driver as shipped, the driver's read with `extract_thermal_data`, a loop of its own
+asking for 16 KiB, 64 KiB and a whole frame at a time, and a whole frame read with no copy
+between buffers. Every request is a whole number of packets, because a bulk read that ends inside
+a packet is an overflow on Linux, which may be the "overflow" the driver's docstring reports from
+whole frame reads on macOS. Before timing anything it prints what each read of one frame
+returned, which is what turns the fourteen above from arithmetic into a count. It was rehearsed
+against the real driver over a simulated endpoint, where all six returned the same temperatures
+frame for frame for both cameras.
+
+**Run on the U1 on 2026-11-13,** the P3, the stream switched off, two rounds of 200 frames a
+candidate, the second in the opposite order. Processor time is the reading thread's own clock:
+
+| candidate | reads a frame | processor a frame, both rounds | of a core |
+| --- | --- | --- | --- |
+| the driver as shipped, both pictures | 14 | 3.54 and 3.48 ms | 8.8% |
+| the driver's read, temperatures only | 14 | 3.17 and 3.26 ms | 8.0% |
+| a loop of our own, 16 KiB requests | 14 | 2.94 and 2.98 ms | 7.4% |
+| the same loop, 64 KiB requests | 5 | 1.70 and 1.65 ms | 4.2% |
+| the same loop, whole frame requests | 2 | 1.09 and 1.10 ms | 2.7% |
+| a whole frame, no copy between buffers | 2 | 0.88 and 0.88 ms | 2.2% |
+
+- **The fourteen is counted.** The driver's reads of one frame returned 16384 twelve times, then
+  1036, then 12. Asked for a whole frame, the camera returned 197,644 bytes and then 12: two
+  transfers, as `P3_PROTOCOL.md` has it, and Linux hands the first over in one read.
+- **The number of reads is most of the cost.** The same loop with 2 reads instead of 14 is
+  1.86 ms a frame cheaper, about 0.16 ms for each read not made. The rest is smaller: 0.29 ms
+  for the infrared picture nobody looks at, 0.26 ms between the driver's loop and ours at the
+  same request size (two of its whole frame copies and its marker bookkeeping), and 0.21 ms
+  for the last copy between buffers.
+- **From first row to last is 2.63 ms a frame, 6.6 points of a core,** for the same
+  temperatures, and it is paid watched or not. The service's reading thread measured 9.4% idle
+  where the bench's first row is 8.8%; the difference is the capture loop around the read. So
+  an idle P3 should come to about 3% and a watched one to about 56%. Both are sums until the
+  service has been measured with the change in it.
+- **The camera sends 25.0 frames a second and every reader keeps up.** All twelve runs took
+  40.00 ms a frame within 0.01, with no frame dropped, none out of step and no bad marker. So
+  the 24.3 a second counted through `/health` on 2026-11-12 was not the camera's rate.
+- The kernel's share of the reading thread's time was between 12% and 30% from run to run,
+  which is the tick sampling over eight seconds, and about a fifth as in the idle measurement.
+  The whole machine spent at most 0.6% of a core in interrupts during any run.
+
+**And with the P1, the same afternoon,** same printer, same protocol:
+
+| candidate | reads a frame | processor a frame, both rounds | of a core |
+| --- | --- | --- | --- |
+| the driver as shipped, both pictures | 6 | 1.84 and 1.86 ms | 4.6% |
+| the driver's read, temperatures only | 6 | 1.63 and 1.70 ms | 4.2% |
+| a loop of our own, 16 KiB requests | 6 | 1.45 and 1.46 ms | 3.6% |
+| the same loop, 64 KiB requests | 3 | 0.96 and 1.03 ms | 2.5% |
+| the same loop, whole frame requests | 2 | 0.81 and 0.81 ms | 2.0% |
+| a whole frame, no copy between buffers | 2 | 0.69 and 0.69 ms | 1.7% |
+
+The six is counted too: 16384 four times, then 11916, then 12, and 77,452 then 12 when a whole
+frame is asked for. So a P1 frames as a P3 does, two transfers, and the driver's docstring, which
+has three, does not describe either. Again 40.00 ms a frame in every run and no fault of any
+kind. A read not made is worth 0.16 ms here as well, and first row to last is 1.17 ms a frame,
+2.9 points of a core: a P1 that costs 4.6% idle and 41.9% watched should come to about 1.7% and
+39%.
+
+**The maintainer took the last row, for both cameras. Built as 0.30.4.** The reader is
+`frame_reader.py`, the plugin's own, and the vendored file is as it was: the driver still finds
+the camera, starts the stream, sets the gain and sends the shutter command, and only the frame is
+read around it, through `camera.dev`. Two reads a frame: the marked frame into the buffer the
+temperatures are copied out of, and the end marker into a small buffer of its own. A read that is
+not the size it should be is a frame given up, and since every request is larger than the
+transfer it is for, the next read starts on a transfer boundary whatever happened. The capture
+loop sees such a frame as it sees a glitched one, and counts it towards a stall in the same way.
+
+The driver's reader is the fallback, as agreed. Out of step ten times in a row, the session is
+handed to `read_frame_both` until the camera is next reconnected, and the log says so once. Ten
+is half of what the capture loop allows before it calls a camera stalled, so the driver's reader
+has its turn first.
+
+The tests changed shape to carry it. The stand-in camera plays its script through a stand-in USB
+endpoint that hands data over in packets and ends a read at a short one, so every capture test
+that was there now runs the new reader. `test_frame_reader.py` loads the vendored file itself and
+reads the same bytes through the driver and through the reader, for both cameras, and puts the
+reader out of step the ways a camera does: a stream joined mid frame, an emission longer than a
+frame, markers that disagree, and a camera that never frames as expected. 701 tests, 13 of them
+new. `VENDORING.md` now lists what the plugin does beside the driver and what to read again when
+the pin moves.
+
+**Measured on the running service, the U1, 2026-11-13.** Whole process, as a share of one core.
+Nothing watching is `scripts/measure-threads-on-printer.sh U1 60 70`; watched is one tile open and
+nothing else, smooth enlarging, `scripts/measure-cpu-on-printer.sh U1 30`. The P1's two builds were
+measured the same day on the same mount, with the same rotation and readout (the P3's). The P3's
+watched figures for 0.30.3 are from 2026-11-12.
+
+| | P3, 0.30.3 | P3, 0.30.4 | P1, 0.30.3 | P1, 0.30.4 |
+| --- | --- | --- | --- | --- |
+| nothing watching, whole process | 9.6% | 2.5% | not taken | 2.1% |
+| the capture thread | 9.4% | 2.4% | not taken | 1.9% |
+| of that, user and kernel | 7.7 and 1.7 | 2.3 and 0.1 | not taken | 1.4 and 0.6 |
+| its waits a second | 350.2 | 50.0 | not taken | 50.0 |
+| watched, "Sharpen edges" ticked | 62.3% | 55.0% | 44.0% | 41.4% |
+| watched, unticked | 55.0% | 48.2% | 39.1% | 36.3% |
+
+- P3: 7.1 points less with nothing watching, 7.3 less watched (6.8 with sharpening off). The bench
+  predicted 6.6.
+- P1: 2.6 points less watched (2.8 with sharpening off). The bench predicted 2.9. With nothing
+  watching there is no 0.30.3 figure for a P1; the nearest is 4.6% on 0.23.0 in September, 2.5
+  points above today's.
+- 50.0 waits a second is 2 reads a frame at 25.0 frames a second, for both cameras.
+- The 41.9% recorded for a watched P1 on 0.30.0 is not a baseline for this. It is lower than the
+  same camera on 0.30.3 today, although 0.30.3 does less work a frame, so it was taken under other
+  settings that nobody noted.
+- "Sharpen edges" costs about 5 points on a P1 (4.9 on 0.30.3, 5.1 on 0.30.4) and about 7 on a P3.
+- Calibration pressed several times with the stream open, on both cameras: the picture carried on.
+- The fallback never engaged: the log line "reading as the driver does" was counted 0 times after
+  each camera's run.
+
+**The readout drawn once and pasted, benched on the U1 on 2026-11-14.** The maintainer's idea,
+from the maker's phone app, which updates its pointers and ruler about once a second: draw the
+readout a few times a second and paste it in between. It takes in the older idea of redrawing the
+ruler only when its numbers change, which on its own would rarely hit while the range follows
+the scene, since the ruler's two end numbers then move most frames; the bar between them never
+changes at all. `scripts/bench-readout-candidates.py` got the candidates: each piece lifted off
+the picture as a patch with its coverage, by drawing it on black and on white with the plugin's
+own functions, and pasted. Run at a P3's size, 256x192 rotated 270, on a 240x320 picture, which
+is what the service sends for a smoothly enlarged P3:
+
+| | drawn every frame | pasted | saved a frame | of a core |
+| --- | --- | --- | --- | --- |
+| the ruler, one patch | 1.59 ms | 0.34 ms | 1.24 ms | 3.1% |
+| three markers, a patch each | 1.23 ms | 0.22 ms | 1.02 ms | 2.5% |
+| the whole readout, four patches | 3.01 ms | 0.59 ms | 2.42 ms | 6.0% |
+| the whole readout, one layer the size of the picture | 3.00 ms | 2.42 ms | 0.58 ms | 1.4% |
+| a knee's ruler, one patch | 1.96 ms | 0.48 ms | 1.48 ms | 3.7% |
+
+- **A P1 gets the same.** Run at 160x120 the same day, every row was within 0.06 ms of the above,
+  because a P1 at 2x and a P3 at 1.25x are both a 240x320 picture and the readout is drawn at the
+  picture's size, not the sensor's. So this is worth the same points to both cameras.
+- **Patches, not a layer.** A paste costs by the pixels it covers, about 0.03 ms a thousand with
+  a mask: four patches cover 15,370 pixels and the layer 76,800.
+- **The build as benched cannot be shipped: 39.0 ms**, a whole frame's interval, because it draws
+  every piece twice on canvases the size of the picture to lift it off. The plugin's own build
+  has to draw each piece once, straight into its patch. With a build that costs what drawing the
+  readout costs today, the bench's arithmetic gives 0.70 ms a frame on average with the readout
+  refreshed once a second and 1.18 ms at five times a second, against 2.99 ms: 5.7 and 4.5
+  points of a core. Those two are sums, not measurements, until such a build exists.
+- **The pasted readout is not byte for byte the drawn one**: about 250 pixels on the edges of
+  the text differ, by 1 of 255.
+- **What it would look like**: numbers that hold between refreshes, and the hottest and coldest
+  crosses trailing what they point at by up to the refresh interval. The colours follow every
+  frame as now.
+- The profile from the same run, for the record: a P3's frame is 19.04 ms (pipeline 9.36,
+  encode at 1.25x 6.52, readout 3.16) and a P1's 13.20 ms (4.52, 5.45, 3.23). Which of 0.30.3 and
+  0.30.4 was installed was not noted; they render alike.
+
+Nothing is wired into the plugin. What to build from this is the maintainer's to decide.
+Decided on 2026-11-14: a "Readout refresh" setting, every frame by default until it has been
+looked at on the printer, built after the live view's rate below and as its own test build.
+
+**Built as 0.30.6 on 2026-11-14.** `readout_refresh`: every frame, or 5, 2 or 1 times a
+second. `HeldReadout` in `overlay.py` draws the readout into patches every so many pictures and
+pastes them on the ones in between; `ThermalRenderer.hold_readout` gives one to the live view's
+renderer and to no other, so a clip draws every frame.
+
+- **Each piece is drawn once**, by the functions that draw it onto a picture, on an empty canvas
+  of its own, and cut down to the pixels it touched. Glyph tiles are composited there and not
+  pasted (`lay_tile`): pasting a soft edge onto nothing mixes its coverage in twice, and the
+  pasted readout then differs from the drawn one by 51 of 255 instead of 1.
+- **Counted, not timed**, like the live view's pace: `pictures_a_refresh` is the live view's
+  rate divided by the refreshes asked for, rounded down and never under one. That settles how
+  it meets the live view's rate: a refresh cannot come oftener than the pictures.
+- **A change shows at once** because a change of settings builds a new renderer, and the hold
+  is not among the things carried over to it.
+- **What the build costs is the open figure.** On a development machine a build of the patches
+  is about two and a half ordinary draws, since compositing a glyph is three steps where
+  pasting it is one. The bench's sums above assumed one draw. If the ratio holds on the U1 the
+  saving at 25 pictures a second is about 5 points at one refresh a second, 4.5 at two and 2.5
+  at five, where those sums gave 5.7 at one and 4.5 at five.
+- **Measured on the U1 the same day**, one tile open at 25 pictures a second, % of one core at
+  every frame, five, two and one refreshes a second. P3: 54.5, 51.6, 49.4, 49.1. P1: 38.9,
+  36.4, 34.4, 33.7. That is 2.9, 5.1 and 5.4 points for a P3 and 2.5, 4.5 and 5.2 for a P1, so
+  the ratio held, both cameras save the same as the bench said they would, and nearly all of
+  it is had at two refreshes a second.
+- **Twice a second is the default from 0.30.7**, the maintainer's choice on those figures. A
+  settings file that never named the setting gets it; one that says every frame keeps that.
+
+**The live view's rate, and Off with the timelapse kept. Built as 0.30.5 on 2026-11-14.** The
+maintainer's second idea of the day: not everybody wants the live view, some only the clips.
+Read off the code first, the answer for somebody who never opens Fluidd was that there is
+nothing to save: a minute with no page asking and nothing is rendered (Phase 7g), and the
+timelapse takes its frames raw whether or not anything is. What is left to save is a dashboard
+left open with the tile on it, which costs the full watched figure for as long as it is open,
+and a live view that is wanted but not at 25 pictures a second. So the Camera panel has a "Live
+view" setting: 25, 20, 15, 10 or 5 pictures a second, or Off.
+
+- **The camera cannot be asked for fewer frames** (above), so the capture loop draws some and
+  passes over the rest, by count: each frame adds the wanted rate to what is owed and a picture
+  is drawn for every 25 owed. 20, 15 and 10 are uneven by one camera frame, 10 a second being
+  gaps of 80 and 120 ms in turn; the maintainer chose steps of five over even pacing.
+- **Five is the slowest.** A picture older than a second is stale to everything that serves
+  one (`FRESH_ENOUGH_SECONDS`, and a stream resends after `STREAM_WAIT_SECONDS`), so one a second
+  would sit on both limits. It needs those to follow the rate, and was left for later.
+- **Off is not "Stream off".** The camera stays open and read, `offer_raw` still feeds the
+  timelapse, and a second placeholder, "Live view off", is published twice a second to whoever
+  is looking, the snapshot included (the maintainer's choice: off costs nothing whoever asks).
+  `/health` carries `live_view`, so the viewer's watchdog leaves that picture alone as it does
+  the other.
+- **Two things a renderer does once per picture were tied to the clock instead.** Noise
+  reduction averages a frame with the renderer's last output, which at 5 a second is 200 ms
+  old: the frame passed over just before is kept and used. The range's easing is compounded over
+  the camera frames between two pictures. At 25 neither applies and the settings reach the
+  renderer untouched, so that picture is 0.30.4's. A clip's renderer is built without any of
+  this.
+- **Expected, not measured:** if the cost follows the pictures, a P3 at 55.0% watched and 2.5%
+  idle comes to about 44, 34, 23 and 13% at 20, 15, 10 and 5, and a P1 at 41.4% and 2.1% to
+  about 34, 26, 18 and 10%, with Off at the idle figure for both. To be measured on the U1 with
+  one tile open, `scripts/measure-cpu-on-printer.sh U1 30` at each setting.
+
+**F-79. The smaller picture made the pipeline slower: the C library gives a P3's working arrays
+back on every frame.** Closed in test build 0.30.3, which asks glibc to keep them. Found,
+confirmed and measured on the printer on 2026-11-12.
+
+In 0.30.2's profile the pipeline stage rose, 13.33 ms against 0.30.0's 11.56 ms, although the
+turn inside it had become 2 ms cheaper, and the unsharp mask timed alone read 5.08 ms against
+3.67 ms for code nobody had touched. Nothing in the pipeline explains that. What had changed was
+the size of the largest thing the process allocates.
+
+The reading that fits, and it is fitted to the numbers rather than traced: glibc keeps freed
+memory for reuse up to a threshold, raises that threshold to the largest block freed so far, and
+hands the top of the heap back to the system once more than twice that much is free. Up to 0.30.0
+the largest block was the doubled picture, about 786 KB for a P3, so numpy's whole-frame arrays,
+about 196 KB each, stayed and were reused. With the picture at 320x240 the largest block is about
+307 KB, and the arrays are handed back and their pages faulted in again on every frame. A P1's
+arrays are about 77 KB, under the threshold glibc starts at, so a P1 never met this.
+
+What was measured: the same profiler on the same build with `MALLOC_MMAP_THRESHOLD_=8388608` and
+`MALLOC_TRIM_THRESHOLD_=67108864` in its environment, which tells glibc to keep what is freed.
+
+| | as installed | told to keep its memory |
+| --- | --- | --- |
+| pipeline and statistics | 13.33 ms | 10.08 ms |
+| unsharp mask, on its own | 5.08 ms | 3.93 ms |
+| the whole frame | 22.68 ms | 19.94 ms |
+
+No other step moved, so this is not why a P3's noise reduction costs four times a P1's for two
+and a half times the pixels; that is still unexplained. On a development machine the mask alone
+showed the same shape, 0.09 ms on 0.30.0, 0.17 ms on 0.30.2 and 0.09 ms again with the two
+variables set, and the pipeline stage did not move at all, so once more the size of it was the
+printer's to say.
+
+There were three ways to fix it: ask glibc once, at start-up, to keep what is freed; set the two
+variables in the service's environment, if a manifest can say so; or reuse the pipeline's arrays
+from frame to frame, which does not depend on the C library at all and is the largest change of
+the three. **The maintainer took the first, in 0.30.3.** `allocator.py` looks `mallopt` up in the
+process itself and sets the same two thresholds the measurement used, `main` calls it before
+anything is rendered and says so in the log, and where there is no glibc, macOS and musl among
+them, it does nothing. The price is a few megabytes the process no longer returns. The profiling
+scripts ask as the service does when the plugin they are measuring can, so they time a process
+set up the same way.
+
+**Measured on the running service, 0.30.3, 2026-11-12,** the P3 turned a quarter, one tile open.
+The log carries the line saying glibc was asked, and the profiler reads 10.07 ms for the pipeline,
+where the run with the two variables read 10.08 ms.
+
+| Enlarging | "Sharpen edges" ticked | unticked |
+| --- | --- | --- |
+| smooth, a P3 at 1.25x | 62.3% of a core | 55.0% |
+| sharp, a P3 at 2x | 64.9% | 56.0% and 57.4% |
+
+Against 0.30.0's 81.9%, a P3 costs 19.6 points less with nothing changed on the settings page,
+and 26.9 points less with the switch off. A P1 is at 41.9%. How much of that is this finding's
+cannot be read off cleanly, because of the caution on 0.30.2's figures in F-78: 6.3 points if
+they were taken on Smooth, which is what the profiler's 2.7 ms a frame would come to, and 3.7 if
+on Sharp, where the doubled picture is back and this finding would hardly have applied.
 
 ### 4.5 Gate and CI
 
@@ -2903,6 +3342,42 @@ channel, and reinstalled from the store the same day: "Package was unsigned at i
 shows under a stage build of the Bespok3d app and not under the stable one, a question for its
 maintainer rather than for this plugin.
 
+**2026-11-12, at 0.30.0: a P3 met the plugin.** On the U1: it was detected and streamed, a video
+and a still were saved from it, and a print ran normally beside the live view and the timelapse.
+Still to meet the device: the gain switch, calibration, a finished timelapse clip, and the
+readings checked against a known temperature. It costs about twice what a P1 does, which is F-78
+in section 4.4.
+
+**2026-11-13, at 0.30.3: the camera read, measured.** With nothing watching a P3 costs 9.6% of a
+core, all of it on the thread that reads the camera and four fifths of it user time. A bench of
+other ways to read a frame, beside the vendored driver, ran on the U1 the same day: the driver
+makes 14 reads a frame and spends 3.51 ms on it, and a whole frame read at once is 2 reads and
+0.88 ms, 6.6 points of a core less; a P1 goes from 6 reads and 1.85 ms to 0.69 ms. Test build
+0.30.4 reads that way, with the driver's reader kept as the fallback. Measured on the running
+service the same day: a P3 with nothing watching went from 9.6% of a core to 2.5%, and with one
+tile open from 62.3% to 55.0%; a P1 with one tile open went from 44.0% to 41.4%, and costs 2.1%
+with nothing watching. The fallback never engaged. F-78 in section 4.4 has the figures.
+
+**2026-11-14, at 0.30.5: the live view has a rate.** A "Live view" setting, 25 pictures a second
+down to 5 in fives, or off with the camera left on for the timelapse and a "Live view off"
+picture in place of the stream. Built and tested, 757 tests; what each rate costs has still to
+be measured on the printer. The readout drawn once and pasted was benched on the U1 the same
+day, 3.01 ms a frame against 0.59 ms, and is the next test build, as a "Readout refresh"
+setting. F-78 in section 4.4 has both.
+
+**2026-11-14, later: 0.30.5 measured, 0.30.6 built.** On the U1 the live view's cost follows
+its pictures: a P1 at 40.4, 33.8, 25.9, 17.9, 10.2 and 2.6% of a core at 25, 20, 15, 10, 5 and
+Off, a P3 at 56.3, 45.5, 34.9, 23.9, 13.3 and 2.8%. In Safari the Fluidd tile stays black with
+the live view off; in Chrome it shows the off screen. 0.30.6 adds the "Readout refresh"
+setting and the live view's list in FPS. Measured the same day, it saves about 5 points of a
+core at twice a second for either camera, and 0.30.7 makes that the default. 808 tests.
+
+**2026-11-14, evening: 1.0.0 prepared.** 0.30.7 read 49.4% on the U1 with a P3. The public
+changelog has one entry for everything since 0.30.0, both READMEs have the measured cost of
+each setting and the P3's status, "Sharp, cheaper" is "Sharp", and the settings screenshot was
+made again. Still `rc`. Not done for it: the P3's wide range gain and either camera's readings
+against a known temperature, the Safari tile with the live view off, and the upstream report.
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
@@ -2935,14 +3410,23 @@ What is left, in the order it is worth doing:
   - 0.30.0, tried on the U1 and ready to release: clips with their own colour scale (the knee)
     and smooth enlarging, and the markers' dark edge.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
+    Widened on 2026-11-14 to the whole readout, any scale: `scripts/bench-readout-candidates.py`
+    now times the ruler and the markers drawn once and pasted as patches, against drawn every
+    frame, at the size the service sends, and works out a frame's cost with the readout
+    refreshed once and five times a second (the maintainer's idea, from the maker's phone app,
+    which updates its pointers and ruler about once a second). Pasted patches differ from the
+    drawn readout by at most 1 of 255 on the edges of the text. Run on the U1 the same day:
+    3.01 ms a frame drawn against 0.59 ms pasted, the same for both cameras; F-78 in section
+    4.4 has the table. To be built as a "Readout refresh" setting after 0.30.5.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted
   outside the repo, since a message addressed to another project is spent once it is sent; section
   10 is the version that stays. The installer dropping `userEditable` values was retested on
   2026-09-18, did not reproduce, and is closed.
-- **The P3 hardware trial**, whenever one turns up. Everything for it is implemented and none of it
-  has met the device.
+- **The rest of the P3 hardware trial.** It streams, as of 2026-11-12, and on 2026-11-13 a
+  calibration pressed with the stream open did not interrupt the picture. The gain switch, a
+  timelapse clip and the readings have not met the device, and F-78 is what it costs.
 - **Parked deliberately**: auto-mode range decimation and a dead band, and F-55's fps decay. Both
   wait on somebody actually wanting them.
 

@@ -30,8 +30,28 @@ ORIENTATIONS = [
 ]
 
 
+P3_SENSOR_WIDTH = 256
+P3_SENSOR_HEIGHT = 192
+
+
 def raw_for(celsius: float) -> int:
     return int((celsius + KELVIN_AT_ZERO_CELSIUS) * RAW_UNITS_PER_KELVIN)
+
+
+def p3_frame() -> np.ndarray:
+    """A P3-shaped ramp. Every other frame in this file is a P1's."""
+
+    ramp = np.linspace(
+        raw_for(24.0), raw_for(40.0), P3_SENSOR_WIDTH * P3_SENSOR_HEIGHT, dtype=np.float32
+    )
+    return ramp.reshape((P3_SENSOR_HEIGHT, P3_SENSOR_WIDTH)).astype(np.uint16)
+
+
+def encoded_size(streamer, palettes, frame: np.ndarray, **settings) -> tuple[int, int]:
+    """The size of the JPEG the stream would send for this frame, readout on."""
+
+    renderer = streamer.ThermalRenderer(palettes["ironbow"], streamer.RenderSettings(**settings))
+    return Image.open(io.BytesIO(renderer.render_frame(frame).jpeg)).size
 
 
 @pytest.fixture
@@ -154,6 +174,68 @@ def test_without_the_overlay_the_encode_is_left_exactly_as_asked(thermal_streame
     """The 43% of a core F-27 bought back stays bought for anyone who turns the readout off."""
 
     assert thermal_streamer.encode_upscale((160, 120), 1, readout_enabled=False) == 1
+
+
+def test_smooth_enlarging_stops_at_the_edge_the_text_needs(thermal_streamer):
+    """A P3 needs one and a quarter times. The whole step above it is two and a half times the
+    pixels of a doubled P1, which on the U1 was 12.46 ms of a 29.98 ms frame."""
+
+    upscale = thermal_streamer.encode_upscale
+
+    assert upscale((256, 192), 1, readout_enabled=True, whole_steps=False) == 1.25
+    assert upscale((192, 256), 1, readout_enabled=True, whole_steps=False) == 1.25
+
+
+def test_a_p1_is_doubled_however_it_is_enlarged(thermal_streamer):
+    """Its short side is half the edge the text needs, so the exact figure is the whole step."""
+
+    upscale = thermal_streamer.encode_upscale
+
+    assert upscale((160, 120), 1, readout_enabled=True, whole_steps=False) == 2
+    assert upscale((160, 120), 1, readout_enabled=True, whole_steps=True) == 2
+
+
+def test_smooth_enlarging_never_lowers_an_upscale_someone_asked_for(thermal_streamer):
+    assert thermal_streamer.encode_upscale((256, 192), 4, True, whole_steps=False) == 4
+
+
+def test_without_the_overlay_smooth_enlarging_leaves_the_encode_alone_too(thermal_streamer):
+    assert thermal_streamer.encode_upscale((256, 192), 1, False, whole_steps=False) == 1
+
+
+def test_a_smoothly_enlarged_p3_is_encoded_with_its_short_side_at_the_text_edge(
+    thermal_streamer, palettes
+):
+    edge = thermal_streamer.OVERLAY_MIN_ENCODE_EDGE
+
+    assert encoded_size(thermal_streamer, palettes, p3_frame()) == (320, edge)
+    assert encoded_size(thermal_streamer, palettes, p3_frame(), rotation=270) == (edge, 320)
+
+
+def test_a_sharply_enlarged_p3_keeps_whole_sensor_pixels(thermal_streamer, palettes):
+    """One and a quarter times with nearest repeats every fourth pixel: uneven squares."""
+
+    sharp = thermal_streamer.SHARP_UPSCALE
+
+    assert encoded_size(thermal_streamer, palettes, p3_frame(), upscale_filter=sharp) == (
+        P3_SENSOR_WIDTH * 2, P3_SENSOR_HEIGHT * 2
+    )
+
+
+@pytest.mark.parametrize("upscale_filter", ["smooth", "sharp"])
+def test_a_p1_is_encoded_at_the_size_it_always_was(thermal_streamer, palettes, upscale_filter):
+    size = encoded_size(thermal_streamer, palettes, thermal_frame(), upscale_filter=upscale_filter)
+
+    assert size == (P1_SENSOR_WIDTH * 2, P1_SENSOR_HEIGHT * 2)
+
+
+def test_a_p3_with_the_readout_off_is_encoded_at_the_sensors_own_size(thermal_streamer, palettes):
+    size = encoded_size(
+        thermal_streamer, palettes, p3_frame(),
+        colorbar=False, reticle=False, hotspot=False, coldspot=False,
+    )
+
+    assert size == (P3_SENSOR_WIDTH, P3_SENSOR_HEIGHT)
 
 
 def test_a_frame_with_the_overlay_is_still_a_jpeg(thermal_streamer, palettes):

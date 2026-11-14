@@ -12,14 +12,23 @@ libusb-driven capture and MJPEG streaming for the Thermal Master P1.
 | pyusb | PyUSB contributors | BSD-3-Clause | yes | yes, as a wheel |
 | Material Icons | Google | Apache-2.0 | yes | the "info" icon, inline in the settings page |
 
-The USB protocol layer is not reimplemented here. `files/vendor/p3_camera.py` is verbatim from
+`files/vendor/p3_camera.py` is the USB protocol driver, verbatim from
 [jvdillon/p3-ir-camera](https://github.com/jvdillon/p3-ir-camera) at pinned commit
 `e3205dca5727682ff2d903585d1dce5a1d19f1f6`, Apache-2.0, whose licence ships beside it as
 `LICENSE.p3-ir-camera`. The repository's `VENDORING.md` records the pin and how to verify it.
 Protocol reverse-engineering credit belongs to @aeternium.
 
-This plugin adds the colormap, the auto-ranging and the MJPEG serving layer on top, in
-`files/bin/thermal-master-stream.py`.
+**What is used from it:** the camera models with their USB identifiers and geometry, opening
+and initialising the device, the commands and their acknowledgements, starting and stopping the
+stream, the gain, the size of a frame and where the temperatures sit in it, the conversion of
+raw values to temperatures with the emissivity correction, and its frame reader as the fallback.
+
+**What this plugin implements itself, beside the driver and without changing it:** reading a
+frame, in two bulk reads through the device the driver opened, in
+`files/lib/thermal_master/frame_reader.py`; firing the calibration shutter, with the driver's own
+command instead of through its `trigger_shutter`; and on top of both, the colour mapping, the
+ranging, the temperature readout, the viewer, the timelapse and the MJPEG serving, in
+`files/lib/thermal_master/`.
 
 numpy, Pillow and pyusb are declared in `requirements.txt` and ship as wheels built for the printer's
 architecture, installed into a virtual environment belonging to this plugin alone. They are separate

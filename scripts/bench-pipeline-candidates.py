@@ -49,7 +49,24 @@ def load_streamer(entry: Path):
         import thermal_master
     except ImportError as error:
         raise SystemExit(f"cannot import the plugin from {plugin_files}: {error}") from error
+    start_allocator_as_the_service_does(thermal_master)
     return thermal_master
+
+
+def start_allocator_as_the_service_does(streamer) -> None:
+    """Ask the C library to keep freed memory, if the plugin under test does so when it starts.
+
+    The service asks once, in `main`, which nothing here calls (F-79). Left out, every number
+    below would be for a process set up differently from the one that serves the picture. A
+    version from before 0.30.3 has nothing to ask with and is measured as it runs, unasked.
+    """
+
+    ask = getattr(streamer, "keep_freed_memory", None)
+    if ask is None:
+        return
+    kept = ask(streamer.glibc_mallopt())
+    print(f"allocator: {'keeps' if kept else 'was not asked to keep'} freed memory, "
+          "as the service on this machine does", file=sys.stderr)
 
 
 def synthetic_frame(width: int, height: int):
@@ -147,6 +164,17 @@ def palette_take(palette, indices):
     return np.take(palette, indices, axis=0)
 
 
+def orient_before_lookup(streamer, palette, indices, rotation: int):
+    """Turn the palette indices and colour them afterwards, not the coloured picture.
+
+    The same picture either way, since a lookup does not care where a pixel is. What differs is
+    what is copied through a rotated view: one byte a pixel instead of three. On the U1 turning a
+    coloured P3 frame was 2.49 ms of a 29.98 ms frame, measured on 2026-11-12.
+    """
+
+    return np.take(palette, streamer.orient(indices, rotation, False, False), axis=0)
+
+
 # ---- the comparisons ------------------------------------------------------------------------
 
 
@@ -169,6 +197,7 @@ def main() -> None:
     parser.add_argument("streamer", type=Path, help="path to thermal-master-stream.py")
     parser.add_argument("--width", type=int, default=160)
     parser.add_argument("--height", type=int, default=120)
+    parser.add_argument("--rotate", type=int, default=0, choices=(0, 90, 180, 270))
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
     options = parser.parse_args()
 
@@ -187,7 +216,7 @@ def main() -> None:
     detailed = streamer.enhance_detail(normalized, settings.detail_strength)
 
     print("")
-    print(f"pipeline candidates, {options.width}x{options.height}, "
+    print(f"pipeline candidates, {options.width}x{options.height} rotated {options.rotate}, "
           f"median of {options.repeats} calls at {FRAMES_PER_SECOND:.0f} fps")
     print("")
 
@@ -240,6 +269,17 @@ def main() -> None:
         lambda: palette_take(palette, detailed),
         options.repeats,
         f"identical output: {same}",
+    )
+
+    turned_after = streamer.orient(palette_take(palette, detailed), options.rotate, False, False)
+    turned_before = orient_before_lookup(streamer, palette, detailed, options.rotate)
+    same = bool(np.array_equal(turned_after, turned_before))
+    compare(
+        "orient: before the lookup",
+        lambda: streamer.orient(palette_take(palette, detailed), options.rotate, False, False),
+        lambda: orient_before_lookup(streamer, palette, detailed, options.rotate),
+        options.repeats,
+        f"identical output: {same}; both times include the lookup",
     )
     print("")
 

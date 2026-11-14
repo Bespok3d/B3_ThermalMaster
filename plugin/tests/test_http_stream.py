@@ -345,7 +345,9 @@ def test_health_answers_before_any_frame(thermal_streamer):
         server.server_close()
 
     assert status == 200
-    assert payload == {"frame": 0, "frame_age_seconds": None, "streaming": True}
+    assert payload == {
+        "frame": 0, "frame_age_seconds": None, "streaming": True, "live_view": True,
+    }
 
 
 def test_health_answers_where_the_statistics_do_not(serving):
