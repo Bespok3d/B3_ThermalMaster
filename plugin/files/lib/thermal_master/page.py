@@ -31,8 +31,10 @@ from .cost import describe_cost
 from .pipeline import (
     CAMERA_FRAMES_A_SECOND,
     LIVE_VIEW_OFF,
+    READOUT_EVERY_PICTURE,
     VALID_LIVE_VIEW_RATES,
     VALID_RANGE_MODES,
+    VALID_READOUT_REFRESHES,
     VALID_ROTATIONS,
     VALID_UPSCALE_FILTERS,
 )
@@ -70,13 +72,27 @@ RANGE_MODE_DESCRIPTIONS = {
 
 
 def live_view_description(pictures_a_second: int) -> str:
-    """What a live view rate is called in its list: the number, and what the two ends mean."""
+    """What a live view rate is called in its list: the number, and what the two ends mean.
+
+    "FPS" and "(Max)" are the maintainer's wording (2026-11-14, after using the list on the U1):
+    the unit people already know a frame rate by, and the top marked as the top.
+    """
 
     if pictures_a_second == LIVE_VIEW_OFF:
         return "Off"
     if pictures_a_second == CAMERA_FRAMES_A_SECOND:
-        return f"{pictures_a_second} pictures a second, all the camera sends"
-    return f"{pictures_a_second} a second"
+        return f"{pictures_a_second} FPS (Max)"
+    return f"{pictures_a_second} FPS"
+
+
+# How often the readout is drawn afresh, in the words of its list. Not in FPS: the picture's
+# rate is the live view's, and this is how often the numbers on it change.
+READOUT_REFRESH_DESCRIPTIONS = {
+    READOUT_EVERY_PICTURE: "Every frame",
+    5: "5 times a second",
+    2: "Twice a second",
+    1: "Once a second",
+}
 
 
 # The four scales, named for what they do to the picture.
@@ -234,6 +250,17 @@ INFO_TEXTS = {
         "off\" picture instead, the camera stays connected, and the timelapse records every "
         "layer as before. None of this matters while no page is showing the picture, because "
         "then none is made anyway. To release the camera completely, stop it instead.",
+    ),
+    "readout_refresh": (
+        "the readout refresh",
+        "How often the ruler's numbers and the markers are worked out again in the live view. "
+        "A few times a second draws them once and keeps them still until the next time, which "
+        "is less work for the printer on every frame in between: the numbers hold, and the "
+        "hottest and coldest crosses follow what they point at a moment late. Twice a second "
+        "is where it starts, and saves about a twentieth of a core. Every frame is what the "
+        "plugin did before there was a choice. The colours themselves always follow every "
+        "frame. A spot you place or a setting you change shows at once, and timelapse clips "
+        "are not affected.",
     ),
     "cost": (
         "the cost line",
@@ -450,6 +477,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
              Hottest pixel</label>
       <label><input type="checkbox" name="coldspot"{coldspot}>
              Coldest pixel</label>
+      <div class="field">
+        <label><span>Readout refresh</span>
+               <select name="readout_refresh">{readout_refresh_options}</select></label>
+        {info_readout_refresh}
+      </div>
       <label><span>Units</span><select name="units">{unit_options}</select></label>
       <div class="field">
         <label><span>Emissivity</span>
@@ -462,7 +494,7 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
       <legend>Camera</legend>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
       <div class="field">
-        <label><span>Live view</span>
+        <label><span>Live view frame rate</span>
                <select name="live_view_rate">{live_view_options}</select></label>
         {info_live_view}
       </div>
@@ -1041,6 +1073,14 @@ def render_control_page(
                 pictures_a_second == settings["live_view_rate"],
             )
             for pictures_a_second in VALID_LIVE_VIEW_RATES
+        ),
+        readout_refresh_options="".join(
+            option(
+                str(refreshes_a_second),
+                READOUT_REFRESH_DESCRIPTIONS[refreshes_a_second],
+                refreshes_a_second == settings["readout_refresh"],
+            )
+            for refreshes_a_second in VALID_READOUT_REFRESHES
         ),
         device_status=describe_device(device_status),
         control_script=CONTROL_SCRIPT.replace("COST_POLL_MS", str(COST_POLL_MILLISECONDS)),

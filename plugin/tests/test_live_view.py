@@ -349,8 +349,29 @@ def test_the_control_page_offers_every_rate_and_marks_the_one_in_force(thermal_s
     assert 'name="live_view_rate"' in page
     for pictures_a_second in thermal_streamer.VALID_LIVE_VIEW_RATES:
         assert f'<option value="{pictures_a_second}"' in page
-    assert '<option value="10" selected>10 a second</option>' in page
+    assert '<option value="10" selected>10 FPS</option>' in page
     assert '<option value="0">Off</option>' in page
+
+
+def test_the_list_reads_in_fps_and_marks_the_top_as_the_most_there_is(thermal_streamer):
+    """The maintainer's wording, after using the list on the U1 (2026-11-14)."""
+
+    listed = [
+        thermal_streamer.live_view_description(pictures_a_second)
+        for pictures_a_second in thermal_streamer.VALID_LIVE_VIEW_RATES
+    ]
+
+    assert sorted(listed) == sorted(
+        ["25 FPS (Max)", "20 FPS", "15 FPS", "10 FPS", "5 FPS", "Off"]
+    )
+
+
+def test_the_setting_is_titled_for_what_it_changes(thermal_streamer):
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), None)
+
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert "<span>Live view frame rate</span>" in page
 
 
 def test_the_page_says_what_off_keeps_and_what_stopping_the_camera_does_instead(

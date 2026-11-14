@@ -67,9 +67,10 @@ the next click. The plugin's version is at the foot of the page.
 | Range | From, To | `range_low_celsius`, `range_high_celsius` | degrees Celsius, whatever the display units |
 | Readout | Ruler, crosshair, hottest and coldest pixel | `colorbar`, `reticle`, `hotspot`, `coldspot` | `true`, `false` |
 | Readout | Units | `units` | `celsius`, `fahrenheit` |
+| Readout | Readout refresh | `readout_refresh` | how often the live view's ruler and markers are drawn afresh: `2` times a second by default, or `5` or `1`, held still on the pictures in between, or `0` for every frame; clips always draw every frame |
 | Readout | Emissivity | `emissivity` | 0.05 to 1.00, 0.95 by default |
 | Camera | Gain | `gain` | `high` for -20 to 150 C, `low` for 0 to 550 C |
-| Camera | Live view | `live_view_rate` | pictures a second: `25` (every frame the camera sends, the default), `20`, `15`, `10`, `5`, or `0` for off, which keeps the camera on for the timelapse and draws nothing |
+| Camera | Live view frame rate | `live_view_rate` | pictures a second, listed as FPS: `25` (every frame the camera sends, the default, listed as "25 FPS (Max)"), `20`, `15`, `10`, `5`, or `0` for off, which keeps the camera on for the timelapse and draws nothing |
 | Camera | Stop the camera, Start | `streaming` | `true`, `false` |
 | Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
 | Timelapse | Record one frame per layer | `timelapse` | `true`, `false`; off until you switch it on |

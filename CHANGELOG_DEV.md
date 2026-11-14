@@ -20,14 +20,71 @@ the same evening. 0.30.3 came out of what that measurement found, and was built,
 measured the same evening too. 0.30.4 is the next day's, 2026-11-13, and is about reading the
 camera where the first three are about drawing the picture. 0.30.5, 2026-11-14, is the first
 that gives the owner something to choose: how many pictures a second the live view is worth.
+0.30.6, the same day, is the second: how often the numbers on it are worked out. 0.30.7 makes
+twice a second the answer nobody has to give.
 The measurements behind all of them are F-78 and F-79 in `ROADMAP.md`.
 Their public entry is still to be written, with the release they lead to.
 
+### 0.30.7
+
+- **The readout is refreshed twice a second unless somebody says otherwise.** The maintainer's
+  choice after 0.30.6's figures: twice a second took 5.1 points of a core off a P3 and 4.5 off
+  a P1, and once a second only 0.3 and 0.7 more, for markers that trail twice as long. "If
+  people want it faster, they can tune it up": every frame and 5 times a second are still in
+  the list.
+- This changes the picture for whoever upgrades without touching the setting, which is meant:
+  a settings file that never named `readout_refresh` gets twice a second. One that says `0`
+  keeps every frame, and one edited to something not offered now falls back to twice a second.
+- Timelapse clips are untouched, as before: each frame's readout is drawn.
+
+### 0.30.6
+
+- **The readout can be held between refreshes.** A new "Readout refresh" setting in the Readout
+  panel: every frame, which is what the plugin always did and stays the default until it has
+  been looked at on the printer, or 5 times, twice or once a second. Held, the ruler and the
+  markers are drawn once into small patches and pasted onto the pictures in between: the
+  numbers stand still, and the hottest and coldest crosses follow what they point at by up to
+  one refresh. The colours follow every picture as before. `readout_refresh` in JSON and in the
+  settings file, 0 for every frame; it survives a restart.
+- It is counted in pictures, as the live view's own pace is, and rounded down so the readout
+  is never refreshed less often than asked: at 25 FPS, twice a second is every twelfth picture.
+  A refresh cannot come oftener than the pictures do.
+- **A change shows at once.** A spot placed, a marker switched off, a unit changed: any change
+  of settings starts from an empty hold, so the next picture carries a fresh readout. So does
+  coming back from a silence, and so does a picture of another size.
+- **Clips are not affected.** Only the live view holds a readout; a timelapse clip draws every
+  frame's, whatever this says.
+- The pasted readout is the drawn one to within 1 of 255 on the soft edges of the text, which
+  is what the bench found. With the setting at every frame no patch is made and the picture is
+  byte for byte what it was.
+- **Expected, not measured.** The bench on the U1 gave 3.01 ms a frame drawn and 0.59 ms
+  pasted (F-78). The plugin's own build of the patches, timed only on a development machine
+  and so worth nothing as a figure, costs about two and a half ordinary draws, because each
+  glyph is composited onto an empty canvas instead of pasted. If that ratio holds on the
+  printer, at 25 FPS the readout goes from about 7.5% of a core to about 2% at once a second,
+  3% at twice and 5% at five times. To be measured with
+  `scripts/measure-cpu-on-printer.sh U1 30` at each setting.
+- **Measured on the U1, 2026-11-14**, in Chrome, one tile open at 25 FPS, 30 s each, % of one
+  core at every frame, 5 times, twice and once a second. P3: 54.5, 51.6, 49.4, 49.1. P1: 38.9,
+  36.4, 34.4, 33.7. So 2.9, 5.1 and 5.4 points less for a P3 and 2.5, 4.5 and 5.2 for a P1,
+  against the 2.5, 4.5 and 5 expected above: the build does cost about two and a half draws on
+  the printer too, and once a second buys almost nothing over twice. Seen as well: the numbers
+  hold, the markers move once a second at that setting, a spot appears at once, the ruler
+  disappears at once, and the timelapse works. In 0.30.6 the default is every frame; 0.30.7
+  makes it twice a second.
+- **The live view's list reads in FPS** (the maintainer's wording, after 0.30.5 on the U1):
+  "25 FPS (Max)", "20 FPS" down to "5 FPS", and "Off", under the title "Live view frame rate".
+- Inside: `encode_jpeg` is now two steps a renderer can put a readout between,
+  `enlarged_picture` and `picture_jpeg` (0.30.5's `placeholder_jpeg`, renamed for what it has
+  become).
+
 ### 0.30.5
 
-- **The live view has a rate, and an Off.** A new "Live view" setting in the Camera panel: 25
-  pictures a second, which is every frame the camera sends and what the plugin always did, or
-  20, 15, 10 or 5, or Off. Making pictures is nearly all of what the plugin costs while a page
+- **The live view has a rate, and an Off.** A new "Live view frame rate" setting in the Camera
+  panel: 25 pictures a second, which is every frame the camera sends and what the plugin always
+  did, or 20, 15, 10 or 5, or Off. The list reads "25 FPS (Max)", "20 FPS" and so on down to
+  "Off"; it first read "Live view" and "20 a second", reworded on 2026-11-14 after the list was
+  used on the U1. Making pictures is nearly all of what the plugin costs while a page
   is showing one (55.0% of a core for a P3 on 0.30.4 against 2.5% with nothing watching), so
   this is the one setting that scales the whole of it. `live_view_rate` in JSON and in the
   settings file; it survives a restart.
@@ -43,6 +100,16 @@ Their public entry is still to be written, with the release they lead to.
   and come out uneven by one camera frame: 10 a second is gaps of 80 and 120 ms in turn. Five is
   the slowest offered because a picture older than a second counts as stale to everything that
   serves one.
+- **Measured on the U1, 2026-11-14**, one tile open, 30 s each, % of one core at 25, 20, 15,
+  10, 5 and Off. P1: 40.4, 33.8, 25.9, 17.9, 10.2, 2.6. P3: 56.3, 45.5, 34.9, 23.9, 13.3, 2.8.
+  The cost follows the pictures, about 1.5 points for each picture a second on a P1 and 2.1 on
+  a P3, and 25 reads as 0.30.4 did (41.4 and 55.0). Seen as well: the picture is right at 10
+  and 5, the timelapse records with the live view off, the snapshot shows the off screen, and
+  switching back on is clean. One thing looked wrong and was the browser: in Safari the Fluidd
+  tile stayed black with the live view off, for both cameras, where the settings page showed
+  the off screen. In Chrome the tile shows the off screen at once (the maintainer, the same
+  day), and the tree did the same in Chromium with a stand-in camera. Why Safari does not draw
+  it in the tile is not looked into.
 - Two things a slower rate would have changed are kept as they were. Noise reduction averages a
   picture with the camera frame just before it, which is read anyway, and not with the last
   picture drawn, which at 5 a second would be a ghost a fifth of a second behind a moving

@@ -34,6 +34,7 @@ from .pipeline import (
     RenderSettings,
     ThermalRenderer,
     known_live_view_rate,
+    known_readout_refresh,
     ordered_range,
     smoothing_at_rate,
 )
@@ -288,6 +289,7 @@ class SettingsStore:
             spots=clean_spots(self._settings.spots),
             colour_scale=known_scale(self._settings.colour_scale),
             live_view_rate=known_live_view_rate(self._settings.live_view_rate),
+            readout_refresh=known_readout_refresh(self._settings.readout_refresh),
         )
         self._camera = restored(self._camera, saved)
         self._timelapse = checked_timelapse(restored(self._timelapse, saved))
@@ -300,6 +302,13 @@ class SettingsStore:
             self._state_file.write_text(json.dumps(self.saved_dict(), indent=2))
         except OSError as error:
             log_line(f"could not save settings: {error}")
+
+
+def posted_whole_number(form: dict, field: str) -> int | None:
+    """A form field that is a whole number, or None when it is missing or anything else."""
+
+    posted = form.get(field, [""])[0]
+    return int(posted) if posted.isdigit() else None
 
 
 def settings_from_form(
@@ -319,12 +328,13 @@ def settings_from_form(
     posted_filter = form.get("upscale_filter", [""])[0]
     posted_mode = form.get("range_mode", [""])[0]
     posted_scale = form.get("colour_scale", [""])[0]
-    posted_live_view = form.get("live_view_rate", [""])[0]
     updated = dataclasses.replace(
         current,
         live_view_rate=known_live_view_rate(
-            int(posted_live_view) if posted_live_view.isdigit() else None,
-            current.live_view_rate,
+            posted_whole_number(form, "live_view_rate"), current.live_view_rate
+        ),
+        readout_refresh=known_readout_refresh(
+            posted_whole_number(form, "readout_refresh"), current.readout_refresh
         ),
         colour_scale=posted_scale if posted_scale in VALID_COLOUR_SCALES
         else current.colour_scale,
@@ -389,6 +399,9 @@ JSON_SETTINGS: dict[str, Callable[[Any, RenderSettings], Any]] = {
     "coldspot": a_switch("coldspot"),
     "edge_sharpening": a_switch("edge_sharpening"),
     "live_view_rate": lambda value, current: known_live_view_rate(value, current.live_view_rate),
+    "readout_refresh": lambda value, current: known_readout_refresh(
+        value, current.readout_refresh
+    ),
 }
 
 
@@ -548,6 +561,9 @@ class RendererSource:
             # picture from re-settling on every change; see ThermalRenderer.carry_over.
             if self._renderer is not None:
                 replacement.carry_over(self._renderer)
+            # After the settings, never carried across: a held readout was drawn for the old
+            # ones, and starting empty is what shows a change on the next picture.
+            replacement.hold_readout()
             self._renderer = replacement
         return self._renderer
 

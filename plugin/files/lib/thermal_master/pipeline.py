@@ -31,6 +31,7 @@ from .colour_scale import (
 )
 from .geometry import orient
 from .overlay import (
+    HeldReadout,
     Overlay,
     draw_overlay,
     encode_upscale,
@@ -112,6 +113,19 @@ LIVE_VIEW_OFF = 0
 VALID_LIVE_VIEW_RATES = (CAMERA_FRAMES_A_SECOND, 20, 15, 10, 5, LIVE_VIEW_OFF)
 
 
+# How often the live view's readout is drawn afresh: on every picture, which is what the plugin
+# always did, or this many times a second with the last one pasted in between (HeldReadout in
+# the overlay). Every picture is nought rather than 25, because it means "do not hold it" at
+# whatever rate the live view runs.
+READOUT_EVERY_PICTURE = 0
+VALID_READOUT_REFRESHES = (READOUT_EVERY_PICTURE, 5, 2, 1)
+# Twice a second, the maintainer's choice after 0.30.6 was measured on the U1 on 2026-11-14:
+# about 5 points of a core less than every picture for either camera, where once a second
+# bought half a point more and left the markers trailing twice as long. "If people want it
+# faster, they can tune it up."
+DEFAULT_READOUT_REFRESH = 2
+
+
 NORMALIZE_LOW_PERCENTILE = 2.0
 
 
@@ -148,6 +162,25 @@ def known_live_view_rate(value: object, otherwise: int = CAMERA_FRAMES_A_SECOND)
     if type(value) is int and value in VALID_LIVE_VIEW_RATES:
         return value
     return otherwise
+
+
+def known_readout_refresh(value: object, otherwise: int = DEFAULT_READOUT_REFRESH) -> int:
+    """A readout refresh that is offered, or `otherwise`. A whole number, as the live view's is."""
+
+    if type(value) is int and value in VALID_READOUT_REFRESHES:
+        return value
+    return otherwise
+
+
+def pictures_a_refresh(pictures_a_second: int, refreshes_a_second: int) -> int:
+    """How many pictures one drawing of the readout lasts, at this live view rate.
+
+    Rounded down, so the readout refreshes at least as often as was asked: twice a second at 25
+    pictures is every twelfth. Never less than one, so a refresh asked for oftener than the
+    pictures come is simply every picture.
+    """
+
+    return max(pictures_a_second // refreshes_a_second, 1)
 
 
 def smoothing_at_rate(smoothing: float, pictures_a_second: int) -> float:
@@ -329,6 +362,10 @@ class RenderSettings:
     # whatever this says, which is what keeps the timelapse working with the live view off. The
     # capture loop does the choosing, and a renderer only ever sees the frames chosen for it.
     live_view_rate: int = CAMERA_FRAMES_A_SECOND
+    # How many times a second the live view's readout is drawn afresh, or every picture. Held in
+    # between, the ruler's numbers and the markers stand still while the colours carry on. Only
+    # the live view's renderer holds one: a clip's frames are layers, and each is drawn.
+    readout_refresh: int = DEFAULT_READOUT_REFRESH
 
     @property
     def live_view(self) -> bool:
@@ -399,6 +436,22 @@ class ThermalRenderer:
         self._shape: CurveShape | None = CURVE_SHAPES.get(settings.colour_scale)
         self._scene: tuple[float, float] | None = None
         self._mapping: ColourMapping | None = None
+        self._held_readout: HeldReadout | None = None
+
+    def hold_readout(self) -> None:
+        """Draw the readout as often as the settings say, and paste it on the pictures between.
+
+        Asked for by the live view's source and by nothing else, so a renderer built for a clip
+        draws every frame's readout whatever the setting says. With the setting at every
+        picture there is nothing to hold, and the picture is drawn as it always was.
+        """
+
+        settings = self._settings
+        if settings.readout_refresh == READOUT_EVERY_PICTURE or not settings.live_view:
+            return
+        self._held_readout = HeldReadout(
+            pictures_a_refresh(settings.live_view_rate, settings.readout_refresh)
+        )
 
     @property
     def bounds(self) -> tuple[float, float] | None:
@@ -556,19 +609,24 @@ class ThermalRenderer:
         # out of, and it is stored unconverted because converting is four float passes over the
         # whole frame and nothing is asking for them yet.
         measured = ThermalFrame(denoised, settings.rotation, settings.mirrors, settings.emissivity)
-        return RenderedFrame(
-            encode_jpeg(
-                image, upscale, settings.jpeg_quality, overlay, settings.upscale_filter
-            ),
-            stats,
-            measured,
-        )
+        picture = enlarged_picture(image, upscale, settings.upscale_filter)
+        if overlay is not None:
+            self._draw_readout(picture, overlay)
+        return RenderedFrame(picture_jpeg(picture, settings.jpeg_quality), stats, measured)
+
+    def _draw_readout(self, picture: Image.Image, overlay: Overlay) -> None:
+        """The readout on a picture already at its size: held if this renderer holds one."""
+
+        if self._held_readout is None:
+            draw_overlay(picture, overlay)
+            return
+        self._held_readout.draw(picture, overlay)
 
     def render_jpeg(self, thermal_raw: np.ndarray) -> bytes:
         return self.render_frame(thermal_raw).jpeg
 
 
-def placeholder_jpeg(picture: Image.Image, quality: int) -> bytes:
+def picture_jpeg(picture: Image.Image, quality: int) -> bytes:
     buffer = io.BytesIO()
     picture.save(buffer, format="JPEG", quality=quality)
     return buffer.getvalue()
@@ -583,7 +641,7 @@ def stream_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     should not spend a JPEG encode a second saying so.
     """
 
-    return placeholder_jpeg(stream_off_picture(), quality)
+    return picture_jpeg(stream_off_picture(), quality)
 
 
 @functools.lru_cache(maxsize=1)
@@ -593,7 +651,7 @@ def live_view_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     Kept for the same reason: it is republished twice a second to whoever is looking.
     """
 
-    return placeholder_jpeg(live_view_off_picture(), quality)
+    return picture_jpeg(live_view_off_picture(), quality)
 
 
 def resampling(upscale_filter: str) -> Image.Resampling:
@@ -611,16 +669,21 @@ def encode_jpeg(
     overlay: Overlay | None = None,
     upscale_filter: str = SMOOTH_UPSCALE,
 ) -> bytes:
-    image = Image.fromarray(rgb_frame, mode="RGB")
-    height, width = rgb_frame.shape[0], rgb_frame.shape[1]
-    if upscale != 1:
-        # Rounded, because smooth enlarging may be a fraction: a P3 at one and a quarter times.
-        image = image.resize(
-            (round(width * upscale), round(height * upscale)), resampling(upscale_filter)
-        )
+    image = enlarged_picture(rgb_frame, upscale, upscale_filter)
     # After the resize, so the text is drawn at the size it will be looked at rather than resampled.
     if overlay is not None:
         draw_overlay(image, overlay)
-    buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=quality)
-    return buffer.getvalue()
+    return picture_jpeg(image, quality)
+
+
+def enlarged_picture(rgb_frame: np.ndarray, upscale: float, upscale_filter: str) -> Image.Image:
+    """The colours as a picture at the size it is sent, before anything is drawn on it."""
+
+    image = Image.fromarray(rgb_frame, mode="RGB")
+    if upscale == 1:
+        return image
+    height, width = rgb_frame.shape[0], rgb_frame.shape[1]
+    # Rounded, because smooth enlarging may be a fraction: a P3 at one and a quarter times.
+    return image.resize(
+        (round(width * upscale), round(height * upscale)), resampling(upscale_filter)
+    )

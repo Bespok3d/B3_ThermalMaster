@@ -1214,6 +1214,33 @@ Nothing is wired into the plugin. What to build from this is the maintainer's to
 Decided on 2026-11-14: a "Readout refresh" setting, every frame by default until it has been
 looked at on the printer, built after the live view's rate below and as its own test build.
 
+**Built as 0.30.6 on 2026-11-14.** `readout_refresh`: every frame, or 5, 2 or 1 times a
+second. `HeldReadout` in `overlay.py` draws the readout into patches every so many pictures and
+pastes them on the ones in between; `ThermalRenderer.hold_readout` gives one to the live view's
+renderer and to no other, so a clip draws every frame.
+
+- **Each piece is drawn once**, by the functions that draw it onto a picture, on an empty canvas
+  of its own, and cut down to the pixels it touched. Glyph tiles are composited there and not
+  pasted (`lay_tile`): pasting a soft edge onto nothing mixes its coverage in twice, and the
+  pasted readout then differs from the drawn one by 51 of 255 instead of 1.
+- **Counted, not timed**, like the live view's pace: `pictures_a_refresh` is the live view's
+  rate divided by the refreshes asked for, rounded down and never under one. That settles how
+  it meets the live view's rate: a refresh cannot come oftener than the pictures.
+- **A change shows at once** because a change of settings builds a new renderer, and the hold
+  is not among the things carried over to it.
+- **What the build costs is the open figure.** On a development machine a build of the patches
+  is about two and a half ordinary draws, since compositing a glyph is three steps where
+  pasting it is one. The bench's sums above assumed one draw. If the ratio holds on the U1 the
+  saving at 25 pictures a second is about 5 points at one refresh a second, 4.5 at two and 2.5
+  at five, where those sums gave 5.7 at one and 4.5 at five.
+- **Measured on the U1 the same day**, one tile open at 25 pictures a second, % of one core at
+  every frame, five, two and one refreshes a second. P3: 54.5, 51.6, 49.4, 49.1. P1: 38.9,
+  36.4, 34.4, 33.7. That is 2.9, 5.1 and 5.4 points for a P3 and 2.5, 4.5 and 5.2 for a P1, so
+  the ratio held, both cameras save the same as the bench said they would, and nearly all of
+  it is had at two refreshes a second.
+- **Twice a second is the default from 0.30.7**, the maintainer's choice on those figures. A
+  settings file that never named the setting gets it; one that says every frame keeps that.
+
 **The live view's rate, and Off with the timelapse kept. Built as 0.30.5 on 2026-11-14.** The
 maintainer's second idea of the day: not everybody wants the live view, some only the clips.
 Read off the code first, the answer for somebody who never opens Fluidd was that there is
@@ -3337,6 +3364,13 @@ picture in place of the stream. Built and tested, 757 tests; what each rate cost
 be measured on the printer. The readout drawn once and pasted was benched on the U1 the same
 day, 3.01 ms a frame against 0.59 ms, and is the next test build, as a "Readout refresh"
 setting. F-78 in section 4.4 has both.
+
+**2026-11-14, later: 0.30.5 measured, 0.30.6 built.** On the U1 the live view's cost follows
+its pictures: a P1 at 40.4, 33.8, 25.9, 17.9, 10.2 and 2.6% of a core at 25, 20, 15, 10, 5 and
+Off, a P3 at 56.3, 45.5, 34.9, 23.9, 13.3 and 2.8%. In Safari the Fluidd tile stays black with
+the live view off; in Chrome it shows the off screen. 0.30.6 adds the "Readout refresh"
+setting and the live view's list in FPS. Measured the same day, it saves about 5 points of a
+core at twice a second for either camera, and 0.30.7 makes that the default. 808 tests.
 
 What is left, in the order it is worth doing:
 
