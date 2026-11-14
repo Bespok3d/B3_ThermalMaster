@@ -14,7 +14,7 @@ import json
 import threading
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from .camera import (
     SHUTTER_FIELD,
@@ -26,13 +26,16 @@ from .camera import (
 from .colour_scale import VALID_COLOUR_SCALES, known_scale
 from .log import log_line
 from .pipeline import (
+    CAMERA_FRAMES_A_SECOND,
     FIXED_RANGE,
     VALID_RANGE_MODES,
     VALID_ROTATIONS,
     VALID_UPSCALE_FILTERS,
     RenderSettings,
     ThermalRenderer,
+    known_live_view_rate,
     ordered_range,
+    smoothing_at_rate,
 )
 from .temperature import (
     MAX_EMISSIVITY,
@@ -52,6 +55,10 @@ from .timelapse import (
     clamped_keep,
     clamped_threshold,
 )
+
+if TYPE_CHECKING:
+    import numpy as np
+
 
 # Both settings dataclasses go through `restored`, and it has to hand back the same kind it
 # was given rather than a common base, or every caller loses its type.
@@ -280,6 +287,7 @@ class SettingsStore:
             self._settings,
             spots=clean_spots(self._settings.spots),
             colour_scale=known_scale(self._settings.colour_scale),
+            live_view_rate=known_live_view_rate(self._settings.live_view_rate),
         )
         self._camera = restored(self._camera, saved)
         self._timelapse = checked_timelapse(restored(self._timelapse, saved))
@@ -311,8 +319,13 @@ def settings_from_form(
     posted_filter = form.get("upscale_filter", [""])[0]
     posted_mode = form.get("range_mode", [""])[0]
     posted_scale = form.get("colour_scale", [""])[0]
+    posted_live_view = form.get("live_view_rate", [""])[0]
     updated = dataclasses.replace(
         current,
+        live_view_rate=known_live_view_rate(
+            int(posted_live_view) if posted_live_view.isdigit() else None,
+            current.live_view_rate,
+        ),
         colour_scale=posted_scale if posted_scale in VALID_COLOUR_SCALES
         else current.colour_scale,
         rotation=rotation if rotation in VALID_ROTATIONS else current.rotation,
@@ -375,6 +388,7 @@ JSON_SETTINGS: dict[str, Callable[[Any, RenderSettings], Any]] = {
     "hotspot": a_switch("hotspot"),
     "coldspot": a_switch("coldspot"),
     "edge_sharpening": a_switch("edge_sharpening"),
+    "live_view_rate": lambda value, current: known_live_view_rate(value, current.live_view_rate),
 }
 
 
@@ -465,6 +479,22 @@ def camera_settings_from_form(form: dict, current: CameraSettings) -> CameraSett
     return switched_stream(form.get(SHUTTER_FIELD, []), updated)
 
 
+def paced(settings: RenderSettings) -> RenderSettings:
+    """The settings a live renderer is built from: the range's easing matched to the live view.
+
+    Left exactly alone at the camera's own rate, so a picture there is byte for byte what it was
+    before the live view had a rate. A clip's renderer never comes through here: its frames are
+    layers, not moments a fraction of a second apart.
+    """
+
+    if settings.live_view_rate == CAMERA_FRAMES_A_SECOND or not settings.live_view:
+        return settings
+    return dataclasses.replace(
+        settings,
+        bounds_smoothing=smoothing_at_rate(settings.bounds_smoothing, settings.live_view_rate),
+    )
+
+
 class RendererSource:
     """Hands out a renderer that matches the current settings, rebuilding it when they change.
 
@@ -491,11 +521,28 @@ class RendererSource:
         self._renderer = None
         self._revision = None
 
+    @property
+    def live_view_rate(self) -> int:
+        """How many pictures a second the live view is to be given now, or none. Read fresh."""
+
+        _, _, settings = self._settings_store.snapshot()
+        return settings.live_view_rate
+
+    def pass_over(self, thermal_raw: np.ndarray) -> None:
+        """A frame a slower live view is not drawing, for the renderer to remember all the same.
+
+        Only if there is a renderer. With none yet, nothing has been drawn and there is nothing
+        for the next picture to be averaged with.
+        """
+
+        if self._renderer is not None:
+            self._renderer.keep_undrawn(thermal_raw)
+
     def current(self) -> ThermalRenderer:
         revision, palette_name, settings = self._settings_store.snapshot()
         if revision != self._revision or self._renderer is None:
             self._revision = revision
-            replacement = ThermalRenderer(self._palettes[palette_name], settings)
+            replacement = ThermalRenderer(self._palettes[palette_name], paced(settings))
             # Only this thread, the capture loop, ever asks for a renderer, so the one being
             # replaced is not in use and its state can be handed across. That is what keeps the
             # picture from re-settling on every change; see ThermalRenderer.carry_over.

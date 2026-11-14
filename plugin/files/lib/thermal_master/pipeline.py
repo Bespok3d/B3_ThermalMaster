@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import io
+import math
 
 import numpy as np
 from PIL import Image
@@ -29,7 +30,13 @@ from .colour_scale import (
     ToldScene,
 )
 from .geometry import orient
-from .overlay import Overlay, draw_overlay, encode_upscale, stream_off_picture
+from .overlay import (
+    Overlay,
+    draw_overlay,
+    encode_upscale,
+    live_view_off_picture,
+    stream_off_picture,
+)
 from .palettes import PALETTE_STEPS
 from .temperature import (
     DEFAULT_EMISSIVITY,
@@ -91,6 +98,20 @@ SHARP_UPSCALE = "sharp"
 VALID_UPSCALE_FILTERS = (SMOOTH_UPSCALE, SHARP_UPSCALE)
 
 
+# What the camera sends, and nothing here can change it: upstream's protocol notes know no
+# command for the rate, and the U1 counted 25.0 frames a second from both cameras on 2026-11-13
+# (F-78).
+CAMERA_FRAMES_A_SECOND = 25
+
+
+# How many of those the live view may be given as pictures, and none at all. In fives, at the
+# maintainer's word. Five is the slowest because a picture older than a second is treated as
+# stale by everything that serves one (FRESH_ENOUGH_SECONDS in the server), so anything slower
+# would need those to follow the rate first.
+LIVE_VIEW_OFF = 0
+VALID_LIVE_VIEW_RATES = (CAMERA_FRAMES_A_SECOND, 20, 15, 10, 5, LIVE_VIEW_OFF)
+
+
 NORMALIZE_LOW_PERCENTILE = 2.0
 
 
@@ -115,6 +136,30 @@ DETAIL_STRENGTH = 0.3
 
 # The one weight that can be done without leaving the integers, and the only one anything sets.
 EVEN_BLEND_WEIGHT = 0.5
+
+
+def known_live_view_rate(value: object, otherwise: int = CAMERA_FRAMES_A_SECOND) -> int:
+    """A live view rate that is offered, or `otherwise` for anything that is not one.
+
+    A whole number and nothing that merely equals one: a JSON `false` equals nought, and a body
+    that says `false` has not asked for the live view to be switched off.
+    """
+
+    if type(value) is int and value in VALID_LIVE_VIEW_RATES:
+        return value
+    return otherwise
+
+
+def smoothing_at_rate(smoothing: float, pictures_a_second: int) -> float:
+    """The easing weight that moves the range as far in a second as `smoothing` does at 25.
+
+    The range eases once for every picture drawn, so a live view at five pictures a second would
+    take five times as long by the clock to follow a scene. Compounded over the camera frames
+    between two pictures, it arrives where the full rate would have.
+    """
+
+    camera_frames_a_picture = CAMERA_FRAMES_A_SECOND / pictures_a_second
+    return 1.0 - math.pow(1.0 - smoothing, camera_frames_a_picture)
 
 
 def reduce_temporal_noise(
@@ -277,6 +322,19 @@ class RenderSettings:
     # Which of the scales in `colour_scale` the picture is drawn with. The stretch is what it
     # always was; the curves spread the palette unevenly, over a followed range or a held one.
     colour_scale: str = DEFAULT_COLOUR_SCALE
+    # How many pictures a second the live view is given, out of the 25 frames the camera sends,
+    # or none. Making pictures is nearly all of what this plugin costs while somebody watches,
+    # so fewer of them is the one setting that scales the whole of it. It is here with the
+    # rendering because it is about what is done with a frame: the camera is read the same
+    # whatever this says, which is what keeps the timelapse working with the live view off. The
+    # capture loop does the choosing, and a renderer only ever sees the frames chosen for it.
+    live_view_rate: int = CAMERA_FRAMES_A_SECOND
+
+    @property
+    def live_view(self) -> bool:
+        """Whether the live view is drawn at all."""
+
+        return self.live_view_rate != LIVE_VIEW_OFF
 
     @property
     def readout(self) -> bool:
@@ -362,6 +420,17 @@ class ThermalRenderer:
         self._bounds = previous.bounds
         self._previous_frame = previous._previous_frame
         self._scene = previous._scene
+
+    def keep_undrawn(self, thermal_raw: np.ndarray) -> None:
+        """A frame the live view is not drawing, kept as the one before the next it does.
+
+        Noise reduction averages a frame with the one before it. At a slower live view the frame
+        before would otherwise be the last one drawn, a fifth of a second old at five pictures a
+        second, and a nozzle crossing the view would trail a ghost that far behind it. The camera
+        frame just before is read anyway, so it is used instead, and keeping it costs a reference.
+        """
+
+        self._previous_frame = thermal_raw
 
     def render(self, thermal_raw: np.ndarray) -> np.ndarray:
         return self.render_image(thermal_raw)[0]
@@ -499,6 +568,12 @@ class ThermalRenderer:
         return self.render_frame(thermal_raw).jpeg
 
 
+def placeholder_jpeg(picture: Image.Image, quality: int) -> bytes:
+    buffer = io.BytesIO()
+    picture.save(buffer, format="JPEG", quality=quality)
+    return buffer.getvalue()
+
+
 @functools.lru_cache(maxsize=1)
 def stream_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     """The placeholder as a JPEG, ready to publish like any other frame.
@@ -508,9 +583,17 @@ def stream_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     should not spend a JPEG encode a second saying so.
     """
 
-    buffer = io.BytesIO()
-    stream_off_picture().save(buffer, format="JPEG", quality=quality)
-    return buffer.getvalue()
+    return placeholder_jpeg(stream_off_picture(), quality)
+
+
+@functools.lru_cache(maxsize=1)
+def live_view_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
+    """The other placeholder, for the live view switched off with the camera still being read.
+
+    Kept for the same reason: it is republished twice a second to whoever is looking.
+    """
+
+    return placeholder_jpeg(live_view_off_picture(), quality)
 
 
 def resampling(upscale_filter: str) -> Image.Resampling:

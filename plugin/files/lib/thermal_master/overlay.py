@@ -566,9 +566,20 @@ STREAM_OFF_TITLE = "Stream off"
 STREAM_OFF_HINT = "Press Start to turn the camera back on"
 
 
+# What it says while the camera is on and the live view is not. The timelapse is why anybody
+# chooses that, so the first line is about it, and the second is the way back. Two lines, because
+# together they are wider than the picture.
+LIVE_VIEW_OFF_TITLE = "Live view off"
+LIVE_VIEW_OFF_HINTS = ("The timelapse still records.", "Turn the live view on in the settings")
+
+
 # The plugin's dark background, behind the "Stream off" words and under a timelapse frame for a
 # layer missed before any was taken.
 PLACEHOLDER_RGB = (16, 18, 22)
+
+
+# The lines under a placeholder's title, greyer than the title so the eye takes the title first.
+PLACEHOLDER_HINT_RGB = (154, 160, 170)
 
 
 # The size it is drawn at. Nothing is streaming, so there is no frame to take a shape from, and
@@ -577,34 +588,50 @@ PLACEHOLDER_RGB = (16, 18, 22)
 STREAM_OFF_SIZE = (320, 240)
 
 
-@functools.lru_cache(maxsize=1)
-def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
-    """The placeholder, drawn once and kept.
+@functools.lru_cache(maxsize=4)
+def placeholder_picture(
+    title: str, hints: tuple[str, ...], size: tuple[int, int] = STREAM_OFF_SIZE
+) -> Image.Image:
+    """A picture of words, for when there is no picture: a title, and under it what to do.
 
-    A picture rather than an error, because it travels the same path a real frame does: the tile,
-    the viewer, the snapshot and anything else showing the camera all display it without a single
-    special case, and each of them says what has happened rather than showing a broken image.
+    Drawn once for each thing it can say and kept. A picture rather than an error, because it
+    travels the same path a real frame does: the tile, the viewer, the snapshot and anything else
+    showing the camera all display it without a single special case, and each of them says what
+    has happened rather than showing a broken image.
     """
 
     picture = Image.new("RGB", size, PLACEHOLDER_RGB)
     style = overlay_style(size, colorbar=False)
     title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
     draw = ImageDraw.Draw(picture)
-    title_width = label_width(STREAM_OFF_TITLE, title_height)
+    title_width = label_width(title, title_height)
     draw.text(
         ((size[0] - title_width) / 2, size[1] / 2 - title_height),
-        STREAM_OFF_TITLE,
+        title,
         font=overlay_font(title_height),
         fill=OVERLAY_TEXT_RGB,
     )
-    hint_width = label_width(STREAM_OFF_HINT, style.pixel_height)
-    draw.text(
-        ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height / 2),
-        STREAM_OFF_HINT,
-        font=overlay_font(style.pixel_height),
-        fill=(154, 160, 170),
-    )
+    for line_number, hint in enumerate(hints):
+        hint_width = label_width(hint, style.pixel_height)
+        draw.text(
+            ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height * (line_number + 0.5)),
+            hint,
+            font=overlay_font(style.pixel_height),
+            fill=PLACEHOLDER_HINT_RGB,
+        )
     return picture
+
+
+def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
+    """What everything shows while the camera is switched off and released."""
+
+    return placeholder_picture(STREAM_OFF_TITLE, (STREAM_OFF_HINT,), size)
+
+
+def live_view_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
+    """What everything shows while the camera is read for the timelapse and nothing is drawn."""
+
+    return placeholder_picture(LIVE_VIEW_OFF_TITLE, LIVE_VIEW_OFF_HINTS, size)
 
 
 # The band across the top of a picture that is not live: the viewer's watchdog line, drawn the same

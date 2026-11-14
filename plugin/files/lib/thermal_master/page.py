@@ -28,7 +28,14 @@ from .camera import (
 )
 from .colour_scale import SCALE_NAMES, VALID_COLOUR_SCALES
 from .cost import describe_cost
-from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
+from .pipeline import (
+    CAMERA_FRAMES_A_SECOND,
+    LIVE_VIEW_OFF,
+    VALID_LIVE_VIEW_RATES,
+    VALID_RANGE_MODES,
+    VALID_ROTATIONS,
+    VALID_UPSCALE_FILTERS,
+)
 from .recording import BYTES_PER_MEGABYTE, gain_switch_sentence
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 from .timelapse import (
@@ -60,6 +67,16 @@ RANGE_MODE_DESCRIPTIONS = {
     "auto": "Follow the scene",
     "fixed": "Hold these temperatures",
 }
+
+
+def live_view_description(pictures_a_second: int) -> str:
+    """What a live view rate is called in its list: the number, and what the two ends mean."""
+
+    if pictures_a_second == LIVE_VIEW_OFF:
+        return "Off"
+    if pictures_a_second == CAMERA_FRAMES_A_SECOND:
+        return f"{pictures_a_second} pictures a second, all the camera sends"
+    return f"{pictures_a_second} a second"
 
 
 # The four scales, named for what they do to the picture.
@@ -206,6 +223,17 @@ INFO_TEXTS = {
         "pays nothing at all for having the plugin installed. Everything that shows the camera "
         "shows a \"Stream off\" picture instead, it survives a restart, and the same switch is in "
         "the camera view's toolbar.",
+    ),
+    "live_view": (
+        "the live view",
+        "The live view is the moving picture: in the dashboard tile, in the camera view and at "
+        "the top of this page. The camera always sends 25 frames a second, and this is how many "
+        "of them the plugin turns into pictures. Making pictures is nearly all of what the plugin "
+        "costs the printer while a page is showing one, so fewer costs less, and moves less "
+        "smoothly. Off makes none at all: everything that shows the camera shows a \"Live view "
+        "off\" picture instead, the camera stays connected, and the timelapse records every "
+        "layer as before. None of this matters while no page is showing the picture, because "
+        "then none is made anyway. To release the camera completely, stop it instead.",
     ),
     "cost": (
         "the cost line",
@@ -433,6 +461,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     <fieldset>
       <legend>Camera</legend>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
+      <div class="field">
+        <label><span>Live view</span>
+               <select name="live_view_rate">{live_view_options}</select></label>
+        {info_live_view}
+      </div>
       <div class="field">
         <div class="buttons">
           <button type="submit">Apply</button>
@@ -1000,6 +1033,14 @@ def render_control_page(
         gain_options="".join(
             option(name, GAIN_DESCRIPTIONS[name], name == settings["gain"])
             for name in VALID_GAINS
+        ),
+        live_view_options="".join(
+            option(
+                str(pictures_a_second),
+                live_view_description(pictures_a_second),
+                pictures_a_second == settings["live_view_rate"],
+            )
+            for pictures_a_second in VALID_LIVE_VIEW_RATES
         ),
         device_status=describe_device(device_status),
         control_script=CONTROL_SCRIPT.replace("COST_POLL_MS", str(COST_POLL_MILLISECONDS)),

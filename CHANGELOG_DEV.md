@@ -18,9 +18,44 @@ Written on 2026-11-12, the evening the first P3 met the plugin. 0.30.1 passed th
 never built: 0.30.2 followed it within the hour, and was built, installed on the U1 and measured
 the same evening. 0.30.3 came out of what that measurement found, and was built, installed and
 measured the same evening too. 0.30.4 is the next day's, 2026-11-13, and is about reading the
-camera where the first three are about drawing the picture. The measurements behind all four are
-F-78 and F-79 in `ROADMAP.md`.
+camera where the first three are about drawing the picture. 0.30.5, 2026-11-14, is the first
+that gives the owner something to choose: how many pictures a second the live view is worth.
+The measurements behind all of them are F-78 and F-79 in `ROADMAP.md`.
 Their public entry is still to be written, with the release they lead to.
+
+### 0.30.5
+
+- **The live view has a rate, and an Off.** A new "Live view" setting in the Camera panel: 25
+  pictures a second, which is every frame the camera sends and what the plugin always did, or
+  20, 15, 10 or 5, or Off. Making pictures is nearly all of what the plugin costs while a page
+  is showing one (55.0% of a core for a P3 on 0.30.4 against 2.5% with nothing watching), so
+  this is the one setting that scales the whole of it. `live_view_rate` in JSON and in the
+  settings file; it survives a restart.
+- **Off keeps the timelapse.** The camera stays connected and every frame is still read and
+  offered to the timelapse; nothing is drawn. Everything that shows the camera shows a "Live
+  view off" picture of its own, "The timelapse still records. Turn the live view on in the
+  settings", the snapshot included, and the temperatures under the pointer are refused as they
+  are for "Stream off". It is for a dashboard left open by somebody who wants the clips and not
+  the tile. Stopping the camera is still the deeper switch: that releases the device, and takes
+  the timelapse with it.
+- The camera sends 25 frames a second and cannot be asked for fewer, so a slower live view draws
+  some frames and passes over the rest, counted and not timed. 20, 15 and 10 do not divide 25
+  and come out uneven by one camera frame: 10 a second is gaps of 80 and 120 ms in turn. Five is
+  the slowest offered because a picture older than a second counts as stale to everything that
+  serves one.
+- Two things a slower rate would have changed are kept as they were. Noise reduction averages a
+  picture with the camera frame just before it, which is read anyway, and not with the last
+  picture drawn, which at 5 a second would be a ghost a fifth of a second behind a moving
+  nozzle. And the range eases as far in a second at every rate, where it would have taken five
+  times as long at 5. At 25 the renderer gets the settings untouched, so the picture there is
+  what 0.30.4 drew.
+- The viewer's watchdog reads the "Live view off" picture as it does "Stream off", still on
+  purpose: `/health` says `live_view`, and the page neither reopens the stream nor offers to
+  record it.
+- 757 tests, 56 of them new, in `test_live_view.py`.
+- **Not measured on the printer at the time of writing.** What each rate costs is expected to
+  follow the number of pictures, about 44, 34, 23 and 13% of a core for a P3 at 20, 15, 10 and
+  5 and the idle 2.5% at Off, and those are sums until the running service has been measured.
 
 ### 0.30.4
 

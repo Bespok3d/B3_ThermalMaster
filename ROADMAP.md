@@ -1172,6 +1172,80 @@ watched figures for 0.30.3 are from 2026-11-12.
 - The fallback never engaged: the log line "reading as the driver does" was counted 0 times after
   each camera's run.
 
+**The readout drawn once and pasted, benched on the U1 on 2026-11-14.** The maintainer's idea,
+from the maker's phone app, which updates its pointers and ruler about once a second: draw the
+readout a few times a second and paste it in between. It takes in the older idea of redrawing the
+ruler only when its numbers change, which on its own would rarely hit while the range follows
+the scene, since the ruler's two end numbers then move most frames; the bar between them never
+changes at all. `scripts/bench-readout-candidates.py` got the candidates: each piece lifted off
+the picture as a patch with its coverage, by drawing it on black and on white with the plugin's
+own functions, and pasted. Run at a P3's size, 256x192 rotated 270, on a 240x320 picture, which
+is what the service sends for a smoothly enlarged P3:
+
+| | drawn every frame | pasted | saved a frame | of a core |
+| --- | --- | --- | --- | --- |
+| the ruler, one patch | 1.59 ms | 0.34 ms | 1.24 ms | 3.1% |
+| three markers, a patch each | 1.23 ms | 0.22 ms | 1.02 ms | 2.5% |
+| the whole readout, four patches | 3.01 ms | 0.59 ms | 2.42 ms | 6.0% |
+| the whole readout, one layer the size of the picture | 3.00 ms | 2.42 ms | 0.58 ms | 1.4% |
+| a knee's ruler, one patch | 1.96 ms | 0.48 ms | 1.48 ms | 3.7% |
+
+- **A P1 gets the same.** Run at 160x120 the same day, every row was within 0.06 ms of the above,
+  because a P1 at 2x and a P3 at 1.25x are both a 240x320 picture and the readout is drawn at the
+  picture's size, not the sensor's. So this is worth the same points to both cameras.
+- **Patches, not a layer.** A paste costs by the pixels it covers, about 0.03 ms a thousand with
+  a mask: four patches cover 15,370 pixels and the layer 76,800.
+- **The build as benched cannot be shipped: 39.0 ms**, a whole frame's interval, because it draws
+  every piece twice on canvases the size of the picture to lift it off. The plugin's own build
+  has to draw each piece once, straight into its patch. With a build that costs what drawing the
+  readout costs today, the bench's arithmetic gives 0.70 ms a frame on average with the readout
+  refreshed once a second and 1.18 ms at five times a second, against 2.99 ms: 5.7 and 4.5
+  points of a core. Those two are sums, not measurements, until such a build exists.
+- **The pasted readout is not byte for byte the drawn one**: about 250 pixels on the edges of
+  the text differ, by 1 of 255.
+- **What it would look like**: numbers that hold between refreshes, and the hottest and coldest
+  crosses trailing what they point at by up to the refresh interval. The colours follow every
+  frame as now.
+- The profile from the same run, for the record: a P3's frame is 19.04 ms (pipeline 9.36,
+  encode at 1.25x 6.52, readout 3.16) and a P1's 13.20 ms (4.52, 5.45, 3.23). Which of 0.30.3 and
+  0.30.4 was installed was not noted; they render alike.
+
+Nothing is wired into the plugin. What to build from this is the maintainer's to decide.
+Decided on 2026-11-14: a "Readout refresh" setting, every frame by default until it has been
+looked at on the printer, built after the live view's rate below and as its own test build.
+
+**The live view's rate, and Off with the timelapse kept. Built as 0.30.5 on 2026-11-14.** The
+maintainer's second idea of the day: not everybody wants the live view, some only the clips.
+Read off the code first, the answer for somebody who never opens Fluidd was that there is
+nothing to save: a minute with no page asking and nothing is rendered (Phase 7g), and the
+timelapse takes its frames raw whether or not anything is. What is left to save is a dashboard
+left open with the tile on it, which costs the full watched figure for as long as it is open,
+and a live view that is wanted but not at 25 pictures a second. So the Camera panel has a "Live
+view" setting: 25, 20, 15, 10 or 5 pictures a second, or Off.
+
+- **The camera cannot be asked for fewer frames** (above), so the capture loop draws some and
+  passes over the rest, by count: each frame adds the wanted rate to what is owed and a picture
+  is drawn for every 25 owed. 20, 15 and 10 are uneven by one camera frame, 10 a second being
+  gaps of 80 and 120 ms in turn; the maintainer chose steps of five over even pacing.
+- **Five is the slowest.** A picture older than a second is stale to everything that serves
+  one (`FRESH_ENOUGH_SECONDS`, and a stream resends after `STREAM_WAIT_SECONDS`), so one a second
+  would sit on both limits. It needs those to follow the rate, and was left for later.
+- **Off is not "Stream off".** The camera stays open and read, `offer_raw` still feeds the
+  timelapse, and a second placeholder, "Live view off", is published twice a second to whoever
+  is looking, the snapshot included (the maintainer's choice: off costs nothing whoever asks).
+  `/health` carries `live_view`, so the viewer's watchdog leaves that picture alone as it does
+  the other.
+- **Two things a renderer does once per picture were tied to the clock instead.** Noise
+  reduction averages a frame with the renderer's last output, which at 5 a second is 200 ms
+  old: the frame passed over just before is kept and used. The range's easing is compounded over
+  the camera frames between two pictures. At 25 neither applies and the settings reach the
+  renderer untouched, so that picture is 0.30.4's. A clip's renderer is built without any of
+  this.
+- **Expected, not measured:** if the cost follows the pictures, a P3 at 55.0% watched and 2.5%
+  idle comes to about 44, 34, 23 and 13% at 20, 15, 10 and 5, and a P1 at 41.4% and 2.1% to
+  about 34, 26, 18 and 10%, with Off at the idle figure for both. To be measured on the U1 with
+  one tile open, `scripts/measure-cpu-on-printer.sh U1 30` at each setting.
+
 **F-79. The smaller picture made the pipeline slower: the C library gives a P3's working arrays
 back on every frame.** Closed in test build 0.30.3, which asks glibc to keep them. Found,
 confirmed and measured on the printer on 2026-11-12.
@@ -3257,6 +3331,13 @@ service the same day: a P3 with nothing watching went from 9.6% of a core to 2.5
 tile open from 62.3% to 55.0%; a P1 with one tile open went from 44.0% to 41.4%, and costs 2.1%
 with nothing watching. The fallback never engaged. F-78 in section 4.4 has the figures.
 
+**2026-11-14, at 0.30.5: the live view has a rate.** A "Live view" setting, 25 pictures a second
+down to 5 in fives, or off with the camera left on for the timelapse and a "Live view off"
+picture in place of the stream. Built and tested, 757 tests; what each rate costs has still to
+be measured on the printer. The readout drawn once and pasted was benched on the U1 the same
+day, 3.01 ms a frame against 0.59 ms, and is the next test build, as a "Readout refresh"
+setting. F-78 in section 4.4 has both.
+
 What is left, in the order it is worth doing:
 
 - **Closed: the adapter drop test** from F-72: replug the camera in the hub port farthest from the ethernet
@@ -3294,8 +3375,9 @@ What is left, in the order it is worth doing:
     frame, at the size the service sends, and works out a frame's cost with the readout
     refreshed once and five times a second (the maintainer's idea, from the maker's phone app,
     which updates its pointers and ruler about once a second). Pasted patches differ from the
-    drawn readout by at most 1 of 255 on the edges of the text. Not run on the printer yet, so
-    there is no number for it, and nothing is wired into the plugin.
+    drawn readout by at most 1 of 255 on the edges of the text. Run on the U1 the same day:
+    3.01 ms a frame drawn against 0.59 ms pasted, the same for both cameras; F-78 in section
+    4.4 has the table. To be built as a "Readout refresh" setting after 0.30.5.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted

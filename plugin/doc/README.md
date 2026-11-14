@@ -69,6 +69,7 @@ the next click. The plugin's version is at the foot of the page.
 | Readout | Units | `units` | `celsius`, `fahrenheit` |
 | Readout | Emissivity | `emissivity` | 0.05 to 1.00, 0.95 by default |
 | Camera | Gain | `gain` | `high` for -20 to 150 C, `low` for 0 to 550 C |
+| Camera | Live view | `live_view_rate` | pictures a second: `25` (every frame the camera sends, the default), `20`, `15`, `10`, `5`, or `0` for off, which keeps the camera on for the timelapse and draws nothing |
 | Camera | Stop the camera, Start | `streaming` | `true`, `false` |
 | Viewer | Spots | `spots` | up to four `[x, y]` pairs in the picture's own pixels; `[]` clears them |
 | Timelapse | Record one frame per layer | `timelapse` | `true`, `false`; off until you switch it on |
