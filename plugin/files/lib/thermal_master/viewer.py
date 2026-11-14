@@ -1105,7 +1105,9 @@ VIEWER_SCRIPT = """
     if (watch.count === null || health.frame !== watch.count) { watch.countChangedAt = now; }
     watch.count = health.frame;
     watch.answered = true;
-    watch.streaming = health.streaming !== false;
+    // Still on purpose either way: the camera switched off, or left on for the timelapse with
+    // the live view off. Both show a placeholder, and neither is a stream to restart or record.
+    watch.streaming = health.streaming !== false && health.live_view !== false;
   }
 
   // Dated when the question was asked, not when it gave up: the printer was already silent then,

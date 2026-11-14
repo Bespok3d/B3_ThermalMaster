@@ -154,9 +154,9 @@ def test_the_control_page_shows_the_current_state(thermal_streamer, store):
     assert '<option value="celsius" selected>' in page
     # The attribute in the markup, not the word anywhere on the page: the page carries a script
     # now, and that script has every right to contain the word "checked".
-    # The ruler and the three markers, all on by default, the clips' own five, also on, and the
-    # timelapse's automatic switch to wide range.
-    assert page.count(" checked>") == 10
+    # The ruler and the three markers, all on by default, the clips' own five, also on, the
+    # timelapse's automatic switch to wide range, and edge sharpening.
+    assert page.count(" checked>") == 11
 
 
 def test_the_control_page_ticks_the_boxes_that_are_set(thermal_streamer, settings_dict):
@@ -513,3 +513,100 @@ def test_the_two_filters_produce_different_pictures(thermal_streamer):
     ).render_frame(counts).jpeg
 
     assert smooth != sharp
+
+
+def test_the_control_page_has_the_sharpening_switch_and_it_starts_ticked(thermal_streamer, store):
+    page = thermal_streamer.render_control_page(store.as_dict(), ["ironbow"], None)
+
+    assert '<input type="checkbox" name="edge_sharpening" checked>' in page
+
+
+def test_edges_are_sharpened_unless_somebody_says_otherwise(thermal_streamer):
+    """Upgrading must not change the picture under somebody who never asked."""
+
+    settings = thermal_streamer.RenderSettings()
+
+    assert settings.edge_sharpening is True
+    assert settings.applied_detail_strength == thermal_streamer.DETAIL_STRENGTH
+
+
+def test_a_posted_form_switches_sharpening_by_whether_its_box_is_there(thermal_streamer, palettes):
+    """A form says off by leaving the box out, as it does for every other tick box."""
+
+    form = {"palette": ["ironbow"], "rotation": ["0"], "units": ["celsius"],
+            "emissivity": ["0.95"]}
+    current = thermal_streamer.RenderSettings()
+
+    _, unticked = thermal_streamer.settings_from_form(form, palettes, current)
+    _, ticked = thermal_streamer.settings_from_form(
+        {**form, "edge_sharpening": ["on"]}, palettes, unticked
+    )
+
+    assert unticked.edge_sharpening is False
+    assert ticked.edge_sharpening is True
+
+
+def test_json_switches_sharpening_only_when_it_names_it(thermal_streamer, palettes):
+    current = thermal_streamer.RenderSettings(edge_sharpening=False, rotation=90)
+
+    _, untouched = thermal_streamer.settings_from_json({"rotation": 180}, palettes, current)
+    _, switched = thermal_streamer.settings_from_json({"edge_sharpening": True}, palettes, current)
+
+    assert untouched.edge_sharpening is False
+    assert (switched.edge_sharpening, switched.rotation) == (True, 90)
+
+
+def test_the_sharpening_switch_survives_a_restart(thermal_streamer, tmp_path):
+    state_file = tmp_path / "settings.json"
+    first = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), state_file)
+
+    first.update("ironbow", thermal_streamer.RenderSettings(edge_sharpening=False))
+    second = thermal_streamer.SettingsStore(
+        "ironbow", thermal_streamer.RenderSettings(), state_file
+    )
+
+    assert second.as_dict()["edge_sharpening"] is False
+
+
+def test_a_settings_file_from_before_the_switch_still_sharpens(thermal_streamer, tmp_path):
+    """0.30.0 wrote no such key, and its picture was sharpened."""
+
+    state_file = tmp_path / "settings.json"
+    state_file.write_text(json.dumps({"palette": "ironbow", "detail_strength": 0.3}))
+
+    store = thermal_streamer.SettingsStore("ironbow", thermal_streamer.RenderSettings(), state_file)
+
+    assert store.as_dict()["edge_sharpening"] is True
+
+
+def test_switching_sharpening_off_keeps_the_strength_for_when_it_comes_back(thermal_streamer):
+    """A strength somebody edited into the settings file is not lost to a tick box."""
+
+    off = thermal_streamer.RenderSettings(detail_strength=0.8, edge_sharpening=False)
+
+    assert off.applied_detail_strength == 0.0
+    assert off.detail_strength == 0.8
+
+
+def test_with_sharpening_off_the_unsharp_mask_is_not_in_the_picture(
+    thermal_streamer, palettes, thermal_ramp_frame
+):
+    """Off is the picture a strength of nought gives, and not the one the mask gives."""
+
+    import numpy as np
+
+    # A cooler block set into the ramp, so there are edges between colours for a mask to find.
+    # Two flat levels alone stretch to the two ends of the palette, where it has nothing to add.
+    counts = thermal_ramp_frame.copy()
+    counts[40:80, 40:80] = counts[10, 10]
+
+    def picture(**settings):
+        renderer = thermal_streamer.ThermalRenderer(
+            palettes["ironbow"], thermal_streamer.RenderSettings(**settings)
+        )
+        return renderer.render_image(counts)[0]
+
+    switched_off = picture(edge_sharpening=False)
+
+    assert np.array_equal(switched_off, picture(detail_strength=0.0))
+    assert not np.array_equal(switched_off, picture())

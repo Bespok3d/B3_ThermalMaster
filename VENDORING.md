@@ -9,7 +9,10 @@ What this repo ships that it did not write, where it came from, and how to verif
 
 ## p3_camera.py
 
-The USB protocol layer for the Thermal Master P1 and P3. It is not reimplemented here.
+The USB protocol driver for the Thermal Master P1 and P3. The plugin uses it for everything it
+says to the camera except two things, reading a frame and firing the calibration shutter, which
+are the plugin's own code beside the driver: see
+[What this repo does beside the driver](#what-this-repo-does-beside-the-driver).
 
 | | |
 | --- | --- |
@@ -59,6 +62,30 @@ a printer, and note in `plugin/doc/CHANGELOG.md` that the driver moved.
 
 Never edit the vendored file in place to fix something. That change belongs upstream, or in this
 repo's own code beside the driver, where a re-vendor cannot silently drop it.
+
+### What this repo does beside the driver
+
+Two things the driver has a method for are done by the plugin's own code instead, through the
+camera object the driver made. Both reach into the driver, so both are what to read again when the
+pin moves.
+
+- **The calibration shutter.** `fire_shutter` in `camera.py` sends the driver's own shutter
+  command and reads its acknowledgement, and does not call `trigger_shutter`, which fails on a P1
+  (upstream issue #17). It uses `COMMANDS["shutter"]`, `_send_command` and `_read_status`.
+- **Reading a frame.** `frame_reader.py` reads a whole frame in two bulk reads, where the driver's
+  `read_frame` makes fourteen for a P3 and six for a P1, and takes only the temperatures out of
+  it. It was measured at a quarter of the processor time for a P3 and a little over a third for
+  a P1 (ROADMAP, F-78). It uses `camera.dev`, and from `camera.config` the names `sensor_w`,
+  `sensor_h`, `thermal_row_start` and `frame_read_size`. It repeats three things the driver
+  writes as literals or keeps to itself: the stream's endpoint, 0x81, the read timeout, and the
+  layout of a frame marker. The driver's `read_frame_both` is still called, as the fallback for a
+  camera the plugin's reader cannot get in step with.
+
+`plugin/tests/test_frame_reader.py` loads the vendored file itself and holds the reader against
+it: the same bytes read both ways, for both cameras, and the geometry and the marker size
+compared. A re-vendor that changes any of those fails there. The endpoint and the timeout are not
+covered by a test and have to be looked at by hand. Neither piece is in upstream yet; the frame
+read is meant to be offered there.
 
 ## Runtime dependencies
 

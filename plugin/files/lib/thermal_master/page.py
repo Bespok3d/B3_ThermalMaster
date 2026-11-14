@@ -28,7 +28,16 @@ from .camera import (
 )
 from .colour_scale import SCALE_NAMES, VALID_COLOUR_SCALES
 from .cost import describe_cost
-from .pipeline import VALID_RANGE_MODES, VALID_ROTATIONS, VALID_UPSCALE_FILTERS
+from .pipeline import (
+    CAMERA_FRAMES_A_SECOND,
+    LIVE_VIEW_OFF,
+    READOUT_EVERY_PICTURE,
+    VALID_LIVE_VIEW_RATES,
+    VALID_RANGE_MODES,
+    VALID_READOUT_REFRESHES,
+    VALID_ROTATIONS,
+    VALID_UPSCALE_FILTERS,
+)
 from .recording import BYTES_PER_MEGABYTE, gain_switch_sentence
 from .temperature import EMISSIVITY_MATCH, EMISSIVITY_PRESETS, VALID_UNITS
 from .timelapse import (
@@ -51,7 +60,7 @@ from .version import plugin_version
 # interpolation.
 UPSCALE_FILTER_DESCRIPTIONS = {
     "smooth": "Smooth",
-    "sharp": "Sharp, cheaper",
+    "sharp": "Sharp",
 }
 
 
@@ -59,6 +68,30 @@ UPSCALE_FILTER_DESCRIPTIONS = {
 RANGE_MODE_DESCRIPTIONS = {
     "auto": "Follow the scene",
     "fixed": "Hold these temperatures",
+}
+
+
+def live_view_description(pictures_a_second: int) -> str:
+    """What a live view rate is called in its list: the number, and what the two ends mean.
+
+    "FPS" and "(Max)" are the maintainer's wording (2026-11-14, after using the list on the U1):
+    the unit people already know a frame rate by, and the top marked as the top.
+    """
+
+    if pictures_a_second == LIVE_VIEW_OFF:
+        return "Off"
+    if pictures_a_second == CAMERA_FRAMES_A_SECOND:
+        return f"{pictures_a_second} FPS (Max)"
+    return f"{pictures_a_second} FPS"
+
+
+# How often the readout is drawn afresh, in the words of its list. Not in FPS: the picture's
+# rate is the live view's, and this is how often the numbers on it change.
+READOUT_REFRESH_DESCRIPTIONS = {
+    READOUT_EVERY_PICTURE: "Every frame",
+    5: "5 times a second",
+    2: "Twice a second",
+    1: "Once a second",
 }
 
 
@@ -149,9 +182,20 @@ INFO_TEXTS = {
     "enlarging": (
         "enlarging",
         "Enlarging is how the picture is made bigger before the readout is drawn on it, which only "
-        "happens while some part of the readout is switched on. Smooth blends the sensor's pixels; "
-        "sharp leaves them as squares and is about a sixth less work for the printer per frame. "
-        "Which one looks better depends on the scene and the screen.",
+        "happens while some part of the readout is switched on. Smooth blends the sensor's pixels "
+        "and enlarges only as far as the text needs: twice for a P1, one and a quarter times for "
+        "a P3. Sharp leaves them as squares, in whole steps, so twice for both. With a P1, sharp "
+        "is about a sixth less work for the printer per frame. With a P3 it is the other way "
+        "round: smooth is slightly less work, because it enlarges less. Which one looks better "
+        "depends on the scene and the screen.",
+    ),
+    "sharpening": (
+        "sharpening",
+        "Sharpening adds back a little of what a slight blur removes, which is the edges, so a "
+        "part reads as a part rather than as a warm blob. It is the largest single step in making "
+        "the picture: switched off, edges come out slightly softer and the printer saves about a "
+        "tenth of a core with a P3, about half that with a P1. It changes the picture, never the "
+        "numbers, and timelapse clips follow it.",
     ),
     "range": (
         "the colours",
@@ -196,6 +240,28 @@ INFO_TEXTS = {
         "pays nothing at all for having the plugin installed. Everything that shows the camera "
         "shows a \"Stream off\" picture instead, it survives a restart, and the same switch is in "
         "the camera view's toolbar.",
+    ),
+    "live_view": (
+        "the live view",
+        "The live view is the moving picture: in the dashboard tile, in the camera view and at "
+        "the top of this page. The camera always sends 25 frames a second, and this is how many "
+        "of them the plugin turns into pictures. Making pictures is nearly all of what the plugin "
+        "costs the printer while a page is showing one, so fewer costs less, and moves less "
+        "smoothly. Off makes none at all: everything that shows the camera shows a \"Live view "
+        "off\" picture instead, the camera stays connected, and the timelapse records every "
+        "layer as before. None of this matters while no page is showing the picture, because "
+        "then none is made anyway. To release the camera completely, stop it instead.",
+    ),
+    "readout_refresh": (
+        "the readout refresh",
+        "How often the ruler's numbers and the markers are worked out again in the live view. "
+        "A few times a second draws them once and keeps them still until the next time, which "
+        "is less work for the printer on every frame in between: the numbers hold, and the "
+        "hottest and coldest crosses follow what they point at a moment late. Twice a second "
+        "is where it starts, and saves about a twentieth of a core. Every frame is what the "
+        "plugin did before there was a choice. The colours themselves always follow every "
+        "frame. A spot you place or a setting you change shows at once, and timelapse clips "
+        "are not affected.",
     ),
     "cost": (
         "the cost line",
@@ -372,6 +438,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
                <select name="upscale_filter">{upscale_filter_options}</select></label>
         {info_enlarging}
       </div>
+      <div class="field">
+        <label><input type="checkbox" name="edge_sharpening"{edge_sharpening}>
+               Sharpen edges</label>
+        {info_sharpening}
+      </div>
       <button type="submit">Apply</button>
     </fieldset>
     <fieldset>
@@ -407,6 +478,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
              Hottest pixel</label>
       <label><input type="checkbox" name="coldspot"{coldspot}>
              Coldest pixel</label>
+      <div class="field">
+        <label><span>Readout refresh</span>
+               <select name="readout_refresh">{readout_refresh_options}</select></label>
+        {info_readout_refresh}
+      </div>
       <label><span>Units</span><select name="units">{unit_options}</select></label>
       <div class="field">
         <label><span>Emissivity</span>
@@ -418,6 +494,11 @@ CONTROL_PAGE_TEMPLATE = """<!doctype html>
     <fieldset>
       <legend>Camera</legend>
       <label><span>Gain</span><select name="gain">{gain_options}</select></label>
+      <div class="field">
+        <label><span>Live view frame rate</span>
+               <select name="live_view_rate">{live_view_options}</select></label>
+        {info_live_view}
+      </div>
       <div class="field">
         <div class="buttons">
           <button type="submit">Apply</button>
@@ -986,6 +1067,22 @@ def render_control_page(
             option(name, GAIN_DESCRIPTIONS[name], name == settings["gain"])
             for name in VALID_GAINS
         ),
+        live_view_options="".join(
+            option(
+                str(pictures_a_second),
+                live_view_description(pictures_a_second),
+                pictures_a_second == settings["live_view_rate"],
+            )
+            for pictures_a_second in VALID_LIVE_VIEW_RATES
+        ),
+        readout_refresh_options="".join(
+            option(
+                str(refreshes_a_second),
+                READOUT_REFRESH_DESCRIPTIONS[refreshes_a_second],
+                refreshes_a_second == settings["readout_refresh"],
+            )
+            for refreshes_a_second in VALID_READOUT_REFRESHES
+        ),
         device_status=describe_device(device_status),
         control_script=CONTROL_SCRIPT.replace("COST_POLL_MS", str(COST_POLL_MILLISECONDS)),
         palette_options="".join(
@@ -1015,6 +1112,7 @@ def render_control_page(
         ),
         flip_horizontal=" checked" if settings["flip_horizontal"] else "",
         flip_vertical=" checked" if settings["flip_vertical"] else "",
+        edge_sharpening=" checked" if settings["edge_sharpening"] else "",
         colorbar=" checked" if settings["colorbar"] else "",
         reticle=" checked" if settings["reticle"] else "",
         hotspot=" checked" if settings["hotspot"] else "",

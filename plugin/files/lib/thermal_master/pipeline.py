@@ -15,6 +15,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import io
+import math
 
 import numpy as np
 from PIL import Image
@@ -29,7 +30,14 @@ from .colour_scale import (
     ToldScene,
 )
 from .geometry import orient
-from .overlay import Overlay, draw_overlay, encode_upscale, stream_off_picture
+from .overlay import (
+    HeldReadout,
+    Overlay,
+    draw_overlay,
+    encode_upscale,
+    live_view_off_picture,
+    stream_off_picture,
+)
 from .palettes import PALETTE_STEPS
 from .temperature import (
     DEFAULT_EMISSIVITY,
@@ -59,12 +67,12 @@ DEFAULT_JPEG_QUALITY = 88
 VALID_ROTATIONS = (0, 90, 180, 270)
 
 
-# The picture is doubled before the readout is drawn, so the text has pixels to land on, and on the
-# printer that one resize is the most expensive operation in the frame: 3.05 ms bilinear against
-# 0.60 ms nearest, of a 14.85 ms frame. What the extra 2.45 ms buys is smoothing that every browser
-# then resamples again, and that the viewer throws away outright by asking for the picture
-# pixelated. Whether it is worth it is a question about a particular scene on a particular screen,
-# so it is a setting rather than a decision taken here.
+# The picture is enlarged before the readout is drawn, so the text has pixels to land on, and on the
+# printer that one resize is the most expensive operation in the frame: for a P1, which is doubled,
+# 3.05 ms bilinear against 0.60 ms nearest, of a 14.85 ms frame. What the extra 2.45 ms buys is
+# smoothing that every browser then resamples again, and that the viewer throws away outright by
+# asking for the picture pixelated. Whether it is worth it is a question about a particular scene
+# on a particular screen, so it is a setting rather than a decision taken here.
 # How the display range is decided. Auto follows the scene, which is right when you do not know
 # what you are looking at and wrong when you do: a toolhead crossing the view re-maps every colour
 # and moves the ruler with it. Fixed is told two temperatures and stays there, so a colour means
@@ -91,6 +99,33 @@ SHARP_UPSCALE = "sharp"
 VALID_UPSCALE_FILTERS = (SMOOTH_UPSCALE, SHARP_UPSCALE)
 
 
+# What the camera sends, and nothing here can change it: upstream's protocol notes know no
+# command for the rate, and the U1 counted 25.0 frames a second from both cameras on 2026-11-13
+# (F-78).
+CAMERA_FRAMES_A_SECOND = 25
+
+
+# How many of those the live view may be given as pictures, and none at all. In fives, at the
+# maintainer's word. Five is the slowest because a picture older than a second is treated as
+# stale by everything that serves one (FRESH_ENOUGH_SECONDS in the server), so anything slower
+# would need those to follow the rate first.
+LIVE_VIEW_OFF = 0
+VALID_LIVE_VIEW_RATES = (CAMERA_FRAMES_A_SECOND, 20, 15, 10, 5, LIVE_VIEW_OFF)
+
+
+# How often the live view's readout is drawn afresh: on every picture, which is what the plugin
+# always did, or this many times a second with the last one pasted in between (HeldReadout in
+# the overlay). Every picture is nought rather than 25, because it means "do not hold it" at
+# whatever rate the live view runs.
+READOUT_EVERY_PICTURE = 0
+VALID_READOUT_REFRESHES = (READOUT_EVERY_PICTURE, 5, 2, 1)
+# Twice a second, the maintainer's choice after 0.30.6 was measured on the U1 on 2026-11-14:
+# about 5 points of a core less than every picture for either camera, where once a second
+# bought half a point more and left the markers trailing twice as long. "If people want it
+# faster, they can tune it up."
+DEFAULT_READOUT_REFRESH = 2
+
+
 NORMALIZE_LOW_PERCENTILE = 2.0
 
 
@@ -115,6 +150,49 @@ DETAIL_STRENGTH = 0.3
 
 # The one weight that can be done without leaving the integers, and the only one anything sets.
 EVEN_BLEND_WEIGHT = 0.5
+
+
+def known_live_view_rate(value: object, otherwise: int = CAMERA_FRAMES_A_SECOND) -> int:
+    """A live view rate that is offered, or `otherwise` for anything that is not one.
+
+    A whole number and nothing that merely equals one: a JSON `false` equals nought, and a body
+    that says `false` has not asked for the live view to be switched off.
+    """
+
+    if type(value) is int and value in VALID_LIVE_VIEW_RATES:
+        return value
+    return otherwise
+
+
+def known_readout_refresh(value: object, otherwise: int = DEFAULT_READOUT_REFRESH) -> int:
+    """A readout refresh that is offered, or `otherwise`. A whole number, as the live view's is."""
+
+    if type(value) is int and value in VALID_READOUT_REFRESHES:
+        return value
+    return otherwise
+
+
+def pictures_a_refresh(pictures_a_second: int, refreshes_a_second: int) -> int:
+    """How many pictures one drawing of the readout lasts, at this live view rate.
+
+    Rounded down, so the readout refreshes at least as often as was asked: twice a second at 25
+    pictures is every twelfth. Never less than one, so a refresh asked for oftener than the
+    pictures come is simply every picture.
+    """
+
+    return max(pictures_a_second // refreshes_a_second, 1)
+
+
+def smoothing_at_rate(smoothing: float, pictures_a_second: int) -> float:
+    """The easing weight that moves the range as far in a second as `smoothing` does at 25.
+
+    The range eases once for every picture drawn, so a live view at five pictures a second would
+    take five times as long by the clock to follow a scene. Compounded over the camera frames
+    between two pictures, it arrives where the full rate would have.
+    """
+
+    camera_frames_a_picture = CAMERA_FRAMES_A_SECOND / pictures_a_second
+    return 1.0 - math.pow(1.0 - smoothing, camera_frames_a_picture)
 
 
 def reduce_temporal_noise(
@@ -260,6 +338,12 @@ class RenderSettings:
     units: str = DEFAULT_UNITS
     emissivity: float = DEFAULT_EMISSIVITY
     upscale_filter: str = SMOOTH_UPSCALE
+    # Whether the unsharp mask runs at all. A switch beside the strength rather than a strength of
+    # nought, so that switching it off and on again gives back whatever strength a settings file
+    # was edited to. On unless somebody says otherwise, so that upgrading changes nobody's
+    # picture. Off, the largest single step of the pipeline is not run: 3.83 ms of a P3 frame on
+    # the U1 and 1.70 ms of a P1's, measured on 2026-11-12.
+    edge_sharpening: bool = True
     range_mode: str = AUTO_RANGE
     range_low_celsius: float = DEFAULT_RANGE_LOW_CELSIUS
     range_high_celsius: float = DEFAULT_RANGE_HIGH_CELSIUS
@@ -271,6 +355,23 @@ class RenderSettings:
     # Which of the scales in `colour_scale` the picture is drawn with. The stretch is what it
     # always was; the curves spread the palette unevenly, over a followed range or a held one.
     colour_scale: str = DEFAULT_COLOUR_SCALE
+    # How many pictures a second the live view is given, out of the 25 frames the camera sends,
+    # or none. Making pictures is nearly all of what this plugin costs while somebody watches,
+    # so fewer of them is the one setting that scales the whole of it. It is here with the
+    # rendering because it is about what is done with a frame: the camera is read the same
+    # whatever this says, which is what keeps the timelapse working with the live view off. The
+    # capture loop does the choosing, and a renderer only ever sees the frames chosen for it.
+    live_view_rate: int = CAMERA_FRAMES_A_SECOND
+    # How many times a second the live view's readout is drawn afresh, or every picture. Held in
+    # between, the ruler's numbers and the markers stand still while the colours carry on. Only
+    # the live view's renderer holds one: a clip's frames are layers, and each is drawn.
+    readout_refresh: int = DEFAULT_READOUT_REFRESH
+
+    @property
+    def live_view(self) -> bool:
+        """Whether the live view is drawn at all."""
+
+        return self.live_view_rate != LIVE_VIEW_OFF
 
     @property
     def readout(self) -> bool:
@@ -284,6 +385,12 @@ class RenderSettings:
         return bool(
             self.colorbar or self.reticle or self.hotspot or self.coldspot or self.spots
         )
+
+    @property
+    def applied_detail_strength(self) -> float:
+        """How much edge the unsharp mask adds back: the strength, or none with the switch off."""
+
+        return self.detail_strength if self.edge_sharpening else 0.0
 
     @property
     def fixed_range(self) -> bool:
@@ -329,6 +436,22 @@ class ThermalRenderer:
         self._shape: CurveShape | None = CURVE_SHAPES.get(settings.colour_scale)
         self._scene: tuple[float, float] | None = None
         self._mapping: ColourMapping | None = None
+        self._held_readout: HeldReadout | None = None
+
+    def hold_readout(self) -> None:
+        """Draw the readout as often as the settings say, and paste it on the pictures between.
+
+        Asked for by the live view's source and by nothing else, so a renderer built for a clip
+        draws every frame's readout whatever the setting says. With the setting at every
+        picture there is nothing to hold, and the picture is drawn as it always was.
+        """
+
+        settings = self._settings
+        if settings.readout_refresh == READOUT_EVERY_PICTURE or not settings.live_view:
+            return
+        self._held_readout = HeldReadout(
+            pictures_a_refresh(settings.live_view_rate, settings.readout_refresh)
+        )
 
     @property
     def bounds(self) -> tuple[float, float] | None:
@@ -350,6 +473,17 @@ class ThermalRenderer:
         self._bounds = previous.bounds
         self._previous_frame = previous._previous_frame
         self._scene = previous._scene
+
+    def keep_undrawn(self, thermal_raw: np.ndarray) -> None:
+        """A frame the live view is not drawing, kept as the one before the next it does.
+
+        Noise reduction averages a frame with the one before it. At a slower live view the frame
+        before would otherwise be the last one drawn, a fifth of a second old at five pictures a
+        second, and a nozzle crossing the view would trail a ghost that far behind it. The camera
+        frame just before is read anyway, so it is used instead, and keeping it costs a reference.
+        """
+
+        self._previous_frame = thermal_raw
 
     def render(self, thermal_raw: np.ndarray) -> np.ndarray:
         return self.render_image(thermal_raw)[0]
@@ -394,18 +528,19 @@ class ThermalRenderer:
         # `take` rather than fancy indexing, for byte-identical output at a third of the cost:
         # 1.44 ms against 0.48 ms on the printer. Not on anybody's list of suspects, which is the
         # argument for timing every step rather than the ones that look expensive.
-        coloured = np.take(
-            self._palette, enhance_detail(normalized, self._settings.detail_strength), axis=0
-        )
-        # Last, so everything before it works in the sensor's own orientation and the frame kept for
-        # noise reduction cannot change shape when the setting does.
-        oriented = orient(
-            coloured,
+        # Turned last of the steps that look at the scene, so everything before it works in the
+        # sensor's own orientation and the frame kept for noise reduction cannot change shape when
+        # the setting does. And before the colours rather than after them: a lookup does not care
+        # where a pixel is, so the picture is the same either way, and what is copied through the
+        # rotated view is one byte a pixel instead of three. For a P3 turned a quarter, 3.67 ms
+        # for the two steps against 1.70 ms on the U1, measured on 2026-11-12.
+        oriented_indices = orient(
+            enhance_detail(normalized, self._settings.applied_detail_strength),
             self._settings.rotation,
             self._settings.flip_horizontal,
             self._settings.flip_vertical,
         )
-        return oriented, stats, denoised
+        return np.take(self._palette, oriented_indices, axis=0), stats, denoised
 
     def _palette_indices(self, frame: np.ndarray, bounds: tuple[float, float]) -> np.ndarray:
         """The stretch, or the curve and the mapping it used, kept for the ruler."""
@@ -465,22 +600,36 @@ class ThermalRenderer:
         settings = self._settings
         overlay = self.overlay_for(stats)
         upscale = encode_upscale(
-            (image.shape[1], image.shape[0]), settings.upscale, settings.readout
+            (image.shape[1], image.shape[0]),
+            settings.upscale,
+            settings.readout,
+            whole_steps=settings.upscale_filter == SHARP_UPSCALE,
         )
         # The denoised counts rather than the picture: this is what a viewer reads temperatures
         # out of, and it is stored unconverted because converting is four float passes over the
         # whole frame and nothing is asking for them yet.
         measured = ThermalFrame(denoised, settings.rotation, settings.mirrors, settings.emissivity)
-        return RenderedFrame(
-            encode_jpeg(
-                image, upscale, settings.jpeg_quality, overlay, settings.upscale_filter
-            ),
-            stats,
-            measured,
-        )
+        picture = enlarged_picture(image, upscale, settings.upscale_filter)
+        if overlay is not None:
+            self._draw_readout(picture, overlay)
+        return RenderedFrame(picture_jpeg(picture, settings.jpeg_quality), stats, measured)
+
+    def _draw_readout(self, picture: Image.Image, overlay: Overlay) -> None:
+        """The readout on a picture already at its size: held if this renderer holds one."""
+
+        if self._held_readout is None:
+            draw_overlay(picture, overlay)
+            return
+        self._held_readout.draw(picture, overlay)
 
     def render_jpeg(self, thermal_raw: np.ndarray) -> bytes:
         return self.render_frame(thermal_raw).jpeg
+
+
+def picture_jpeg(picture: Image.Image, quality: int) -> bytes:
+    buffer = io.BytesIO()
+    picture.save(buffer, format="JPEG", quality=quality)
+    return buffer.getvalue()
 
 
 @functools.lru_cache(maxsize=1)
@@ -492,9 +641,17 @@ def stream_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
     should not spend a JPEG encode a second saying so.
     """
 
-    buffer = io.BytesIO()
-    stream_off_picture().save(buffer, format="JPEG", quality=quality)
-    return buffer.getvalue()
+    return picture_jpeg(stream_off_picture(), quality)
+
+
+@functools.lru_cache(maxsize=1)
+def live_view_off_jpeg(quality: int = DEFAULT_JPEG_QUALITY) -> bytes:
+    """The other placeholder, for the live view switched off with the camera still being read.
+
+    Kept for the same reason: it is republished twice a second to whoever is looking.
+    """
+
+    return picture_jpeg(live_view_off_picture(), quality)
 
 
 def resampling(upscale_filter: str) -> Image.Resampling:
@@ -507,20 +664,26 @@ def resampling(upscale_filter: str) -> Image.Resampling:
 
 def encode_jpeg(
     rgb_frame: np.ndarray,
-    upscale: int,
+    upscale: float,
     quality: int,
     overlay: Overlay | None = None,
     upscale_filter: str = SMOOTH_UPSCALE,
 ) -> bytes:
-    image = Image.fromarray(rgb_frame, mode="RGB")
-    height, width = rgb_frame.shape[0], rgb_frame.shape[1]
-    if upscale != 1:
-        image = image.resize(
-            (width * upscale, height * upscale), resampling(upscale_filter)
-        )
+    image = enlarged_picture(rgb_frame, upscale, upscale_filter)
     # After the resize, so the text is drawn at the size it will be looked at rather than resampled.
     if overlay is not None:
         draw_overlay(image, overlay)
-    buffer = io.BytesIO()
-    image.save(buffer, format="JPEG", quality=quality)
-    return buffer.getvalue()
+    return picture_jpeg(image, quality)
+
+
+def enlarged_picture(rgb_frame: np.ndarray, upscale: float, upscale_filter: str) -> Image.Image:
+    """The colours as a picture at the size it is sent, before anything is drawn on it."""
+
+    image = Image.fromarray(rgb_frame, mode="RGB")
+    if upscale == 1:
+        return image
+    height, width = rgb_frame.shape[0], rgb_frame.shape[1]
+    # Rounded, because smooth enlarging may be a fraction: a P3 at one and a quarter times.
+    return image.resize(
+        (round(width * upscale), round(height * upscale)), resampling(upscale_filter)
+    )

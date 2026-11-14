@@ -24,8 +24,11 @@ class CountingRendererSource:
     """Stands in for the real one and counts what the capture loop asks it for.
 
     The loop reaches for a renderer once per frame it intends to render, so counting the requests
-    is counting the renders, without subclassing anything to find out.
+    is counting the renders, without subclassing anything to find out. It is asked for the live
+    view's rate too, and answers the camera's own, at which every frame is a picture.
     """
+
+    live_view_rate = 25
 
     def __init__(self, thermal_streamer) -> None:
         self._streamer = thermal_streamer

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import math
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -215,9 +216,23 @@ def draw_label(
     )
     offset = float(left)
     for character in text:
-        tile = glyph_tile(character, style.pixel_height, colour)
-        image.paste(tile, (int(offset), top), tile)
+        lay_tile(image, glyph_tile(character, style.pixel_height, colour), (int(offset), top))
         offset += glyph_advance(character, style.pixel_height)
+
+
+def lay_tile(image: Image.Image, tile: Image.Image, corner: tuple[int, int]) -> None:
+    """Put a see-through tile on a picture, or on a canvas that is see-through itself.
+
+    A picture takes it by pasting through the tile's own coverage. A readout being lifted into
+    patches is drawn on an empty canvas instead, and pasting there mixes the tile's soft edge with
+    the nothing underneath, coverage included, so the edge comes out darker and thinner than the
+    one drawn straight onto a picture. Compositing keeps the tile as it is where nothing was.
+    """
+
+    if image.mode == "RGBA":
+        image.alpha_composite(tile, corner)
+        return
+    image.paste(tile, corner, tile)
 
 
 def marker_label_position(
@@ -541,6 +556,17 @@ def markers_for(overlay: Overlay) -> list[Marker]:
     return [marker for shown, marker in wanted if shown]
 
 
+def draw_ruler(image: Image.Image, overlay: Overlay, style: OverlayStyle) -> list[_Rectangle]:
+    """Whichever ruler this overlay wants, or none, and where a curve's ticks were labelled."""
+
+    if not overlay.colorbar:
+        return []
+    if overlay.mapping is not None:
+        return draw_curved_colorbar(image, overlay, style, overlay.mapping)
+    draw_colorbar(image, overlay, style)
+    return []
+
+
 def draw_overlay(
     image: Image.Image, overlay: Overlay, reserved: list[_Rectangle] | None = None
 ) -> None:
@@ -549,13 +575,97 @@ def draw_overlay(
     style = overlay_style(image.size, overlay.colorbar)
     # Every marker in one pass, so each can see where the ones before it put their labels, and
     # where a curved ruler put its ticks.
-    placed: list[_Rectangle] = list(reserved or [])
-    if overlay.colorbar and overlay.mapping is not None:
-        placed += draw_curved_colorbar(image, overlay, style, overlay.mapping)
-    elif overlay.colorbar:
-        draw_colorbar(image, overlay, style)
+    placed: list[_Rectangle] = list(reserved or []) + draw_ruler(image, overlay, style)
     for marker in markers_for(overlay):
         draw_marker(image, marker, overlay, style, placed)
+
+
+# The readout held between refreshes (0.30.6). Drawing it is 3.01 ms of every frame on the U1 and
+# pasting it from four patches is 0.59 ms, the same for a P1 and a P3 because both send a 240x320
+# picture (F-78, benched on 2026-11-14). The maker's own phone app refreshes its pointers and
+# ruler about once a second, which is where the maintainer took the idea from.
+#
+# Patches rather than one layer the size of the picture: a paste costs by the pixels it covers,
+# and the ruler and three markers cover a fifth of what the picture does.
+
+
+@dataclasses.dataclass(frozen=True)
+class ReadoutPatch:
+    """One piece of the readout lifted off the picture: what it looks like, and where it goes."""
+
+    picture: Image.Image
+    corner: tuple[int, int]
+
+
+def lifted(canvas: Image.Image) -> ReadoutPatch | None:
+    """What was drawn on an empty canvas, cut down to the pixels it touched, or None for nothing."""
+
+    touched = canvas.getbbox()
+    if touched is None:
+        return None
+    return ReadoutPatch(canvas.crop(touched), (touched[0], touched[1]))
+
+
+def empty_canvas(size: tuple[int, int]) -> Image.Image:
+    return Image.new("RGBA", size, (0, 0, 0, 0))
+
+
+def readout_patches(size: tuple[int, int], overlay: Overlay) -> list[ReadoutPatch]:
+    """The readout `draw_overlay` would draw on a picture this size, as patches to paste instead.
+
+    Each piece is drawn once, by the functions that draw it onto a picture, on a canvas of its
+    own. The markers still see where the ones before them put their numbers, because that is
+    worked out from positions and not from pixels.
+    """
+
+    style = overlay_style(size, overlay.colorbar)
+    ruler = empty_canvas(size)
+    placed = draw_ruler(ruler, overlay, style)
+    patches = [lifted(ruler)]
+    for marker in markers_for(overlay):
+        canvas = empty_canvas(size)
+        draw_marker(canvas, marker, overlay, style, placed)
+        patches.append(lifted(canvas))
+    return [patch for patch in patches if patch is not None]
+
+
+def paste_readout(image: Image.Image, patches: list[ReadoutPatch]) -> None:
+    for patch in patches:
+        image.paste(patch.picture, patch.corner, patch.picture)
+
+
+class HeldReadout:
+    """The readout drawn every so many pictures, and pasted as it was on the ones in between.
+
+    Counted in pictures rather than timed, as the live view's own pace is: the camera is the
+    clock, and a count cannot refresh oftener than the pictures it is counting. What holds still
+    between refreshes is the numbers and where the crosses sit, so the hottest and coldest
+    markers trail what they point at by up to one refresh. The colours follow every picture.
+
+    It starts with nothing held, so the first picture it meets is a refresh. A change of settings
+    builds a new renderer and with it a new one of these, which is what makes a spot just placed,
+    or a ruler just switched off, show on the very next picture rather than at the next refresh.
+    """
+
+    def __init__(self, pictures_a_refresh: int) -> None:
+        self._pictures_a_refresh = pictures_a_refresh
+        self._pictures_held = 0
+        self._size: tuple[int, int] | None = None
+        self._patches: list[ReadoutPatch] = []
+
+    def draw(self, image: Image.Image, overlay: Overlay) -> None:
+        """Put the readout on this picture: freshly drawn if it is due, and held otherwise."""
+
+        # The size is asked as well as the count because the other camera can be plugged in
+        # without a setting changing, and a patch cut for one picture is in the wrong place on
+        # the other.
+        due = self._pictures_held >= self._pictures_a_refresh or self._size != image.size
+        if due:
+            self._patches = readout_patches(image.size, overlay)
+            self._size = image.size
+            self._pictures_held = 0
+        self._pictures_held += 1
+        paste_readout(image, self._patches)
 
 
 # What the picture says while the stream is switched off. Two lines rather than one, because
@@ -565,9 +675,20 @@ STREAM_OFF_TITLE = "Stream off"
 STREAM_OFF_HINT = "Press Start to turn the camera back on"
 
 
+# What it says while the camera is on and the live view is not. The timelapse is why anybody
+# chooses that, so the first line is about it, and the second is the way back. Two lines, because
+# together they are wider than the picture.
+LIVE_VIEW_OFF_TITLE = "Live view off"
+LIVE_VIEW_OFF_HINTS = ("The timelapse still records.", "Turn the live view on in the settings")
+
+
 # The plugin's dark background, behind the "Stream off" words and under a timelapse frame for a
 # layer missed before any was taken.
 PLACEHOLDER_RGB = (16, 18, 22)
+
+
+# The lines under a placeholder's title, greyer than the title so the eye takes the title first.
+PLACEHOLDER_HINT_RGB = (154, 160, 170)
 
 
 # The size it is drawn at. Nothing is streaming, so there is no frame to take a shape from, and
@@ -576,34 +697,50 @@ PLACEHOLDER_RGB = (16, 18, 22)
 STREAM_OFF_SIZE = (320, 240)
 
 
-@functools.lru_cache(maxsize=1)
-def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
-    """The placeholder, drawn once and kept.
+@functools.lru_cache(maxsize=4)
+def placeholder_picture(
+    title: str, hints: tuple[str, ...], size: tuple[int, int] = STREAM_OFF_SIZE
+) -> Image.Image:
+    """A picture of words, for when there is no picture: a title, and under it what to do.
 
-    A picture rather than an error, because it travels the same path a real frame does: the tile,
-    the viewer, the snapshot and anything else showing the camera all display it without a single
-    special case, and each of them says what has happened rather than showing a broken image.
+    Drawn once for each thing it can say and kept. A picture rather than an error, because it
+    travels the same path a real frame does: the tile, the viewer, the snapshot and anything else
+    showing the camera all display it without a single special case, and each of them says what
+    has happened rather than showing a broken image.
     """
 
     picture = Image.new("RGB", size, PLACEHOLDER_RGB)
     style = overlay_style(size, colorbar=False)
     title_height = max(style.pixel_height * 2, OVERLAY_MIN_FONT_PIXELS * 2)
     draw = ImageDraw.Draw(picture)
-    title_width = label_width(STREAM_OFF_TITLE, title_height)
+    title_width = label_width(title, title_height)
     draw.text(
         ((size[0] - title_width) / 2, size[1] / 2 - title_height),
-        STREAM_OFF_TITLE,
+        title,
         font=overlay_font(title_height),
         fill=OVERLAY_TEXT_RGB,
     )
-    hint_width = label_width(STREAM_OFF_HINT, style.pixel_height)
-    draw.text(
-        ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height / 2),
-        STREAM_OFF_HINT,
-        font=overlay_font(style.pixel_height),
-        fill=(154, 160, 170),
-    )
+    for line_number, hint in enumerate(hints):
+        hint_width = label_width(hint, style.pixel_height)
+        draw.text(
+            ((size[0] - hint_width) / 2, size[1] / 2 + style.line_height * (line_number + 0.5)),
+            hint,
+            font=overlay_font(style.pixel_height),
+            fill=PLACEHOLDER_HINT_RGB,
+        )
     return picture
+
+
+def stream_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
+    """What everything shows while the camera is switched off and released."""
+
+    return placeholder_picture(STREAM_OFF_TITLE, (STREAM_OFF_HINT,), size)
+
+
+def live_view_off_picture(size: tuple[int, int] = STREAM_OFF_SIZE) -> Image.Image:
+    """What everything shows while the camera is read for the timelapse and nothing is drawn."""
+
+    return placeholder_picture(LIVE_VIEW_OFF_TITLE, LIVE_VIEW_OFF_HINTS, size)
 
 
 # The band across the top of a picture that is not live: the viewer's watchdog line, drawn the same
@@ -648,13 +785,27 @@ def with_banner(picture: Image.Image, text: str) -> Image.Image:
     return Image.alpha_composite(picture.convert("RGBA"), band).convert("RGB")
 
 
-def encode_upscale(frame_size: tuple[int, int], upscale: int, readout_enabled: bool) -> int:
+def encode_upscale(
+    frame_size: tuple[int, int],
+    upscale: float,
+    readout_enabled: bool,
+    whole_steps: bool = True,
+) -> float:
     """The upscale actually used, which the overlay can raise but never lower.
 
     Text is the only part of the picture that does not survive being drawn at the sensor's own size
     and scaled up by a browser, so the overlay pays for its own resolution and nothing else does.
+
+    In whole steps, that is the first whole number of times that reaches the edge the text needs:
+    twice for a P1, whose short side is 120, and twice for a P3, whose short side is 192 and needs
+    only one and a quarter. Twice a P3 is two and a half times the pixels of a doubled P1 to
+    resize and encode, for text no easier to read: 12.46 ms of a 29.98 ms frame on the U1,
+    measured on 2026-11-12. So smooth enlarging asks for the exact figure instead, and sharp
+    keeps to whole steps, because a sensor pixel repeated one and a quarter times is a grid of
+    uneven squares.
     """
 
     if not readout_enabled:
         return upscale
-    return max(upscale, -(-OVERLAY_MIN_ENCODE_EDGE // min(frame_size)))
+    needed = OVERLAY_MIN_ENCODE_EDGE / min(frame_size)
+    return max(upscale, math.ceil(needed) if whole_steps else needed)
