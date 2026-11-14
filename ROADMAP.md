@@ -3289,6 +3289,13 @@ What is left, in the order it is worth doing:
   - 0.30.0, tried on the U1 and ready to release: clips with their own colour scale (the knee)
     and smooth enlarging, and the markers' dark edge.
   - Redrawing a curved scale's ruler only when its numbers change, about 0.5 ms a frame on the U1.
+    Widened on 2026-11-14 to the whole readout, any scale: `scripts/bench-readout-candidates.py`
+    now times the ruler and the markers drawn once and pasted as patches, against drawn every
+    frame, at the size the service sends, and works out a frame's cost with the readout
+    refreshed once and five times a second (the maintainer's idea, from the maker's phone app,
+    which updates its pointers and ruler about once a second). Pasted patches differ from the
+    drawn readout by at most 1 of 255 on the edges of the text. Not run on the printer yet, so
+    there is no number for it, and nothing is wired into the plugin.
 - **Reports owed elsewhere**, written up in section 10: the driver's P1 shutter bug went as a
   comment on upstream issue #17, the filaman card goes privately to its owner, and two reports went
   to Snapmaker on 2026-09-28, one on the U1's wifi and one on Snapmaker Orca. All were drafted

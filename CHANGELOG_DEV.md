@@ -56,6 +56,12 @@ Their public entry is still to be written, with the release they lead to.
   itself beside it, the frame read and the calibration shutter, instead of "the USB protocol
   layer is not reimplemented here": the manifest, `ATTRIBUTIONS.md`, `VENDORING.md` and the root
   README. The package was rebuilt for it; nothing that runs on the printer changed.
+- `NOTICE` rewritten on 2026-11-14, with no change to the package: it still carried the
+  plugin's first name, a mistyped pin for the vendored driver, and the three libraries under
+  `files/vendor/`, where they have not been since they became wheels.
+- `scripts/bench-readout-candidates.py` gained the readout drawn once and pasted, for the ruler,
+  the markers and both together, and what a frame costs with the readout refreshed once or five
+  times a second. A bench only: nothing in the plugin uses it yet.
 
 ### 0.30.3
 

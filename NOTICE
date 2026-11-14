@@ -1,27 +1,44 @@
-thermal-p1 (Bespok3d plugin)
+thermal-master (Bespok3d plugin)
 
-This product vendors and builds upon third-party software:
+Copyright (C) 2026 Mauker and the Bespok3d contributors.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes and builds upon third-party software:
 
 1. p3-ir-camera (plugin/files/vendor/p3_camera.py)
    Source:  https://github.com/jvdillon/p3-ir-camera
-   Pinned:  ae3205dca5727682ff2d903585d1dce5a1d19f1f
+   Author:  Joshua V. Dillon (@jvdillon)
+   Pinned:  e3205dca5727682ff2d903585d1dce5a1d19f1f6
    License: Apache License 2.0
    USB protocol reverse-engineering credit: @aeternium
             (https://github.com/jvdillon/p3-ir-camera/issues/2)
-   A copy of the Apache-2.0 license text is fetched alongside the file as
-   plugin/files/vendor/LICENSE.p3-ir-camera by scripts/fetch-vendor.sh.
+   The file is checked in verbatim and unmodified, with a copy of its license text beside it
+   as plugin/files/vendor/LICENSE.p3-ir-camera. VENDORING.md records the pin, the hashes of
+   both files and how scripts/fetch-vendor.sh verifies them.
 
-2. PyUSB (plugin/files/vendor/usb/)        License: BSD-3-Clause
-3. NumPy (plugin/files/vendor/numpy/)      License: BSD-3-Clause
-4. Pillow (plugin/files/vendor/PIL/)       License: HPND (PIL/Pillow License)
-5. Material Icons, the "info" icon, outlined
+2. Material Icons, the "info" icon, outlined
    (inline in plugin/files/lib/thermal_master/page.py)
    Source:  https://github.com/google/material-design-icons, as @material-design-icons/svg 0.14.15
    License: Apache License 2.0
 
-The vendored aarch64 packages (2-4) are downloaded at build time from PyPI and are not
-committed to this repository. Their license files are retained inside each package's
-*.dist-info directory in the packed artifact.
+Runtime dependencies, declared in plugin/requirements.txt. They are not committed to this
+repository: the build downloads them from PyPI as wheels for the printer's architecture, and
+the package carries them unmodified in files/wheels/. Each wheel keeps its own license files
+inside its *.dist-info directory. They are separate works under their own licenses, aggregated
+with this plugin's code rather than relicensed by it.
 
-The colormap and MJPEG streaming layer (plugin/files/bin/thermal-p1-stream.py) is original
-work, licensed under the same terms as the Bespok3d project.
+3. NumPy 2.2.6     License: BSD-3-Clause
+4. Pillow 12.2.0   License: MIT-CMU
+5. PyUSB 1.3.1     License: BSD-3-Clause
+
+What is used from p3-ir-camera: the camera models with their USB identifiers and geometry,
+opening and initialising the device, the commands and their acknowledgements, starting and
+stopping the stream, the gain, the size of a frame and where the temperatures sit in it, the
+conversion of raw values to temperatures with the emissivity correction, and its frame reader
+as the fallback.
+
+Original work of this project, under the license above: reading a frame in two bulk reads
+through the device the driver opened (plugin/files/lib/thermal_master/frame_reader.py), firing
+the calibration shutter with the driver's own command, and everything on top of both: the
+colour mapping, the ranging, the temperature readout, the viewer, the settings page, the
+timelapse and the MJPEG serving, in plugin/files/lib/thermal_master/.
